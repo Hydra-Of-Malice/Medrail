@@ -1,0 +1,21 @@
+# secrets — never commit
+.env
+.env.local
+*.mnemonic
+contracts/.env
+
+# python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# node
+node_modules/
+.next/
+dist/
+build/
+
+# misc
+.DS_Store
+*.log

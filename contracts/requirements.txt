@@ -1,0 +1,4 @@
+algorand-python==3.5.1
+algokit-utils==4.2.3
+py-algorand-sdk==2.11.1
+python-dotenv

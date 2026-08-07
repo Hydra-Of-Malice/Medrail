@@ -1,0 +1,4 @@
+-r requirements.txt
+puyapy==5.9.0
+algorand-python-testing==1.1.0
+pytest

@@ -1,0 +1,20 @@
+[project]
+name = "medrail-contracts"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+  "algorand-python==3.5.1",
+  "algokit-utils==4.2.3",
+  "py-algorand-sdk==2.11.1",
+  "python-dotenv",
+]
+
+[dependency-groups]
+dev = [
+  "puyapy==5.9.0",
+  "algorand-python-testing==1.1.0",
+  "pytest",
+]
+
+[tool.puya]
+# Compiled once, deployed once, App ID reused everywhere downstream — see docs/DEPLOYMENT.md.

@@ -1,0 +1,75 @@
+{
+  "source": "Widely-taught, textbook-level severe drug-interaction pairs (e.g. standard pharmacology references such as Lexicomp/Micromedex-class severity classifications). Not exhaustive and not a substitute for a pharmacist or prescriber review.",
+  "pairs": [
+    {
+      "drugs": ["warfarin", "aspirin"],
+      "severity": "major",
+      "description": "Combined anticoagulant/antiplatelet effect substantially increases bleeding risk."
+    },
+    {
+      "drugs": ["warfarin", "ibuprofen"],
+      "severity": "major",
+      "description": "NSAIDs increase bleeding risk and can displace warfarin from protein binding."
+    },
+    {
+      "drugs": ["warfarin", "naproxen"],
+      "severity": "major",
+      "description": "NSAIDs increase bleeding risk and can displace warfarin from protein binding."
+    },
+    {
+      "drugs": ["maoi", "ssri"],
+      "severity": "contraindicated",
+      "description": "Risk of serotonin syndrome; generally contraindicated in combination."
+    },
+    {
+      "drugs": ["maoi", "sertraline"],
+      "severity": "contraindicated",
+      "description": "Risk of serotonin syndrome; generally contraindicated in combination."
+    },
+    {
+      "drugs": ["lisinopril", "spironolactone"],
+      "severity": "moderate",
+      "description": "ACE inhibitor plus potassium-sparing diuretic raises hyperkalemia risk; monitor potassium."
+    },
+    {
+      "drugs": ["simvastatin", "clarithromycin"],
+      "severity": "major",
+      "description": "Strong CYP3A4 inhibition raises statin levels substantially; increased rhabdomyolysis risk."
+    },
+    {
+      "drugs": ["simvastatin", "erythromycin"],
+      "severity": "major",
+      "description": "CYP3A4 inhibition raises statin levels; increased myopathy/rhabdomyolysis risk."
+    },
+    {
+      "drugs": ["sildenafil", "nitroglycerin"],
+      "severity": "contraindicated",
+      "description": "Severe, potentially life-threatening hypotension; nitrates and PDE5 inhibitors must not be combined."
+    },
+    {
+      "drugs": ["metformin", "iodinated contrast"],
+      "severity": "moderate",
+      "description": "Risk of contrast-induced nephropathy compounding lactic acidosis risk; typically held around contrast studies."
+    },
+    {
+      "drugs": ["clopidogrel", "omeprazole"],
+      "severity": "moderate",
+      "description": "CYP2C19 inhibition may reduce clopidogrel's antiplatelet effect."
+    },
+    {
+      "drugs": ["methotrexate", "trimethoprim"],
+      "severity": "major",
+      "description": "Additive antifolate effect increases risk of bone marrow suppression."
+    },
+    {
+      "drugs": ["lithium", "hydrochlorothiazide"],
+      "severity": "major",
+      "description": "Thiazide diuretics reduce lithium clearance, raising toxicity risk."
+    },
+    {
+      "drugs": ["digoxin", "amiodarone"],
+      "severity": "major",
+      "description": "Amiodarone raises digoxin levels; dose reduction and monitoring typically required."
+    }
+  ]
+}
