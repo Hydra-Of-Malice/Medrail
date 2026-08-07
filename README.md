@@ -8,12 +8,14 @@ Two open, x402-gated endpoints anyone's agent can call and pay for in one round 
 (`/v1/records/summary`) proving the patient-ownership story on real Algorand infrastructure —
 all backed by one on-chain smart contract, `MedRailConsent`.
 
+Live on Algorand TestNet — App ID [`768743428`](https://lora.algokit.io/testnet/application/768743428), with a real settled x402 payment proven end to end (`docs/PROOF.md`).
+
 **Start here:**
 - [`docs/JUDGES.md`](docs/JUDGES.md) — the pitch, the evidence, a 2-minute demo script
-- [`docs/PROOF.md`](docs/PROOF.md) — what's independently verified right now, with commands to reproduce it
+- [`docs/PROOF.md`](docs/PROOF.md) — every claim, independently verified, with transaction IDs
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — full technical design and the reasoning behind it
 - [`docs/COMPLIANCE.md`](docs/COMPLIANCE.md) — rule-by-rule mapping to the official challenge requirements
-- [`ACTION_NEEDED.md`](ACTION_NEEDED.md) — the one thing blocking a fully-funded live proof
+- [`docs/GO_LIVE_CHECKLIST.md`](docs/GO_LIVE_CHECKLIST.md) — what's left for MainNet
 
 ## Repository layout
 

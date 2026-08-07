@@ -53,7 +53,7 @@ export const config = {
   payToAddress: process.env.PAY_TO_ADDRESS ?? process.env.OPERATOR_ADDRESS ?? "",
   // Consent contract App ID — from env, falling back to the deploy script's own
   // output file so `npm run dev` picks up a fresh deployment with no manual step.
-  consentAppId: Number(process.env.CONSENT_APP_ID ?? readDeployedAppId(network) ?? 0),
+  consentAppId: Number(process.env.CONSENT_APP_ID || readDeployedAppId(network) || 0),
   // Operator (admin) account that calls log_access after a verified payment.
   operatorMnemonic: process.env.OPERATOR_MNEMONIC ?? "",
 } as const;

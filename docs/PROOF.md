@@ -82,34 +82,72 @@ wallet cannot actually pay. That rejection, not a crash or a CORS failure, is th
 behavior; the UI surfaces it as "a real payment was constructed and signed, but settlement was
 rejected — fund your wallet and try again."
 
-## 5. On-chain consent flow — code complete, pending contract deployment
-
-`web/lib/consent.ts` (`grantAccessOnChain`, `revokeAccessOnChain`) and
-`api/src/services/algorand.ts` (`checkAccess`, `logAccess`) are written, typechecked, and
-exercised against the graceful pre-deployment error path — clicking "Grant myself access" in the
-demo currently and correctly reports:
+## 5. Contract deployed live on Algorand TestNet — independently verified
 
 ```
-CONSENT_APP_ID is not set and contracts/artifacts/deploy_testnet.json was not found.
-Deploy the contract first (see docs/DEPLOYMENT.md).
+cd contracts && .venv/Scripts/python.exe scripts/deploy_testnet.py
 ```
 
-This becomes a real on-chain transaction the moment `contracts/scripts/deploy_testnet.py` has
-run — no code changes required, only a funded deployer account (see `ACTION_NEEDED.md`).
+**App ID `768743428`**, creator `2WDV2J2FTWF535SMSUVEBOF5IGXF2OTV7ZZTLTCRBXPVS32UMLOPTI64GE`,
+created at round `66088624`. Confirmed independently via the public indexer (not just the
+deploy script's own say-so):
 
-## 6. Final settlement proof — pending funding
+```
+curl https://testnet-idx.algonode.cloud/v2/applications/768743428
+```
 
-<!-- Filled in automatically by api/scripts/e2e-proof.ts once the TestNet deployer account is
-     funded. Run: cd api && npx tsx scripts/e2e-proof.ts -->
+Explorer: https://lora.algokit.io/testnet/application/768743428
 
-**Status: waiting on `ACTION_NEEDED.md`.** Once the deployer address holds TestNet USDC, running
+**Full consent lifecycle exercised for real** (`contracts/scripts/exercise_contract.py`), using
+two fresh throwaway accounts funded from the deployer — every step a real, confirmed transaction:
+
+| Step | Result | Transaction |
+|---|---|---|
+| `request_access` | logged | `5XIADMCGFP5I7H7AS656RXZS7MFEEPCVJGLA7T3SVE6XDEYSGFFA` |
+| `grant_access` | granted | `X2BQ5FD4MW52B75WQGDB67TEULYLN7FHVFO6ZOBNI74PNCAKVOUA` |
+| `check_access` (after grant) | **`True`** | simulated (readonly, no fee) |
+| `revoke_access` | revoked | `OV2J2T5VWMIQG64JYGL7JEGZKKNZNKCMNIQU6AC4PDRQYZ6ZOO5A` |
+| `check_access` (after revoke) | **`False`** | simulated (readonly, no fee) |
+
+The consent state machine behaves correctly on live infrastructure, not just in the AVM
+simulator.
+
+## 6. Final settlement proof — a real, settled payment
 
 ```
 cd api && npx tsx scripts/e2e-proof.ts
 ```
 
-produces a real settled transaction ID, written to `contracts/artifacts/e2e-proof.json` and
-independently checkable at
-`https://lora.algokit.io/testnet/transaction/<txId>`. The script already runs correctly through
-every step up to settlement — see §4 for the identical flow already proven end-to-end short of
-having funds.
+Result: **`200 OK`**, a real triage response, and a real settled payment:
+
+```json
+{
+  "success": true,
+  "payer": "2WDV2J2FTWF535SMSUVEBOF5IGXF2OTV7ZZTLTCRBXPVS32UMLOPTI64GE",
+  "transaction": "OYRQRKYA7WUKBVLWTOFJSJMZFBW7VCNGP5VGH5EBUJGRCVFQFJRQ",
+  "network": "algorand:SGO1GKSzyE7IEPItTxCByw9x8FmnrCDexi9/cOUJOiI="
+}
+```
+
+Independently verified via the public indexer — not just trusting the facilitator's response:
+
+```
+curl https://testnet-idx.algonode.cloud/v2/transactions/OYRQRKYA7WUKBVLWTOFJSJMZFBW7VCNGP5VGH5EBUJGRCVFQFJRQ
+```
+
+confirms a real `axfer` (asset transfer) transaction, confirmed at round `66091768`, asset id
+`10458941` (TestNet USDC), amount `20000` base units — exactly `$0.02` at 6 decimals, matching
+`/v1/triage`'s configured price with no rounding or manual conversion. Explorer:
+https://lora.algokit.io/testnet/transaction/OYRQRKYA7WUKBVLWTOFJSJMZFBW7VCNGP5VGH5EBUJGRCVFQFJRQ
+
+This proof run paid from and to the same account (the deployer, used as both `PROOF_MNEMONIC`
+payer and the API's configured `PAY_TO_ADDRESS`) — a deliberate choice to avoid needing a second
+funded account, not a shortcut in the payment logic itself: the facilitator verified and settled
+this exactly as it would any other `exact`-scheme Algorand payment, with no special-casing for
+same-account transfers. Raw output saved at `contracts/artifacts/e2e-proof.json`.
+
+## Summary
+
+Every stage of the pipeline — contract deployment, the full consent lifecycle, and a real x402
+payment settling in TestNet USDC through the live GoPlausible facilitator — is now independently
+verifiable on public Algorand TestNet infrastructure, not simulated and not merely asserted.

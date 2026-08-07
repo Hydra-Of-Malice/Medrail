@@ -1,0 +1,9 @@
+{
+  "network": "testnet",
+  "app_id": 768743428,
+  "app_address": "CCO26Y6Z56DDZ3OELO2UKJMIPJVSIT52I23F2MPMR52JBM3HQZZNUZNOR4",
+  "deployer_address": "2WDV2J2FTWF535SMSUVEBOF5IGXF2OTV7ZZTLTCRBXPVS32UMLOPTI64GE",
+  "create_txid": null,
+  "fund_txid": "KYH3H5CG2CCUPUUTJIBX47WD4RWSUV3QWTEUJQRQFYLWO5YAO3QA",
+  "explorer_app_url": "https://lora.algokit.io/testnet/application/768743428"
+}

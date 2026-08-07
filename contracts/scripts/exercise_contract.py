@@ -1,17 +1,20 @@
 """Run a real request -> grant -> check -> revoke cycle against the deployed
-MedRailConsent app on TestNet, using two fresh throwaway accounts (patient,
-requester) funded from the deployer. Prints every transaction ID so they can
-be independently verified on a block explorer.
+MedRailConsent app, using two fresh throwaway accounts (patient, requester)
+funded from the deployer. Prints every transaction ID so they can be
+independently verified on a block explorer.
 
-Requires contracts/artifacts/deploy_testnet.json to exist (run
-deploy_testnet.py first) and the deployer account to still hold a little
-spare TestNet ALGO to fund the two throwaway accounts.
+Network-parameterized via NETWORK (default "testnet"), matching
+scripts/deploy_testnet.py. Requires contracts/artifacts/deploy_{network}.json
+to exist (run deploy_testnet.py first) and the deployer account to still hold
+a little spare ALGO to fund the two throwaway accounts.
 
 Usage:
     .venv/Scripts/python.exe scripts/exercise_contract.py
+    NETWORK=mainnet .venv/Scripts/python.exe scripts/exercise_contract.py
 """
 
 import json
+import os
 import pathlib
 
 from algokit_utils import (
@@ -25,19 +28,24 @@ from algokit_utils import (
 from dotenv import dotenv_values
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-DEPLOY_INFO_PATH = ROOT / "artifacts" / "deploy_testnet.json"
+
+NETWORK = os.environ.get("NETWORK", "testnet").lower()
+if NETWORK not in ("testnet", "mainnet"):
+    raise SystemExit(f"NETWORK must be 'testnet' or 'mainnet', got {NETWORK!r}")
+
+DEPLOY_INFO_PATH = ROOT / "artifacts" / f"deploy_{NETWORK}.json"
 ARC56_PATH = ROOT / "artifacts" / "MedRailConsent.arc56.json"
 
 
 def main() -> None:
     if not DEPLOY_INFO_PATH.exists():
-        raise SystemExit("Run deploy_testnet.py first — no deploy_testnet.json found.")
+        raise SystemExit(f"Run deploy_testnet.py first — no {DEPLOY_INFO_PATH.name} found.")
 
     deploy_info = json.loads(DEPLOY_INFO_PATH.read_text())
     app_id = deploy_info["app_id"]
 
     env = dotenv_values(ROOT / ".env")
-    algorand = AlgorandClient.testnet()
+    algorand = AlgorandClient.mainnet() if NETWORK == "mainnet" else AlgorandClient.testnet()
     deployer = algorand.account.from_mnemonic(mnemonic=env["DEPLOYER_MNEMONIC"])
     algorand.set_signer_from_account(deployer)
 
@@ -60,7 +68,7 @@ def main() -> None:
         AppClientParams(
             algorand=algorand,
             app_id=app_id,
-            app_spec=str(ARC56_PATH),
+            app_spec=ARC56_PATH.read_text(),
         )
     )
 
@@ -69,6 +77,7 @@ def main() -> None:
     r1 = app_client.send.call(
         AppClientMethodCallParams(
             method="request_access",
+            validity_window=1000,
             args=[patient.address, scope],
             sender=requester.address,
         )
@@ -78,6 +87,7 @@ def main() -> None:
     r2 = app_client.send.call(
         AppClientMethodCallParams(
             method="grant_access",
+            validity_window=1000,
             args=[requester.address, scope, 0],  # never expires
             sender=patient.address,
         )
@@ -87,6 +97,7 @@ def main() -> None:
     check1 = app_client.send.call(
         AppClientMethodCallParams(
             method="check_access",
+            validity_window=1000,
             args=[patient.address, requester.address, scope],
             sender=deployer.address,
         )
@@ -96,6 +107,7 @@ def main() -> None:
     r3 = app_client.send.call(
         AppClientMethodCallParams(
             method="revoke_access",
+            validity_window=1000,
             args=[requester.address, scope],
             sender=patient.address,
         )
@@ -105,6 +117,7 @@ def main() -> None:
     check2 = app_client.send.call(
         AppClientMethodCallParams(
             method="check_access",
+            validity_window=1000,
             args=[patient.address, requester.address, scope],
             sender=deployer.address,
         )

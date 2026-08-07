@@ -16,14 +16,15 @@ rate-limiting and monetization mechanism, on both halves.
 | Claim | Evidence |
 |---|---|
 | Smart contract compiles and passes tests | `docs/PROOF.md` §1 — 14/14 passing against the official AVM simulator |
+| Contract deployed live on Algorand TestNet | `docs/PROOF.md` §5 — App ID `768743428`, independently checkable on the public indexer and on [Lora](https://lora.algokit.io/testnet/application/768743428) |
+| Full consent lifecycle proven live on-chain | `docs/PROOF.md` §5 — request → grant → `check_access=True` → revoke → `check_access=False`, every state-changing step a real confirmed transaction |
 | x402 is wired to the real, live facilitator | `docs/PROOF.md` §3 — a real decoded `402` response matching the facilitator's own live `/supported` data, including the correct `$0.02 → 20000` unit conversion |
 | Browser-side payment signing genuinely works | `docs/PROOF.md` §4 — a captured real network sequence: TestNet transaction params fetched live, transaction signed in-browser, submitted to the facilitator |
+| **A real payment settled end to end** | `docs/PROOF.md` §6 — `200 OK`, a real triage response, and a real settled TestNet USDC transaction, independently confirmed on the public indexer: [`OYRQRKYA...`](https://lora.algokit.io/testnet/transaction/OYRQRKYA7WUKBVLWTOFJSJMZFBW7VCNGP5VGH5EBUJGRCVFQFJRQ) |
 | Full test suite | 32 automated tests total (contract + API), all passing, one command each — `docs/DEPLOYMENT.md` "Verify everything" |
 
-The one thing not yet true at time of writing: a *settled* (successful, `200 OK`) payment,
-because that needs the deployer account funded with TestNet play-money — see
-`ACTION_NEEDED.md` for exactly what's pending and why, and `docs/PROOF.md` §6 for the script
-that produces that final proof the moment it's funded.
+Every claim in the row above is independently checkable right now — no step of the TestNet
+pipeline is simulated, mocked, or asserted without a transaction ID to check it against.
 
 ## Live demo script (2 minutes)
 
