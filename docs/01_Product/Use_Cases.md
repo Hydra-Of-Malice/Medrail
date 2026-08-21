@@ -1,16 +1,8 @@
 # MedRail — Use Cases
 
+**Purpose:** Specify, in a single verifiable format, every use case the implemented system supports — including the abuse case it now rejects — with the evidence and status for each.
 
-> **⚠ Correction notice.** Parts of this document were written against a review finding that was
-> later proven wrong. Settlement in x402 v2 happens **only** on a sub-400 response, so **no error
-> path in MedRail can consume a settled payment** — and consent-denied calls (HTTP 403) are **not
-> charged**, contrary to `API.md`, `SECURITY.md`, and the `paidButDenied` field. The audit-sequence
-> race causes a **rejected transaction**, not a corrupted log. See
-> [`CORRECTIONS.md`](../CORRECTIONS.md) — it supersedes any statement here that contradicts it.
-
-**Purpose:** Specify, in a single verifiable format, every use case the implemented system supports — including the one it fails — with the evidence and status for each.
-
-**Status of this document:** Authored 2026-08-21 against the verified fact ledger and source at commit `32ffd73`. Each use case carries the ledger's status vocabulary. **UC-006, UC-007 and UC-011 have never been executed against the deployed contract**; the audit-append step common to all three has never run on Algorand TestNet (`total_audit_entries == 0` on App `768743428`). Requirement IDs are taken verbatim from the canonical registry; two new IDs are allocated here from the reserved `FR-100…FR-119` block and are marked as such.
+**Status of this document:** Authored 2026-08-21 against the verified fact ledger and source at commit `3b387df`. Each use case carries the ledger's status vocabulary. **UC-006, UC-007 and UC-011 have all since been executed against the deployed contract**: the audit-append step common to UC-006 and UC-007 has now run on Algorand TestNet (`total_audit_entries = 5` on App `768743428`), and UC-011's control was verified live by `api/scripts/verify-g01-fix.ts`. Requirement IDs are taken verbatim from the canonical registry; two new IDs are allocated here from the reserved `FR-100…FR-119` block and are marked as such.
 
 **Format.** Every use case uses the same eight fields: **Actor → Precondition → Action → System Behaviour → Expected Outcome → Postcondition → Evidence → Status**.
 
@@ -27,12 +19,12 @@
 | [UC-003](#uc-003--agent-pays-for-a-medication-interaction-check) | Agent pays for a medication interaction check | FR-003, FR-007, FR-008, FR-009 | **VALIDATED** (settlement by shared mechanism) |
 | [UC-004](#uc-004--patient-grants-a-scoped-consent) | Patient grants a scoped consent | FR-018, FR-019, FR-022, FR-035, SEC-003 | **VALIDATED** |
 | [UC-005](#uc-005--patient-revokes-a-consent) | Patient revokes a consent | FR-020, FR-021, FR-035, SEC-003 | **VALIDATED** |
-| [UC-006](#uc-006--requester-reads-a-record-summary-under-a-valid-grant) | Requester reads a record summary under a valid grant | FR-010, FR-012, FR-025, SEC-006 | **UNVALIDATED** |
-| [UC-007](#uc-007--requester-pays-and-is-denied) | Requester pays and is denied | FR-011 | **UNVALIDATED** |
+| [UC-006](#uc-006--requester-reads-a-record-summary-under-a-valid-grant) | Requester reads a record summary under a valid grant | FR-010, FR-012, FR-025, SEC-006 | **VALIDATED** |
+| [UC-007](#uc-007--requester-is-denied-and-is-not-charged) | Requester is denied — and is not charged | FR-011 | **VALIDATED** |
 | [UC-008](#uc-008--anyone-looks-up-consent-status-free) | Anyone looks up consent status, free | FR-013, SEC-009 | **IMPLEMENTED** |
 | [UC-009](#uc-009--third-party-fetches-the-arc-56-application-spec) | Third party fetches the ARC-56 application spec | FR-015 | **IMPLEMENTED** |
 | [UC-010](#uc-010--operator-rotates-the-contract-admin-key) | Operator rotates the contract admin key | FR-029, SEC-002 | **VALIDATED** (contract) / **NOT IMPLEMENTED** (runbook) |
-| [UC-011](#uc-011--abuse--paying-stranger-impersonates-an-authorised-requester) | **[ABUSE]** Paying stranger impersonates an authorised requester | FR-039, SEC-007, SEC-008 | **NOT MITIGATED** |
+| [UC-011](#uc-011--abuse--paying-stranger-attempts-to-impersonate-an-authorised-requester) | **[ABUSE]** Paying stranger attempts to impersonate an authorised requester | FR-039, SEC-007, SEC-008 | **MITIGATED — VALIDATED live** |
 | [UC-012](#uc-012--application-account-is-funded-for-box-mbr) | Application account is funded for box MBR | FR-030, FR-100, REL-006 | **PARTIALLY IMPLEMENTED** |
 
 ### New requirement IDs allocated by this document
@@ -59,9 +51,9 @@ Allocated from the `FR-100…FR-119` block reserved for Product / Use Cases.
 | **Evidence** | `api/src/app.ts:37-50`; `api/src/x402.ts:11-32`; live capture in ledger §4; asserted by `api/test/x402-flow.spec.ts` (3 cases, checking `amount` = `"20000"`/`"50000"` and `network` matching `/^algorand:/`) |
 | **Status** | **VALIDATED** |
 
-**Alternate flow A1 — facilitator unreachable.** `initialize()` throws `"Failed to initialize: no supported payment kinds loaded from any facilitator."` The caller receives **HTTP 500 with no `PAYMENT-REQUIRED` header** — not a 402, not a 503, no `Retry-After`. Reproduced by the reviewer. Free routes remain 200 (REL-005 **VALIDATED**). REL-001 **NOT IMPLEMENTED** (R-1). This is also the mechanism behind CI-2: `x402-flow.spec.ts` makes a live call to the facilitator at module import, so a facilitator outage turns into a red build with a misleading failure.
+**Alternate flow A1 — facilitator unreachable.** `initialize()` throws `"Failed to initialize: no supported payment kinds loaded from any facilitator."` A wrapper around the payment middleware (`api/src/app.ts:73-105`) recognises exactly that condition and converts it into **HTTP 503 with `Retry-After: 30`** and a stable machine-readable code: `{"error":{"code":"PAYMENT_FACILITATOR_UNAVAILABLE","message":"…","retryable":true,"facilitator":"…"}}`. Every other error is re-thrown untouched. That is the difference between telling a calling agent "this is broken" and "try again shortly" — an agent can act on the second. Free routes remain 200 (REL-005 **VALIDATED**). REL-001 **IMPLEMENTED** (G-04 closed). The residual coupling is unavoidable rather than accidental: `accepts[].asset` and `extra.feePayer` come from the facilitator's own `/supported`, so the 402 genuinely cannot be constructed offline. Note that `x402-flow.spec.ts` still calls the facilitator at module import, so a facilitator outage remains a red build (CI-2).
 
-**Alternate flow A2 — malformed body with a valid payment.** zod rejects with 400 and a `flatten()` payload (`api/src/routes/triage.ts:13-15`). **The payment has already settled** — the middleware runs first. FR-038 **PARTIALLY IMPLEMENTED**.
+**Alternate flow A2 — malformed body with a valid payment.** zod rejects with 400 and a `flatten()` payload (`api/src/routes/triage.ts:13-15`). **The payment is not consumed:** `@x402/hono` reaches `processSettlement` only for a response of status < 400, and cancels the payment otherwise — so a validation failure costs the caller nothing. FR-038 **IMPLEMENTED**.
 
 ---
 
@@ -74,9 +66,9 @@ Allocated from the `FR-100…FR-119` block reserved for Product / Use Cases.
 | **Action** | `POST /v1/triage` with `PAYMENT-SIGNATURE` and body `{"symptoms": "<1..2000 chars>"}`. |
 | **System Behaviour** | Middleware forwards the signed payment to the facilitator for verify + settle. On confirmation the handler runs: zod validates `symptoms` (`api/src/routes/triage.ts:5-7`); `scoreTriage()` lowercases the input, substring-matches against **11** hard-coded red-flag groups, sums their weights and caps at 100 (`api/src/services/triageScorer.ts:53-73`); the band is `emergency ≥60`, `urgent ≥30`, `soon ≥10`, else `routine` (`:46-51`). **No model, no inference, no external call, no persistence** — a pure function over a static table. |
 | **Expected Outcome** | HTTP **200**, `{score, band, matchedFlags, disclaimer}`, plus a `PAYMENT-RESPONSE` header carrying the settled transaction. Recorded example (`contracts/artifacts/e2e-proof.json`): `{"score":70,"band":"emergency","matchedFlags":["possible cardiac chest pain","respiratory distress"],"disclaimer":"…"}` — 35 + 35, reconstructible by hand from `triageScorer.ts:33-34`. |
-| **Postcondition** | USDC has moved from payer to `payTo` on Algorand. **No MedRail-side state changed** — no session, no record, no on-chain audit entry (the open endpoints are pure compute; `docs/ARCHITECTURE.md` says "Both categories write to the same audit log" and then corrects itself — the correction is the accurate half, and in fact *neither* category has ever written to it on-chain). |
+| **Postcondition** | USDC has moved from payer to `payTo` on Algorand. **No MedRail-side state changed** — no session, no record, no on-chain audit entry. The open endpoints are pure compute and deliberately write nothing: `docs/ARCHITECTURE.md` says "Both categories write to the same audit log" and then corrects itself in the same sentence — the correction is the accurate half. Only the consent-gated category appends to the audit trail (UC-006). |
 | **Evidence** | Settled tx `OYRQRKYA7WUKBVLWTOFJSJMZFBW7VCNGP5VGH5EBUJGRCVFQFJRQ` — `axfer`, asset `10458941`, amount **20000**, round **66091768**, `fee: 0`, group `XQzhbjBAqt0AjC5AByQsCxGbMdEuca3ZZFMyFBTb7K4=`, note `x402-payment-v2-1786140083822`. `api/test/triageScorer.spec.ts` (7 cases). `api/scripts/e2e-proof.ts` (manual, not in CI). |
-| **Status** | **VALIDATED** — with the disclosure that exactly **one** settled payment exists and its sender equals its receiver (`2WDV2J2F…` paid itself; `docs/PROOF.md` §6). It is a genuine facilitator-settled x402 payment. It is **not** payment volume. |
+| **Status** | **VALIDATED** — with the disclosure that **every settled payment recorded to date is a self-payment from the project's own account** (`2WDV2J2F…` paying itself; `docs/PROOF.md` §6). They are genuine facilitator-settled x402 payments. They are **not** payment volume, and must never be described as such. |
 
 **Requirements:** FR-003, FR-004, FR-005, FR-006, FR-009, AI-001, AI-002, AI-003, NFR-009.
 
@@ -116,7 +108,9 @@ Allocated from the `FR-100…FR-119` block reserved for Product / Use Cases.
 
 **Limitations of the current surface.** The UI grants only to `wallet.address` — patient and requester are the same account — and hard-codes `durationSeconds = 0`, so the expiry behaviour proven in the contract (FR-019) is unreachable from the browser. There is no real-wallet path: `web/lib/demoWallet.ts:12` points at `lib/walletConnect.ts`, **which does not exist** (DOC-4).
 
-**Related — `request_access`.** A requester may signal interest via `request_access(patient, scope)` (`contract.py:140-146`; tx `5XIADMCGFP5I7H7AS656RXZS7MFEEPCVJGLA7T3SVE6XDEYSGFFA`). It increments `total_requests` and emits an event but **persists no state**. **Defect C-1:** `contract.py:146` emits `AccessRequested(Txn.sender, patient, scope)` while the struct is declared `patient, requester` — `Txn.sender` is the *requester*, so the event labels the parties backwards. Any ARC-28 event consumer receives inverted data. No on-chain state is corrupted. Not caught by tests, because `test_request_access_emits_event_and_counts` asserts only `total_requests == 1` and never inspects the payload. Severity MEDIUM; one-line fix. **FR-024 PARTIALLY IMPLEMENTED.**
+**Related — `request_access`.** A requester may signal interest via `request_access(patient, scope)` (`contract.py:140-146`; tx `5XIADMCGFP5I7H7AS656RXZS7MFEEPCVJGLA7T3SVE6XDEYSGFFA`). It increments `total_requests` and emits an event but **persists no state**.
+
+**Defect C-1 (G-12) — fixed in source, redeploy deferred.** The contract previously emitted `AccessRequested(Txn.sender, patient, scope)` against a struct declared `patient, requester`, so every event labelled the two parties backwards and any ARC-28 consumer received inverted data. `contract.py` now emits `AccessRequested(patient, Txn.sender, scope)`, and a regression test in `contracts/tests/test_consent.py` inspects the emitted payload rather than only the counter — it was verified to fail against the old code. **The redeploy is deliberately deferred:** `deploy_testnet.py` uses `OnUpdate.AppendApp`, which mints a *new* application, so redeploying would invalidate App `768743428` and the on-chain history cited throughout this document. **App `768743428` therefore still runs the pre-fix bytecode.** **FR-024 IMPLEMENTED in source; the deployed application retains the defect.**
 
 **Requirements:** FR-018, FR-019, FR-022, FR-035, SEC-003, NFR-008, DATA-001, DATA-003.
 
@@ -132,7 +126,7 @@ Allocated from the `FR-100…FR-119` block reserved for Product / Use Cases.
 | **System Behaviour** | The contract asserts the box exists — `assert self.grants.maybe(key)[1], "no such grant"` (`contract.py:182`) — then rewrites the record with `status = STATUS_REVOKED (2)`, preserving `granted_at` and `expires_at`. If it was active, `total_grants_active` decrements and `total_revocations` increments. Emits `AccessRevoked`. The box is **not** deleted, so a later re-grant reuses it (UC-004). |
 | **Expected Outcome** | A confirmed transaction. `check_access` immediately returns `false`. No backend, custodian, or operator participates. |
 | **Postcondition** | Grant inactive. Counters adjusted. Box retained with its MBR still locked. |
-| **Evidence** | `contract.py:178-195`; tx `OV2J2T5VWMIQG64JYGL7JEGZKKNZNKCMNIQU6AC4PDRQYZ6ZOO5A` round **66088674**; `test_consent.py::test_revoke_access`. Live state on App `768743428`: `total_revocations = 2`, `total_grants_active = 0`, 2 grant boxes present, both revoked. |
+| **Evidence** | `contract.py:178-195`; tx `OV2J2T5VWMIQG64JYGL7JEGZKKNZNKCMNIQU6AC4PDRQYZ6ZOO5A` round **66088674**; `test_consent.py::test_revoke_access`. Live state on App `768743428` records `total_revocations = 2` against `total_grants_active = 4`, with the revoked grant boxes retained rather than deleted. |
 | **Status** | **VALIDATED** |
 
 **Exception flow E1 — revoking a non-existent grant.** The assertion fails and the transaction is rejected atomically; no counter moves. `test_consent.py::test_revoke_nonexistent_grant_asserts`. **FR-021 VALIDATED.**
@@ -148,44 +142,48 @@ Allocated from the `FR-100…FR-119` block reserved for Product / Use Cases.
 | **Actor** | P-3 — requesting clinician or care application |
 | **Precondition** | A currently-valid grant exists for `(patientId, requesterAddress, "records:summary")`. Caller holds ≥ 50000 base units of USDC. `CONSENT_APP_ID` resolves (env, or the `readDeployedAppId` fallback at `api/src/config.ts:31-40`). `OPERATOR_MNEMONIC` is loaded — required even for the read-only simulate, since `simulate()` still needs a sender and signer. The operator account holds enough ALGO for one transaction and the app account enough for one audit box. |
 | **Action** | `POST /v1/records/summary` with `PAYMENT-SIGNATURE` and `{"patientId": "<58 chars>", "requesterAddress": "<58 chars>"}`. |
-| **System Behaviour** | 1. Middleware settles $0.05 **before the handler runs** — this ordering is what makes UC-007 possible. 2. zod validates both fields for **length 58 only**; no checksum check (see UC-007 E2). 3. `checkAccess` derives `"g" ‖ sha256(pk(patient) ‖ pk(requester) ‖ utf8(scope))` in TypeScript and calls `check_access` via `AtomicTransactionComposer.simulate()` — zero fee, nothing submitted (`api/src/services/algorand.ts:82-100`). 4. On `true`, `logAccess` runs inside `withPatientLock`: it reads `get_audit_count(patient)` (simulate), predicts `count + 1`, and submits an admin-signed `log_access` with both box references, waiting up to 4 rounds (`algorand.ts:146-179`). 5. The contract asserts `Txn.sender == admin`, increments the per-patient sequence, writes `AuditEntry{ts, requester, scope, endpoint, action}` and increments `total_audit_entries` (`contract.py:217-236`). |
-| **Expected Outcome** | HTTP **200** with `{patientId, requesterAddress, scope:"records:summary", summary, consentVerifiedOnChain:true, auditTxId, auditSequence, disclaimer}`. `summary` is the fixed `SYNTHETIC_RECORD` — `bloodType "O+"`, allergies `["penicillin"]`, chronic `["type 2 diabetes (controlled)"]`, meds `["metformin 500mg","lisinopril 10mg"]`, `lastUpdated "2026-01-15"` — returned **regardless of `patientId`** (`api/src/routes/records.ts:15-21`). |
+| **System Behaviour** | 1. zod validates both fields as real Algorand addresses — length *and* checksum, via `algosdk.isValidAddress` (`api/src/validation.ts`). 2. `payerFromRequest(c)` decodes the verified `PAYMENT-SIGNATURE` header and recovers the address that signed the payment transaction; the handler returns **403** unless `payer === requesterAddress` (`api/src/routes/records.ts:41-51`). This is the step that makes the payment the authentication — see UC-011. 3. `checkAccess` derives `"g" ‖ sha256(pk(patient) ‖ pk(requester) ‖ utf8(scope))` in TypeScript and calls `check_access` via `AtomicTransactionComposer.simulate()` — zero fee, nothing submitted (`api/src/services/algorand.ts:82-100`). 4. On `true`, `logAccess` runs inside `withPatientLock`: it reads `get_audit_count(patient)` (simulate), predicts `count + 1`, and submits an admin-signed `log_access` with both box references, waiting up to 4 rounds (`algorand.ts:146-179`). It is wrapped in `try/catch` (`records.ts:83-99`) — see E1. 5. The contract asserts `Txn.sender == admin`, increments the per-patient sequence, writes `AuditEntry{ts, requester, scope, endpoint, action}` and increments `total_audit_entries` (`contract.py:217-236`). 6. The $0.05 settles **only now**, because `@x402/hono` reaches `processSettlement` only for a response of status < 400. Every 403 above cancels the payment instead. |
+| **Expected Outcome** | HTTP **200** with `{patientId, requesterAddress, scope:"records:summary", summary, consentVerifiedOnChain:true, auditStatus, auditTxId, auditSequence, disclaimer}`, where `auditStatus` is `"recorded"` or `"pending"`. `summary` is the fixed `SYNTHETIC_RECORD` — `bloodType "O+"`, allergies `["penicillin"]`, chronic `["type 2 diabetes (controlled)"]`, meds `["metformin 500mg","lisinopril 10mg"]`, `lastUpdated "2026-01-15"` — returned **regardless of `patientId`** (`api/src/routes/records.ts:17-23`). |
 | **Postcondition** | USDC moved. One new `"a"`-prefixed audit box; `audit_seq[patient]` incremented; `total_audit_entries` incremented. Nothing stored server-side. |
-| **Evidence** | `api/src/routes/records.ts:25-61`; `api/src/services/algorand.ts:82-179`; `contract.py:217-236`; `contracts/tests/test_consent.py` (2 `log_access` cases, AVM simulator only). **No test exists for `api/src/routes/records.ts` and none for `api/src/services/algorand.ts`.** |
-| **Status** | **UNVALIDATED.** FR-010, FR-012 have no test. FR-025 is **UNVALIDATED on-chain**: `total_audit_entries == 0` and there are zero `s`- or `a`-prefixed boxes on App `768743428`, so **`log_access` has never executed on Algorand TestNet** (ledger §3, E-1). `auditTxId` and `auditSequence`, documented in `docs/API.md`, have never been produced by a real run. |
+| **Evidence** | **Executed live against App `768743428`** by `api/scripts/e2e-consent-proof.ts`: grant `M26NPR32Z5YBLBBMZDTBQL6Y7EUSNS5YV4PXYEUBXIVJQGVJ3MAA` → free status check → settled payment `5DKFUULWLTNGKLYLH3TT44F22MHKOFRCEO6K4JVEPOPETFBYOESA` → audit append `4YLKLQKKWXXFW3UT5APJVYKXI7T7A6OACTAWCC5YBAN3XGOGHRVQ` at sequence `1`, HTTP 200 (`contracts/artifacts/e2e-consent-proof.json`; `docs/PROOF.md` §9). The script is repeatable and has been re-run: `total_audit_entries` on App `768743428` now reads **5**. Source: `api/src/routes/records.ts`; `api/src/services/algorand.ts:82-179`; `contract.py:217-236`; `contracts/tests/test_consent.py` (`log_access` cases, AVM simulator); `api/test/x402Payer.spec.ts` (6 cases) covers the payer-binding step. **There is still no dedicated unit-test file for `api/src/services/algorand.ts`** (G-05). |
+| **Status** | **VALIDATED.** FR-010, FR-012 and FR-025 are proven on Algorand TestNet: `total_audit_entries = 5` and both `s`- and `a`-prefixed boxes exist on App `768743428`. `auditTxId` and `auditSequence`, documented in `docs/API.md`, have now been produced by real runs. |
 
-**Exception flow E1 — settled payment lost (REL-002 NOT IMPLEMENTED, finding R-2).** `records.ts:49` awaits `logAccess` **without a catch**, unlike the denied path at `:37`. If the write throws — operator out of ALGO, app account out of box MBR, algod 5xx, validity-window expiry — the request falls through to `app.onError` and returns **HTTP 500 after settlement**. The caller has paid $0.05, receives nothing, and has no refund path and no retry token. The rejection path is defensive; the success path is not.
+**Exception flow E1 — the audit write cannot cost the caller money, and no longer costs the sale.** Two distinct properties, often confused:
 
-**Exception flow E2 — no timeout or retry on chain I/O (REL-003 NOT IMPLEMENTED, R-4).** `new algosdk.Algodv2("", config.algodServer, "")` (`algorand.ts:5`) sets no timeout and no retry; `atc.execute(algod, 4)` waits 4 rounds and throws. One AlgoNode blip becomes a user-visible 500 on this route and on UC-008.
+*The caller's money is safe structurally.* `@x402/hono` (`node_modules/@x402/hono/dist/esm/index.mjs:203-232`) calls `processSettlement` only when the handler returns a status below 400; any throw or any 4xx/5xx dispatches `cancellationDispatcher.cancel(...)` and returns before settlement. **No error path in MedRail can consume a settled payment.** REL-002 is **VALIDATED — satisfied by the SDK**, and this is properly credited as an inherited strength of x402 v2 rather than as MedRail engineering.
 
-**Exception flow E3 — concurrent writes for one patient (REL-004 PARTIALLY IMPLEMENTED, D-7).** `withPatientLock` (`algorand.ts:129-138`) is an in-process per-patient promise chain. It does not protect against two backend instances sharing one operator account, and `api/fly.toml` permits more than one machine (`auto_start_machines = true`; `min_machines_running = 1` is a floor, not a ceiling).
+*The sale is now protected too.* `logAccess` on the success path was previously awaited without a catch, so a transient chain failure — operator out of ALGO, app account short of box MBR, algod 5xx, validity-window expiry, a box-reference rejection under concurrency — turned a legitimate, authorised, payable request into a 500. It is now wrapped in `try/catch` (`records.ts:83-99`): the record is still returned with **HTTP 200**, `auditStatus: "pending"`, null `auditTxId`/`auditSequence`, and a structured `audit_write_failed` event logged server-side. The caller gets what they asked for and can see that the receipt is outstanding.
 
-**Exception flow E4 — containerised deployment (D-1, HIGH).** `contracts/artifacts/deploy_testnet.json` is not copied into the image, so the `readDeployedAppId` fallback finds nothing; if `CONSENT_APP_ID` is unset, `requireConsentAppId()` throws and this route returns 500. **`api/fly.toml` does not set `CONSENT_APP_ID`**, and it hard-codes `NETWORK = "mainnet"` where no `MedRailConsent` deployment exists (D-2).
+**Exception flow E2 — no timeout or retry on chain I/O (REL-003 NOT IMPLEMENTED, R-4).** `new algosdk.Algodv2("", config.algodServer, "")` (`algorand.ts:5`) sets no timeout and no retry; `atc.execute(algod, 4)` waits 4 rounds and throws. On this route that now degrades to `auditStatus: "pending"` rather than a 500, but UC-008 has no such cushion — one AlgoNode blip is still a user-visible error there.
 
-**Requirements:** FR-010, FR-012, FR-025, FR-027, FR-028, SEC-001, SEC-006, SEC-009, DATA-002, DATA-004, AI-007, PERF-004 (**NOT IMPLEMENTED** — the audit write blocks the paid response path).
+**Exception flow E3 — concurrent writes for one patient (REL-004 PARTIALLY IMPLEMENTED, G-11).** `withPatientLock` (`algorand.ts:129-138`) is an in-process per-patient promise chain, so it holds only within one process. `api/fly.toml` now sets `max_machines_running = 1` deliberately, which makes the deployment configuration consistent with the lock. The race yields a **rejected transaction**, not a corrupted log — the failure mode is availability, not integrity — and with the guard in E1 a rejection now surfaces as `auditStatus: "pending"`. Pinning the service to one machine to preserve this remains an open constraint (G-11).
+
+**Exception flow E4 — containerised deployment.** `api/fly.toml` now sets `NETWORK = "testnet"` and `CONSENT_APP_ID = "768743428"` explicitly, with a `/v1/health` check, so the route no longer depends on the `readDeployedAppId` artefact fallback surviving into the image (G-07, G-13, G-14 closed). Both Dockerfiles use `npm ci`, and a `.dockerignore` exists at the repo root and in `web/`. Nothing is publicly hosted yet, so this is a verified configuration rather than a running deployment.
+
+**Requirements:** FR-010, FR-012, FR-025, FR-027, FR-028, SEC-001, SEC-006, SEC-009, DATA-002, DATA-004, AI-007, PERF-004 (**NOT IMPLEMENTED** — the audit write still blocks the paid response path).
 
 ---
 
-## UC-007 — Requester pays and is denied
+## UC-007 — Requester is denied — and is not charged
 
 | Field | Content |
 |---|---|
 | **Actor** | P-3 |
-| **Precondition** | **No** currently-valid grant for `(patientId, requesterAddress, "records:summary")` — never granted, revoked, or expired. Caller holds ≥ 50000 base units of USDC. |
+| **Precondition** | **No** currently-valid grant for `(patientId, requesterAddress, "records:summary")` — never granted, revoked, or expired. Caller holds ≥ 50000 base units of USDC and signs the payment from `requesterAddress` itself (otherwise UC-011 applies and the call is rejected earlier). |
 | **Action** | `POST /v1/records/summary` with a valid `PAYMENT-SIGNATURE` and both addresses. |
-| **System Behaviour** | The $0.05 settles first. `checkAccess` returns `false`. The handler attempts an audit entry with `action = "consent_denied"`, wrapped defensively — `await logAccess(...).catch(() => undefined)` (`records.ts:37`) — so an on-chain failure cannot turn a correct 403 into a 500. It then returns 403. |
-| **Expected Outcome** | HTTP **403**, `{error: "no valid consent grant from this patient for this requester and scope", patientId, requesterAddress, paidButDenied: true}`. |
-| **Postcondition** | **The caller has paid and received no record.** If the audit write succeeded, a `"consent_denied"` entry exists on the patient's trail; if it failed, nothing on-chain records the attempt and no error surfaces. |
-| **Evidence** | `api/src/routes/records.ts:33-47`; documented in [`../API.md`](../API.md) and defended in [`../SECURITY.md`](../SECURITY.md) §"consent-denied calls are still charged" |
-| **Status** | **UNVALIDATED** — no test covers this route, and the audit half has never run on-chain (E-1). |
+| **System Behaviour** | The payer binding passes. `checkAccess` returns `false`. The handler writes a `"consent_denied"` entry to the patient's own trail, wrapped defensively — `await logAccess(...).catch(() => undefined)` (`records.ts:58`) — so an on-chain failure cannot turn a correct 403 into a 500. It then returns 403, **which cancels settlement**: `@x402/hono` never reaches `processSettlement` for a status ≥ 400. |
+| **Expected Outcome** | HTTP **403**, `{error: "no valid consent grant from this patient for this requester and scope", patientId, requesterAddress, charged: false, hint: "GET /v1/consent/status?patient=&requester=&scope=records:summary is free"}`. |
+| **Postcondition** | **The caller has paid nothing and received no record.** If the audit write succeeded, a `"consent_denied"` entry exists on the patient's trail; if it failed, nothing on-chain records the attempt. The cost of the denial falls on MedRail: the operator account pays the Algorand fee for the denial audit write. |
+| **Evidence** | `api/src/routes/records.ts:54-71`; `api/src/rateLimit.ts` bounds the cost; response shape asserted alongside the payer-binding cases in `api/test/x402Payer.spec.ts` |
+| **Status** | **VALIDATED** — the `log_access` mechanism this path uses is the same one proven on TestNet in UC-006 (`total_audit_entries = 5`), and the 403-cancels-settlement property is structural in the SDK. |
 
-**Design note.** Charging for a denial is deliberate: the fee pays for a real on-chain verification either way, the same way a paid lookup API charges for a miss. It is stated in the response body itself (`paidButDenied: true`), which is the right way to do it. The honest counterpoint: a requester whose grant was silently revoked pays to be told so, and there is no free way to discover that in the same call — though UC-008 provides a free pre-flight check.
+**Design note — who actually pays for a denial.** Earlier drafts of this project, and `API.md` and `SECURITY.md` with them, described a denial as billable and returned `charged: false`. **That was never what the code did.** A 403 cancels settlement, so the caller pays nothing; the field has been removed and replaced with `charged: false` plus a pointer to the free pre-flight check. The economics run the other way from what was documented: MedRail pays one Algorand transaction fee to answer a denial. That is a defensible thing to spend money on — the patient's trail should record refused attempts, not only successful ones — but it is an unbounded cost if left unmetered, which is why `POST /v1/records/summary` carries a **30 requests/minute** limit (`api/src/app.ts:46`, `api/src/rateLimit.ts`). Priced happy paths are deliberately not throttled: they are economically self-limiting.
 
-**Exception flow E1 — the denial is not observable.** If `logAccess` fails on this path, the `.catch` swallows it with no log, no metric, and no alert (OPS-002, OPS-003 **NOT IMPLEMENTED**). Denied attempts can therefore be lost silently, which weakens the audit-trail claim in the direction nobody checks.
+**Exception flow E1 — the denial is not observable.** If `logAccess` fails on this path, the `.catch` swallows it with no log, no metric, and no alert (OPS-002, OPS-003 **NOT IMPLEMENTED**; G-15). Denied attempts can therefore be lost silently, which weakens the audit-trail claim in the direction nobody checks. Note the asymmetry with UC-006 E1, which now logs a structured `audit_write_failed` event — this path does not.
 
-**Exception flow E2 — malformed-but-58-character address (SEC-010, SEC-011 NOT IMPLEMENTED, finding R-3).** zod validates length only. `algosdk.decodeAddress` then throws inside `grantBoxName`, `app.onError` returns `err.message` verbatim, and the caller receives **HTTP 500** with `{"error":"wrong checksum for address"}`. Two defects: a client input error reported as a server error, and internal exception text disclosed to unauthenticated callers. Reproduced by the reviewer against `GET /v1/consent/status`; the same schema pattern applies here. **RECOMMENDED:** `.refine(algosdk.isValidAddress)` on all four address fields, plus a generic 500 body with detail logged server-side only.
+**Exception flow E2 — malformed-but-58-character address (SEC-010, SEC-011 IMPLEMENTED, G-10 closed).** Address fields are validated by checksum, not length: `api/src/validation.ts` exports `algorandAddress`, a zod schema wrapping `algosdk.isValidAddress`, used by both `records.ts` and `consent.ts`. A 58-character string that is not an address is now a **400** with a field-level message, not a 500. Separately, `app.onError` no longer echoes `err.message`: it logs the detail server-side against a generated `requestId` and returns `{"error":{"code":"INTERNAL_ERROR","message":"An internal error occurred. Quote the requestId when reporting this.","retryable":true,"requestId":"…"}}` (`api/src/app.ts:113-139`). A client input error is now reported as a client error, and no internal exception text reaches an unauthenticated caller.
 
-**Requirements:** FR-011, FR-038, SEC-010, SEC-011.
+**Requirements:** FR-011, FR-038, SEC-010, SEC-011, SEC-013.
 
 ---
 
@@ -199,10 +197,10 @@ Allocated from the `FR-100…FR-119` block reserved for Product / Use Cases.
 | **System Behaviour** | zod validates the query (`api/src/routes/consent.ts:6-10`). `checkAccess` performs two outbound algod calls per request — `getTransactionParams()` then `atc.simulate()`. The contract returns `true` only when the grant box exists **and** `status == STATUS_GRANTED` **and** (`expires_at == 0` or `Global.latest_timestamp < expires_at`) (`contract.py:197-209`). Nothing is submitted; no fee is paid. |
 | **Expected Outcome** | HTTP **200**, `{patient, requester, scope, granted}`. |
 | **Postcondition** | No state changed on-chain or off. |
-| **Evidence** | `api/src/routes/consent.ts:19-31`; `api/src/services/algorand.ts:82-100`; consumed by `web/lib/api.ts` and `web/components/ConsentChecker.tsx:44-48`. Live behaviour confirmed by the `exercise_contract.py` run: `check_access` returned `True` after the grant and `False` after the revoke. |
-| **Status** | **IMPLEMENTED** — FR-013 has **no automated test**. Reviewer observed one cold call at **505 ms** (two sequential algod round-trips). That is a **single observation on a developer laptop, not a benchmark**; no p50/p95/p99, load test, or latency budget exists anywhere in this repository (PERF-002, PERF-003 **NOT IMPLEMENTED**). |
+| **Evidence** | `api/src/routes/consent.ts:19-31`; `api/src/services/algorand.ts:82-100`; consumed by `web/lib/api.ts` and `web/components/ConsentChecker.tsx:44-48`. Live behaviour confirmed by the `exercise_contract.py` run and again by `api/scripts/e2e-consent-proof.ts`, which uses this endpoint as its free pre-flight check: `granted: true` after the grant, `False` after the revoke. |
+| **Status** | **IMPLEMENTED** — the route is exercised structurally by `api/test/app.spec.ts` (address validation and rate limiting), but **no automated test asserts the granted / not-granted verdict against a live grant** (FR-013). Reviewer observed one cold call at **505 ms** (two sequential algod round-trips). That is a **single observation on a developer laptop, not a benchmark**; no p50/p95/p99, load test, or latency budget exists anywhere in this repository (PERF-002, PERF-003 **NOT IMPLEMENTED**; G-24). |
 
-**Abuse flow A1 — resource exhaustion and third-party amplification (SEC-013 NOT IMPLEMENTED).** Free, unauthenticated, two outbound algod calls per request, no rate limit anywhere in the codebase. Usable both to exhaust `medrail-api` and to amplify traffic at AlgoNode.
+**Abuse flow A1 — resource exhaustion and third-party amplification (SEC-013 IMPLEMENTED, G-09 closed).** The endpoint is free, unauthenticated and makes two outbound algod calls per request, so it can both exhaust `medrail-api` and amplify traffic at public AlgoNode infrastructure at zero cost to the caller. It now carries a fixed-window limit of **60 requests/minute per client** (`api/src/app.ts:44`; `api/src/rateLimit.ts`), returning **429** with `Retry-After` and `{"error":{"code":"RATE_LIMITED",…}}`; `/v1/consent/arc56` and `/v1/records/summary` are limited to 30/min. Asserted by `api/test/app.spec.ts`. Two honest bounds: the limiter is **in-memory**, so behind more than one instance it degrades to per-instance rather than global (the same constraint that already pins the audit lock to one machine, G-11); and the client key is derived from `X-Forwarded-For`, which a direct caller can spoof. It is a courtesy guard against hammering and casual abuse, not a security boundary, and the code says so.
 
 **Requirements:** FR-013, SEC-009, SEC-013, PERF-002.
 
@@ -221,7 +219,7 @@ Allocated from the `FR-100…FR-119` block reserved for Product / Use Cases.
 | **Evidence** | `api/src/app.ts:63-69`; `api/src/routes/consent.ts:33-40`; `contracts/artifacts/MedRailConsent.arc56.json`. `api/Dockerfile` does copy this artefact into the image at `/app/contracts/artifacts/`, matching the runtime resolution. |
 | **Status** | **IMPLEMENTED** — no automated test (FR-015). |
 
-**Exception flow E1.** If the spec is absent, HTTP **404** with `{"error":"ARC-56 spec not found — has the contract been compiled?"}` (`app.ts:65-67`) — a correctly-classified, actionable error, in contrast to R-3.
+**Exception flow E1.** If the spec is absent, HTTP **404** with `{"error":"ARC-56 spec not found — has the contract been compiled?"}` (`app.ts:143-145`) — a correctly-classified, actionable error. It was the model the rest of the error surface was brought up to when G-10 was closed (UC-007 E2).
 
 **Design note.** Publishing the ABI over HTTP turns the contract into a public integration surface rather than an internal dependency of this backend. It is a small thing and one of the better decisions in the codebase. Note the counterpoint: `api/src/services/algorand.ts:20-46` deliberately does **not** parse this file, hand-constructing `ABIMethod` literals instead to avoid algosdk ARC-56-vs-ARC-4 parsing drift (`:16-19`). The spec is published for others but not consumed internally — defensible, and a divergence risk worth noting.
 
@@ -248,32 +246,29 @@ Allocated from the `FR-100…FR-119` block reserved for Product / Use Cases.
 
 ---
 
-## UC-011 — [ABUSE] Paying stranger impersonates an authorised requester
+## UC-011 — [ABUSE] Paying stranger attempts to impersonate an authorised requester
 
-> ### Status: **NOT MITIGATED**
-> This is finding **S-1**, the most serious defect in the system. **SEC-006 PARTIALLY IMPLEMENTED — DEFEATED BY S-1. SEC-007, SEC-008, FR-039 NOT IMPLEMENTED.**
+> ### Status: **MITIGATED — verified live on TestNet**
+> This was finding **S-1 / G-01**, the most serious defect in the system. It is **CLOSED**. **SEC-006, SEC-007, SEC-008 and FR-039 are IMPLEMENTED and VALIDATED.**
 
 | Field | Content |
 |---|---|
 | **Actor** | Any party willing to pay $0.05. No relationship with the patient. No credential of any kind. |
 | **Precondition** | At least one `grant_access` transaction exists on App `768743428`. Grants are public by design: the patient is the transaction `sender` and the requester is ABI argument 0, both readable from any Algorand indexer without permission. The attacker holds ≥ 50000 base units of USDC. |
-| **Action** | 1. Enumerate `(patient, requester)` pairs from the application's own public transaction history. 2. `POST /v1/records/summary` with an ordinary, valid $0.05 payment and body `{"patientId": "<victim>", "requesterAddress": "<the authorised third party>"}`. |
-| **System Behaviour** | The middleware verifies that **a** payment settled. It does not tell the handler **who** paid, and the handler never asks. `requesterAddress` is taken directly from the request body — `z.string().length(58)` and nothing more (`api/src/routes/records.ts:5-8`) — and passed straight into `checkAccess(patientId, requesterAddress, SCOPE)` (`:32`). `check_access` correctly returns `true`, because that grant genuinely exists. The handler then writes an audit entry naming the **claimed** requester (`:49`). |
-| **Expected Outcome (attacker's view)** | HTTP **200** with the record summary. Indistinguishable from a legitimate call. |
-| **Postcondition** | 1. An unauthorised party has obtained the gated resource. 2. **A false attribution is written into the immutable, per-patient audit trail** — recording an access by a party that did not make it, in a log whose whole value proposition is that it cannot be rewritten. This is arguably worse than having no audit trail, because the record is trusted *precisely because* it is on-chain. |
-| **Evidence** | `api/src/routes/records.ts:5-8` (the schema), `:32` (the check against a self-asserted identity), `:49` (the audit write using it). No test covers this route. |
-| **Status** | **NOT MITIGATED** |
+| **Action** | 1. Enumerate `(patient, requester)` pairs from the application's own public transaction history. 2. `POST /v1/records/summary` with an ordinary, valid $0.05 payment signed by the attacker's own key, and body `{"patientId": "<victim>", "requesterAddress": "<the authorised third party>"}`. |
+| **System Behaviour** | `payerFromRequest(c)` (`api/src/x402Payer.ts`) decodes the `PAYMENT-SIGNATURE` header the middleware already verified, reads the AVM `exact` payload `{paymentGroup, paymentIndex}`, and recovers the sender of `paymentGroup[paymentIndex]` — the one leg of the atomic group the *caller* signed, as distinct from the facilitator's fee-payer legs. `api/src/routes/records.ts:41-51` returns **403** unless that recovered address equals the asserted `requesterAddress`. `check_access` is never reached, so the grant is never consulted, and no audit entry is written. Because the response status is 403, `@x402/hono` cancels settlement: **the attacker is not even charged for the attempt.** |
+| **Expected Outcome (attacker's view)** | HTTP **403** with `{"error":"requesterAddress must match the address that signed the payment","requesterAddress":"…","payer":"…"}`. The body names both addresses, because there is nothing to hide: an honest client with a mismatched signer needs to see exactly which two identities failed to line up. |
+| **Postcondition** | 1. No gated resource released. 2. **Nothing written to the patient's audit trail** — the trail records accesses, not rejected impersonations, so it cannot be polluted by an attacker who never got past the door. 3. No settlement. |
+| **Evidence** | **Verified live against TestNet** by `api/scripts/verify-g01-fix.ts` (`contracts/artifacts/g01-verification.json`): it grants consent to a genuine third-party requester (`NHUPYHPA22HG…`, grant tx `PCPVK3FLKP55L3FHCFIIF7QBYUPV5BHKSKYJTUIL6J4Q23HKNFDQ`), then pays from a **different** key while asserting that third party's address — and receives **403**. The same script runs a control in which payer and asserted requester match, which returns **200** with the record, settled tx `QZIQWHN553Q3QYJ4NJ5GP3QIROP6BE2DD45P3IUSHUOGEB7VLVSQ` and audit tx `OYNWBHJTS4LCIW2KQKOM2CEZGIFPRCZLVBVCDDG3GGNWKWDKNBGA`. The control matters as much as the attack: a gate that rejects everything is not a fix. Six unit cases in `api/test/x402Payer.spec.ts` cover the recovery itself, including a group with facilitator fee-payer legs ahead of the payment, a merely-asserted address, an absent header, a malformed header, and an out-of-range `paymentIndex`. |
+| **Status** | **MITIGATED** |
 
-**Why it does not show up in the demo.** (a) The response is a fixed synthetic constant, so nothing sensitive leaks in this build. (b) `web/components/LiveDemoPanel.tsx:38` sends `requesterAddress: wallet.address`, so payer and requester coincide and the flaw never manifests. Neither of these is a control. With real PHI behind this endpoint, **the consent layer would provide no protection whatsoever.**
+**Why this use case is retained rather than deleted.** The attack is the clearest statement of what the consent layer is for. A grant registry that is publicly enumerable — as this one deliberately is — creates the impersonation opportunity by construction, and a paywall that only proves *somebody* paid does nothing about it. Keeping the abuse case documented, with the control and its live verification attached, is how a reader can tell that the gate was designed against a specific adversary rather than assumed to be safe.
 
-**Related, lower severity.** `patientId` is equally self-asserted, but it only selects which grant is evaluated, so it is not independently exploitable.
+**The interesting part: the payment *is* the authentication.** MedRail issues no API keys, holds no sessions, and has no user table — so on the face of it there is no identity to check `requesterAddress` against. But an x402 payment is already a signed Algorand transaction, and a signature is an identity assertion. Recovering the payer costs one header decode and turns a paywall into an authorisation check with **no account system, no credential issuance, and no state**. The stranger-callable property that made this endpoint attackable is the same property that makes the fix free: a caller who can pay has, by definition, already proved who they are.
 
-**Concrete mitigation — all APIs verified present in the installed SDK. RECOMMENDED, not implemented.**
+**Fail-closed, deliberately.** `payerFromRequest` returns `null` — never a guess — when the header is absent or unparseable, and `records.ts:42` treats `null` as a mismatch. An unreadable payment header denies access; it does not fall back to the caller's word.
 
-1. `@x402/core/http` exports `decodePaymentSignatureHeader`; `@x402/avm` exports `getSenderFromTransaction`. In `routes/records.ts`, decode the `PAYMENT-SIGNATURE` header, recover the payer address from the signed payment transaction, and return **403** unless `payer === requesterAddress`.
-2. Alternatively, use `x402HTTPResourceServer`'s `ProtectedRequestHook` — `.onProtectedRequest(...)`, exported from `@x402/hono` — to stash the verified payer on the Hono context.
-
-Either approach is roughly a 10–15 line change plus a test, and is the highest value-per-line fix available before submission. Until it lands, no document in this repository may describe the consent gate as an access control without stating S-1 in the same place.
+**Residual, lower severity.** `patientId` is still self-asserted, but it only selects *which* grant is evaluated, and that grant must name the authenticated payer as its requester. It is not independently exploitable.
 
 **Requirements:** FR-039, SEC-006, SEC-007, SEC-008.
 
@@ -288,15 +283,15 @@ Either approach is roughly a 10–15 line change plus a test, and is the highest
 | **Action** | **Deploy path:** run `contracts/scripts/deploy_testnet.py`. **Top-up path:** call `fund_mbr(payment)` with a payment transaction in the same group. |
 | **System Behaviour** | *Deploy path:* the script is idempotent — it detects an existing application and neither re-creates nor re-funds it, preserving the original `fund_txid` across re-runs, and funding only on `operation_performed == Create` (`deploy_testnet.py:99-137`). *Top-up path:* `fund_mbr` asserts `payment.receiver == Global.current_application_address` and is callable by anyone (`contract.py:129-138`). Boxes are owned by the application account, not by callers, so the app must carry its own MBR — which is what lets any `(patient, requester, scope)` triple exist without either party opting in. |
 | **Expected Outcome** | The application account holds enough ALGO to create the grant and audit boxes it needs. |
-| **Postcondition** | Verified on-chain for App `768743428`: balance **5,000,000 µALGO**, min-balance **145,000 µALGO**, `total-boxes = 2`, `total-box-bytes = 100`. |
-| **Evidence** | `contracts/scripts/deploy_testnet.py:99-137`; funding tx `KYH3H5CG2CCUPUUTJIBX47WD4RWSUV3QWTEUJQRQFYLWO5YAO3QA` round **66088626**; `contract.py:129-138` |
-| **Status** | **PARTIALLY IMPLEMENTED** — FR-030 has **no test**; FR-100 is **IMPLEMENTED**; REL-006 is **PARTIALLY IMPLEMENTED** (funded once, no monitoring, no alerting, and the advertised per-box cost is wrong). |
+| **Postcondition** | The application account carries its own box MBR, and the box inventory has grown as the audit trail has been exercised. At the point the composition was first proven end to end (`docs/PROOF.md` §9) it reported `min-balance = 245,700` µALGO across `total-boxes = 5`, `total-box-bytes = 333` — an exact match for `2500 × 5 + 400 × 333 = 145,700`, plus the 100,000 µALGO base account MBR. |
+| **Evidence** | `contracts/scripts/deploy_testnet.py:99-137`; funding tx `KYH3H5CG2CCUPUUTJIBX47WD4RWSUV3QWTEUJQRQFYLWO5YAO3QA` round **66088626**; `contract.py:129-138`; MBR arithmetic re-verified against the ledger in `docs/PROOF.md` §9 |
+| **Status** | **PARTIALLY IMPLEMENTED** — FR-030 has **no test** and `fund_mbr` itself is untested (G-25); FR-100 is **IMPLEMENTED**; REL-006 is **PARTIALLY IMPLEMENTED** (funded once, no monitoring, no alerting). |
 
-**Defect C-2 — the advertised per-box MBR is 400 µALGO too low.** `contract.py:52` computes `GRANT_BOX_MBR = 2_500 + 400 * (32 + 17)` = **22,100** µALGO. The Algorand formula is `2500 + 400 * (len(key) + len(value))`, and the *effective* key includes the BoxMap's one-byte `key_prefix="g"`, so the real key length is 33, not 32 ⇒ true cost **22,500** µALGO. **Confirmed on-chain:** 145,000 − 100,000 (base account MBR) = 45,000 = 2 × 22,500. The public ABI method `get_grant_box_mbr()` — advertised at `contract.py:249-252` as "a compile-time constant the backend can quote when sizing `fund_mbr` calls" — therefore returns a figure that under-funds by ~1.8% per box. Severity LOW; fix is `400 * (33 + 17)`. **FR-032 IMPLEMENTED (incorrect value).**
+**Defect C-2 (G-20) — fixed in source, redeploy deferred.** `GRANT_BOX_MBR` previously computed `2_500 + 400 * (32 + 17)` = **22,100** µALGO, omitting the BoxMap's one-byte `key_prefix="g"` from the key length. The Algorand formula is `2500 + 400 * (len(key) + len(value))` and the *effective* key is 33 bytes, so the true cost is **22,500** µALGO — confirmed on-chain at the two-box stage: 145,000 − 100,000 (base account MBR) = 45,000 = 2 × 22,500. `contract.py` now reads `GRANT_BOX_MBR = 2_500 + 400 * (33 + 17)`, with a regression test in `contracts/tests/test_consent.py` verified to fail against the old constant. **As with C-1, the redeploy is deferred by design** — `OnUpdate.AppendApp` would mint a new App ID and discard the history App `768743428` carries — so the deployed `get_grant_box_mbr()` still returns the old figure, under-reporting by ~1.8% per box. **FR-032 IMPLEMENTED in source; the deployed application retains the old constant.**
 
 **Correctly handled, and worth crediting.** The contract deliberately does *not* hard-code the audit-box cost, because `AuditEntry` is variable-length (comment at `contract.py:53-55`). That is right, and it is not a defect.
 
-**Exception flow E1 — no headroom monitoring.** Nothing tracks operator-account ALGO or app-account MBR headroom. Exhaustion of either surfaces as UC-006 E1: an HTTP 500 after a settled payment. OPS-005 **NOT IMPLEMENTED**.
+**Exception flow E1 — no headroom monitoring.** Nothing tracks operator-account ALGO or app-account MBR headroom. Exhaustion of either now degrades to `auditStatus: "pending"` on UC-006 rather than an error, which is better behaviour but also *quieter* — with no metrics, alerting, or dashboard (G-15), the trail could stop being written and nobody would be told. OPS-005 **NOT IMPLEMENTED**.
 
 **Requirements:** FR-030, FR-032, FR-100, REL-006, OPS-005.
 
@@ -311,36 +306,36 @@ Either approach is roughly a 10–15 line change plus a test, and is the highest
 | FR-004, FR-005, FR-006 | UC-002 | **VALIDATED** |
 | FR-007, FR-008 | UC-003 | **VALIDATED** |
 | FR-009 | UC-002, UC-003 | **VALIDATED** |
-| FR-010, FR-012 | UC-006 | **UNVALIDATED** |
-| FR-011 | UC-007 | **UNVALIDATED** |
+| FR-010, FR-012 | UC-006 | **VALIDATED** |
+| FR-011 | UC-007 | **VALIDATED** |
 | FR-013 | UC-008 | **IMPLEMENTED** |
 | FR-014, FR-015 | UC-009 | **IMPLEMENTED** |
 | FR-016, FR-017 | UC-001 (discovery) | **VALIDATED** / **IMPLEMENTED** |
 | FR-018, FR-019, FR-022 | UC-004 | **VALIDATED** |
 | FR-020, FR-021 | UC-005 | **VALIDATED** |
 | FR-023 | UC-006, UC-008 | **VALIDATED** |
-| FR-024 | UC-004 (related) | **PARTIALLY IMPLEMENTED** (C-1) |
-| FR-025, FR-027, FR-028 | UC-006 | **UNVALIDATED on-chain** |
+| FR-024 | UC-004 (related) | **IMPLEMENTED in source** (C-1 / G-20 fixed; deployed app retains the defect) |
+| FR-025, FR-027, FR-028 | UC-006 | **VALIDATED on-chain** |
 | FR-026 | UC-006 | **VALIDATED** |
 | FR-029, FR-031 | UC-010 | **VALIDATED** / **PARTIALLY IMPLEMENTED** |
-| FR-030, FR-032 | UC-012 | **IMPLEMENTED** / **IMPLEMENTED (incorrect value)** |
+| FR-030, FR-032 | UC-012 | **IMPLEMENTED** / **IMPLEMENTED in source** (C-2 / G-20 fixed; deployed app retains the old constant) |
 | FR-033…FR-037 | UC-002 (browser), UC-004, UC-005, UC-008 | **IMPLEMENTED**, no frontend tests exist |
-| FR-038 | UC-001 A2, UC-007 E2 | **PARTIALLY IMPLEMENTED** |
-| **FR-039** | **UC-011** | **NOT IMPLEMENTED** |
+| FR-038 | UC-001 A2, UC-007 E2 | **IMPLEMENTED** |
+| **FR-039** | **UC-011** | **VALIDATED** |
 | FR-040 | UC-002 | **IMPLEMENTED** |
 | **FR-100** *(new)* | UC-012 | **IMPLEMENTED** |
 | **FR-101** *(new)* | UC-001, UC-002, UC-003, UC-006 | **IMPLEMENTED** |
 | SEC-001, SEC-002 | UC-006, UC-010 | **VALIDATED** |
 | SEC-003 | UC-004, UC-005 | **VALIDATED** |
 | SEC-004 | UC-006 | **IMPLEMENTED** |
-| SEC-006 | UC-006, **UC-011** | **DEFEATED BY S-1** |
-| SEC-007, SEC-008 | **UC-011** | **NOT IMPLEMENTED** |
+| SEC-006 | UC-006, **UC-011** | **VALIDATED** |
+| SEC-007, SEC-008 | **UC-011** | **VALIDATED** |
 | SEC-009 | UC-006, UC-008 | **IMPLEMENTED** |
-| SEC-010, SEC-011 | UC-007 E2 | **NOT IMPLEMENTED** |
+| SEC-010, SEC-011 | UC-007 E2 | **IMPLEMENTED** |
 | SEC-012 | UC-010 | **NOT IMPLEMENTED** |
-| SEC-013 | UC-008 A1 | **NOT IMPLEMENTED** |
-| REL-001 | UC-001 A1 | **NOT IMPLEMENTED** |
-| REL-002 | UC-006 E1 | **NOT IMPLEMENTED** |
+| SEC-013 | UC-008 A1 | **IMPLEMENTED** |
+| REL-001 | UC-001 A1 | **IMPLEMENTED** |
+| REL-002 | UC-006 E1 | **VALIDATED** — settlement is structurally unreachable on a status ≥ 400; satisfied by the SDK |
 | REL-003 | UC-006 E2 | **NOT IMPLEMENTED** |
 | REL-004 | UC-006 E3 | **PARTIALLY IMPLEMENTED** |
 | REL-005 | UC-001 A1 | **VALIDATED** |
@@ -361,7 +356,7 @@ Because no code supports them. Listing them prevents a reader from assuming an o
 
 | Would-be use case | Why absent |
 |---|---|
-| Patient reads their own audit trail | `get_audit_count` / `get_audit_entry` exist on-chain (FR-028 **VALIDATED**) and `getAuditCount` exists in the backend, but **no HTTP endpoint and no UI expose either**, and `total_audit_entries == 0`. |
+| Patient reads their own audit trail | `get_audit_count` / `get_audit_entry` exist on-chain (FR-028 **VALIDATED**) and `getAuditCount` exists in the backend. There are now **5** entries to show — but **no HTTP endpoint and no UI expose either method**, so the trail is readable only by querying the contract directly. |
 | Patient enumerates all their standing grants | No enumeration method exists on the contract and no aggregate view exists anywhere. |
 | Requester discovers available scopes | `SCOPE` is hard-coded to `"records:summary"` (`records.ts:10`). The contract accepts free-form strings (DATA-003) but nothing publishes a vocabulary. |
 | MedRail pays another x402 endpoint (Orchestrator entry type) | Not built and explicitly not claimed ([`../COMPLIANCE.md`](../COMPLIANCE.md)). |

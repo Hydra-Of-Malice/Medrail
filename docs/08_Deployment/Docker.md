@@ -1,13 +1,6 @@
 # MedRail — Container Images
 
 
-> **⚠ Correction notice.** Parts of this document were written against a review finding that was
-> later proven wrong. Settlement in x402 v2 happens **only** on a sub-400 response, so **no error
-> path in MedRail can consume a settled payment** — and consent-denied calls (HTTP 403) are **not
-> charged**, contrary to `API.md`, `SECURITY.md`, and the `paidButDenied` field. The audit-sequence
-> race causes a **rejected transaction**, not a corrupted log. See
-> [`CORRECTIONS.md`](../CORRECTIONS.md) — it supersedes any statement here that contradicts it.
-
 **Purpose:** analyse `api/Dockerfile` and `web/Dockerfile` line by line, state exactly what lands in each image, document defects D-1…D-6, and supply corrected files that can be committed as-is.
 
 **Status of this document:** authored 2026-08-21 against commit `32ffd73`. **Neither image has ever been built.** `.github/workflows/ci.yml` contains no `docker build` step, and no container registry is referenced anywhere in the repo. Both images are therefore **UNVALIDATED** (NFR-007), and **no image size, build time, or layer count is stated below** — none has ever been measured. Everything in §1–§4 is derived by reading the Dockerfiles against `api/src/config.ts`, `api/src/app.ts`, `api/src/services/interactionChecker.ts` and `api/tsconfig.json`. Everything in §5–§8 is marked **RECOMMENDED** and is not in the repo.

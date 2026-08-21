@@ -1,16 +1,10 @@
 # MedRail — Performance Validation
 
-
-> **⚠ Correction notice.** Parts of this document were written against a review finding that was
-> later proven wrong. Settlement in x402 v2 happens **only** on a sub-400 response, so **no error
-> path in MedRail can consume a settled payment** — and consent-denied calls (HTTP 403) are **not
-> charged**, contrary to `API.md`, `SECURITY.md`, and the `paidButDenied` field. The audit-sequence
-> race causes a **rejected transaction**, not a corrupted log. See
-> [`CORRECTIONS.md`](../CORRECTIONS.md) — it supersedes any statement here that contradicts it.
-
 **Purpose:** state the only performance data that exists, decompose each endpoint's latency from first principles, and specify the validation programme that would produce real numbers.
 
-**Status of this document:** **NOT IMPLEMENTED** as a results document — **there is no performance testing in this repository.** No load test, no benchmark, no profiler run, no k6/autocannon/JMeter configuration, no throughput measurement, no concurrency measurement, no error-rate-under-load measurement. §2 records two single observations. §3 is structural analysis, explicitly not measurement. §4 onward is a **RECOMMENDED** plan. PERF-002, PERF-003 and PERF-004 are all **NOT IMPLEMENTED**.
+**Status of this document:** **NOT IMPLEMENTED** as a results document — **there is no performance testing in this repository.** No load test, no benchmark, no profiler run, no k6/autocannon/JMeter configuration, no throughput measurement, no concurrency measurement, no error-rate-under-load measurement. §2 records two single observations. §3 is structural analysis, explicitly not measurement. §4 onward is a **RECOMMENDED** plan. PERF-002, PERF-003 and PERF-004 are all **NOT IMPLEMENTED**, and **G-24 — no performance measurement of any kind — is open.**
+
+**This is the one area of the review that has not moved.** Several findings elsewhere in this documentation set closed between editions; none of them was a performance finding, and nothing here has been measured since. Where a fix elsewhere changed the *shape* of a latency path — rate limiting on the free surface, the 503 on facilitator failure, the guarded audit write — that is noted below, but no figure follows from it.
 
 **No benchmark figure appears anywhere in this document.** Any latency, throughput or capacity number a reader wants must come from executing §4, not from reading §3.
 
@@ -25,7 +19,7 @@
 | PERF-001 | The `402` challenge for a priced route shall be served without a per-request outbound network call. | **IMPLEMENTED** | The facilitator's `/supported` is fetched once at `x402ResourceServer` initialisation and cached in-process (`api/src/x402.ts:6-14`). One warm observation of ~15 ms is consistent with this, but a single sample does not verify the property — a test asserting zero outbound calls after warm-up does not exist. |
 | PERF-002 | `GET /v1/consent/status` shall return within a defined latency budget under a defined workload. | **NOT IMPLEMENTED** | **No budget has been defined.** One cold observation of 505 ms exists. |
 | PERF-003 | Paid endpoint latency shall be measured and published (p50/p95/p99) under a defined concurrent workload. | **NOT IMPLEMENTED** | No load test, no measurement, no tooling in the repository. |
-| PERF-004 | The audit-log write shall not block the paid response path. | **NOT IMPLEMENTED** | `api/src/routes/records.ts:49` awaits `logAccess` inline before responding. See §5.1. |
+| PERF-004 | The audit-log write shall not block the paid response path. | **NOT IMPLEMENTED** | `api/src/routes/records.ts` still `await`s `logAccess` inline before responding. The write is now wrapped in `try/catch` — a failure degrades to `200` with `auditStatus: "pending"` rather than throwing — which changes the *failure* behaviour, not the latency. The response still cannot be written until the chain confirms or the attempt gives up. See §5.1. |
 
 ---
 
@@ -60,7 +54,9 @@ Two observations, recorded by the reviewer on 2026-08-21.
 - They do **not** characterise behaviour under load, under concurrency, or under failure.
 - They do **not** transfer to any other environment. Nothing has been measured on a server, in a container, or from a hosted deployment — none of which exist.
 
-Two additional wall-clock figures exist and are also **not** performance measurements: the contract suite runs in **0.41 s** and the API suite in **4.08 s** (see [`Test_Results.md`](Test_Results.md) §2-3). Those are test-harness durations. On a repeat run they were **0.14 s** and **872 ms** respectively, purely from cache warmth — which is a useful illustration of how little a single timing sample means in this environment.
+Two additional wall-clock figures exist and are also **not** performance measurements: the contract suite runs in **0.44 s** (28 tests) and the API suite in **9.99 s** (45 tests) — see [`Test_Results.md`](Test_Results.md) §2 and §3. Those are test-harness durations, and the API figure is a particularly clear illustration of why: vitest reports `tests 348ms` inside that 9.99 s total, so **97 % of the elapsed time is module import and transform**, not assertion execution. A reader who took "9.99 s" as a signal about MedRail's speed would be reading the TypeScript toolchain's startup cost.
+
+The same caution applies across editions: the API suite grew from 18 tests to 45 and its wall time rose, which says nothing about the application. **No timing in this repository, from any source, is a performance measurement.**
 
 ---
 
@@ -72,15 +68,17 @@ Everything in this section is derived by reading the code and the protocol, not 
 
 | Component | Where it happens | Character | Under MedRail's control? |
 |---|---|---|---|
-| **C1 — zod validation** | `routes/*.ts` `safeParse` | Pure CPU over a small object | Yes |
+| **C0 — rate-limit check** | `rateLimit.ts`, mounted ahead of the payment middleware on `/v1/consent/status`, `/v1/records/summary`, `/v1/consent/arc56` | One `Map` lookup and an integer compare. Structurally free, and it **sheds** load rather than adding it | Yes |
+| **C1 — zod validation** | `routes/*.ts` `safeParse`, address fields via `validation.ts` `algorandAddress` → `algosdk.isValidAddress` | Pure CPU over a small object. The checksum decode added for SEC-010 is a base32 decode plus a 4-byte SHA-512/256 comparison — negligible, and it now rejects malformed addresses *before* any chain call, removing a wasted round-trip that previously ended in a 500 | Yes |
+| **C1b — payer recovery** | `x402Payer.ts`, `/v1/records/summary` only | Base64 decode, JSON parse, and one `algosdk` transaction decode to recover the signer. Pure CPU, no I/O, no signature verification of its own — the middleware already verified the header | Yes |
 | **C2 — rule evaluation** | `triageScorer.ts:53-73` (11 substring groups), `interactionChecker.ts:36-55` (14 pairs, table loaded once at import via `readFileSync`) | Pure CPU, no I/O, no allocation of significance. **Structurally negligible** relative to any network component. | Yes |
 | **C3 — x402 initialisation** | `x402.ts:6-14`, first priced request only | One outbound HTTPS call to the facilitator's `/supported`; cached thereafter (PERF-001) | Partly — the cache is MedRail's, the endpoint is not |
 | **C4 — facilitator verify + settle** | `@x402/hono` `paymentMiddleware`, `app.ts:37-50` | Outbound HTTPS round-trip to GoPlausible **plus** whatever that facilitator does internally, which includes submitting and confirming the payment transaction on Algorand | **No** — third party |
 | **C5 — Algorand finality** | Inside C4, and again in C7 | Consensus round time; a transaction is final once included in a round | **No** — network protocol |
-| **C6 — algod `getTransactionParams`** | `algorand.ts:85`, `:106`, `:156` | Outbound HTTPS round-trip to public AlgoNode. **No timeout, no retry, no circuit breaker** (`algorand.ts:5`, finding R-4) | Partly |
+| **C6 — algod `getTransactionParams`** | `algorand.ts:85`, `:106`, `:156` | Outbound HTTPS round-trip to public AlgoNode. **No timeout, no retry, no circuit breaker** (`algorand.ts:5`, REL-003 **NOT IMPLEMENTED**) | Partly |
 | **C7 — algod `simulate`** | `algorand.ts:98`, `:119` | Outbound HTTPS round-trip; executes the read-only method against current state. Zero fee, nothing submitted (SEC-009) | Partly |
 | **C8 — `atc.execute(algod, 4)`** | `algorand.ts:175` | Submits the `log_access` transaction and **waits up to 4 rounds** for confirmation before returning or throwing | Partly — the round count is MedRail's choice; round duration is not |
-| **C9 — `getAuditCount` before every write** | `algorand.ts:158` | An **additional, sequential** C6 + C7 pair executed inside `logAccess` before the write is even composed | Yes — this is a design choice |
+| **C9 — `getAuditCount` before every write** | `algorand.ts:158` | An **additional, sequential** C6 + C7 pair executed inside `logAccess` before the write is even composed. The C6 half is redundant: `logAccess` has *already* fetched suggested params at `algorand.ts:156` and does not pass them down (**G-33**, open) | Yes — this is a design choice |
 | **C10 — `withPatientLock` queueing** | `algorand.ts:123-138` | Serialises all `logAccess` calls for a given patient; a queued call waits for every prior call for that patient to settle | Yes |
 
 ### 3.2 Per-endpoint composition
@@ -89,12 +87,12 @@ Everything in this section is derived by reading the code and the protocol, not 
 |---|---|---|---|
 | `POST /v1/triage` | $0.02 | C4 → C1 → C2 | **C4.** Local work is one substring scan over 11 groups. Everything else is the facilitator round-trip and the settlement it performs. |
 | `POST /v1/interaction-check` | $0.02 | C4 → C1 → C2 | **C4.** Same shape; the 14-pair table is already in memory from module import. |
-| `POST /v1/records/summary` | $0.05 | C4 → C1 → **C6 + C7** (`checkAccess`) → **C10 → C9 (C6 + C7) → C8** (`logAccess`) | **The longest path in the system by construction.** A single request performs: one facilitator settlement, then two algod round-trips for the consent check, then — inside the lock — two more algod round-trips to read the audit count, then a submitted transaction awaited for up to 4 rounds. That is **five outbound algod calls plus one on-chain confirmation plus one facilitator settlement, all sequential, all before the response is written.** |
-| `GET /v1/consent/status` | free | C1 → C6 → C7 | **Two sequential algod round-trips.** This is what M-1's 505 ms cold observation contains. |
-| `GET /v1/consent/app-info` | free | C1 only | Local; reads `config` (`routes/consent.ts:33-40`) |
-| `GET /v1/consent/arc56` | free | `readFileSync` + `JSON.parse` per request | Local disk; `app.ts:63-69` re-reads and re-parses the ARC-56 file on **every** request with no caching |
-| `GET /v1/health` | free | C1 only | Local (`routes/health.ts:6-14`) |
-| `GET /` | free | none | Static object (`app.ts:71-84`) |
+| `POST /v1/records/summary` | $0.05 | C0 → C4 → C1 → **C1b** → **C6 + C7** (`checkAccess`) → **C10 → C9 (C6 + C7) → C8** (`logAccess`) | **The longest path in the system by construction.** A single request performs: one facilitator settlement, a local payer recovery, then two algod round-trips for the consent check, then — inside the lock — two more algod round-trips to read the audit count, then a submitted transaction awaited for up to 4 rounds. That is **five outbound algod calls plus one on-chain confirmation plus one facilitator settlement, all sequential, all before the response is written.** C1b adds no I/O. Note the two *early-exit* paths, both of which skip everything downstream: a payer mismatch returns 403 after C1b, and a consent denial returns 403 after one submitted denial-audit transaction. |
+| `GET /v1/consent/status` | free | C0 → C1 → C6 → C7 | **Two sequential algod round-trips**, now behind a 60/min fixed window. This is what M-1's 505 ms cold observation contains. |
+| `GET /v1/consent/app-info` | free | C1 only | Local; reads `config` |
+| `GET /v1/consent/arc56` | free | C0 → `readFileSync` + `JSON.parse` per request | Local disk; `app.ts` re-reads and re-parses the ARC-56 file on **every** request with no caching. Rate-limited 30/min, which bounds the waste without removing it |
+| `GET /v1/health` | free | C1 only | Local (`routes/health.ts`). **Deliberately not rate-limited** — an orchestrator probe must never be shed, and `app.spec.ts` asserts it is not |
+| `GET /` | free | none | Static object (`app.ts`) |
 
 ### 3.3 What the decomposition implies
 
@@ -102,7 +100,12 @@ Three structural statements, each derivable from the table above without any mea
 
 1. **MedRail's own computation is not the cost.** The rule engines are substring scans over 11 and 14 static entries. Any latency of consequence is network: the facilitator, algod, and Algorand consensus. Optimising the scoring code would be optimising the wrong thing.
 2. **The paid consent-gated endpoint is qualitatively different from the other two priced endpoints.** `/v1/triage` and `/v1/interaction-check` cost one facilitator round-trip; `/v1/records/summary` costs that plus five algod calls plus an awaited on-chain confirmation. Charging $0.05 versus $0.02 reflects the on-chain work honestly, but the *latency* difference is not a factor of 2.5 — it is a difference in kind. Any latency budget must be set per-endpoint, never service-wide.
-3. **The free endpoint is the cheapest to abuse.** `GET /v1/consent/status` is unauthenticated, unpriced, unrate-limited, and performs two outbound algod calls per request (SEC-013 **NOT IMPLEMENTED**). It is simultaneously a denial-of-service surface for MedRail and a traffic-amplification surface pointed at public AlgoNode infrastructure. This is a security finding with a performance shape, and §4 must load-test it for exactly that reason.
+3. **The free endpoint is still the cheapest to abuse, but it now has a ceiling.** `GET /v1/consent/status` is unauthenticated and unpriced, and performs two outbound algod calls per request — so it is simultaneously a denial-of-service surface for MedRail and a traffic-amplification surface pointed at public AlgoNode infrastructure. `api/src/rateLimit.ts` now caps it at **60 requests per minute per client key**, returning 429 with `Retry-After` (SEC-013 / **G-09** closed). Three things follow, and all three are reasons W1 stays in the plan rather than reasons to drop it:
+   - **The cap is a number nobody has measured against.** 60/min was chosen as a plausible courtesy limit, not derived from a throughput curve. W1 is what would tell you whether it is generous, tight, or irrelevant.
+   - **The client key is spoofable.** It reads the first `X-Forwarded-For` hop, which a direct caller controls. The limiter is a guard against accidental hammering and casual abuse, not a security boundary — and the source says so.
+   - **It is per-process and in-memory.** Behind more than one instance it becomes per-instance rather than global. That is a weakening, not a failure, and it currently coincides with the `max_machines_running = 1` ceiling imposed for an unrelated reason (§6.2).
+
+   The same limiter also caps the **consent-denied** path of `/v1/records/summary` at 30/min. That path is free to the caller — a 403 cancels settlement — while costing MedRail one Algorand transaction fee for the denial audit write, so it is the one route where an attacker spends nothing and the operator spends something per request. Bounding it bounds that drain.
 
 ---
 
@@ -131,14 +134,14 @@ Note the last three cannot be obtained from an HTTP load test alone. They need t
 
 | Scenario | Endpoint mix | Concurrency | Duration | Purpose |
 |---|---|---|---|---|
-| **W1 — free-read baseline** | 100 % `GET /v1/consent/status` | ramp 1 → 50 | 5 min | Establish the two-algod-call cost curve; determine where AlgoNode begins to throttle |
+| **W1 — free-read baseline** | 100 % `GET /v1/consent/status` | ramp 1 → 50 | 5 min | Establish the two-algod-call cost curve and determine where AlgoNode begins to throttle. **Requires the rate limiter to be raised or bypassed for the run** — 60/min per client key will otherwise cap the ramp at about 1 rps and the run will measure the limiter, not the endpoint. Run it twice: once bypassed, to find the real ceiling, and once at the production limit, to confirm the limiter sheds cleanly under a flood rather than degrading |
 | **W2 — 402 challenge** | 100 % unpaid `POST /v1/triage` | ramp 1 → 200 | 5 min | Verify PERF-001 holds under load (no per-request outbound call) and find the pure-Node ceiling |
 | **W3 — paid open endpoint** | 100 % paid `POST /v1/triage` | 1 → 10 | 10 min | Isolate facilitator settlement latency and settlement success rate |
 | **W4 — paid consent-gated** | 100 % paid `POST /v1/records/summary`, **distinct patients** | 1 → 10 | 10 min | The full five-algod-call path with no lock contention |
 | **W5 — paid consent-gated, single patient** | 100 % paid `POST /v1/records/summary`, **one patient** | 1 → 10 | 10 min | Directly measures the `withPatientLock` serialisation ceiling (§5.2) |
 | **W6 — realistic mix** | 60 % triage, 20 % interaction-check, 15 % consent-status, 5 % records-summary | steady 20 | 15 min | A composite figure for the whole service |
 | **W7 — soak** | W6 mix | steady 5 | 4 h | Detect memory growth in `patientQueues` (`algorand.ts:129` — a `Map` that is written on every call and **never pruned**) |
-| **W8 — dependency failure** | W6 mix with the facilitator unreachable, then AlgoNode unreachable | steady 10 | 5 min each | Characterise findings R-1 and R-4 under load: does the failure stay bounded, or does it queue and amplify? |
+| **W8 — dependency failure** | W6 mix with the facilitator unreachable, then AlgoNode unreachable | steady 10 | 5 min each | Characterise the two dependency failures under load. The facilitator case now has a defined answer — 503 with `Retry-After: 30` on priced routes, free routes unaffected (**G-04** closed) — so this run is about whether that answer *holds under load* or whether the failing initialisation queues and amplifies. The AlgoNode case has no defined answer at all: there is no timeout, retry or circuit breaker (REL-003), so this is where the queue-depth question is settled |
 
 **W3, W4 and W5 spend real TestNet USDC on every request.** They must be budgeted, run against TestNet only, and funded from a dedicated account. This is a real constraint on how large a paid load test can be, and it should be stated to anyone reading the resulting numbers.
 
@@ -149,7 +152,7 @@ Note the last three cannot be obtained from an HTTP load test alone. They need t
 | HTTP load (W1, W2, W6, W7, W8) | **k6** or **autocannon** | Neither is currently in the repository. k6 is preferred: scripted scenarios, per-request tagging, built-in percentile reporting, thresholds as pass/fail gates. autocannon is the lighter option if the team wants to stay entirely in Node. |
 | Paid load (W3, W4, W5) | **A custom Node harness** wrapping `@x402/fetch`'s `wrapFetchWithPayment`, modelled on `api/scripts/e2e-proof.ts` | k6 cannot sign Algorand payments. The harness must manage a funded TestNet account and a nonce/ordering strategy, and record per-request settlement outcomes. |
 | Contract path (per-patient throughput, lock wait, collisions) | **A scripted concurrent `logAccess` harness** calling `services/algorand.ts` directly | The constraint is an in-process lock plus chain confirmation, neither of which is visible through HTTP. This harness is also the natural home for TC-130…TC-134 in [`Test_Cases.md`](Test_Cases.md) — the correctness and performance questions are the same experiment. |
-| Server-side timing | **Structured logging with request ids, plus a metrics exporter** | Both are **NOT IMPLEMENTED** (OPS-002, OPS-003). Without them every measurement is client-side and cannot attribute time to C4 vs C6 vs C8. **This is a prerequisite, not an optional extra** — build it before running §4.2. |
+| Server-side timing | **Structured logging with request ids, plus a metrics exporter** | **OPS-002 is PARTIALLY IMPLEMENTED**: `api/src/app.ts` emits structured JSON for two events (`audit_write_failed`, `facilitator_unavailable`) and `app.onError` attaches a generated `requestId`. That is enough to correlate a *failure*, not to time a *path* — there is no per-request span, no timer, and no metrics exporter (OPS-003 **NOT IMPLEMENTED**, **G-15** open). Without them every measurement is client-side and cannot attribute time to C4 vs C6 vs C8. **This is a prerequisite, not an optional extra** — build it before running §4.2. |
 
 ### 4.4 Environment requirements
 
@@ -158,10 +161,10 @@ A measurement is worthless without a stated environment. None of these exist tod
 | Requirement | Current state |
 |---|---|
 | A dedicated, non-laptop host for the API — fixed CPU/memory, no competing workload | **Does not exist.** No hosted deployment of any kind. |
-| A container image built from `api/Dockerfile`, so the tested artefact is the shipped artefact | **Never built** (NFR-007 **UNVALIDATED**, CI-3) |
+| A container image built from `api/Dockerfile`, so the tested artefact is the shipped artefact | **Never built** (NFR-007 **UNVALIDATED**, TC-203). The Dockerfile and `api/fly.toml` are now correct — `npm ci`, `.dockerignore`, `NETWORK`, `CONSENT_APP_ID`, `/v1/health` check — so the remaining work is to run the build, not to fix it |
 | Load generator on a separate host from the system under test | Not established |
 | A funded TestNet account with sufficient USDC (ASA `10458941`) and ALGO for the run's duration | Ad hoc |
-| An operator account with ALGO headroom, and app-account MBR headroom for every audit box the run will create | App account holds 5 ALGO; MBR headroom is unmonitored (REL-006 **PARTIALLY IMPLEMENTED**), and the advertised per-box cost is wrong by 400 µALGO (defect C-2) |
+| An operator account with ALGO headroom, and app-account MBR headroom for every audit box the run will create | App account holds 5 ALGO against a min-balance of 550,400 µALGO — roughly 4.45 ALGO of headroom, or about 31,000 further audit boxes at 142 bytes each. MBR headroom is **unmonitored** (REL-006 **PARTIALLY IMPLEMENTED**, and **G-15** means nothing alerts on it). Note a wrinkle for anyone sizing a run from the contract's own advertised constant: `get_grant_box_mbr` is corrected to 22,500 µALGO in source, but **App `768743428` still runs the pre-fix bytecode and returns 22,100** — under-reporting by 400 µALGO per grant box |
 | Recorded versions: Node, algosdk, `@x402/*`, contract App ID, facilitator, algod endpoint | Available but not captured per-run |
 | Baseline persistence and run-over-run comparison | **Does not exist** |
 
@@ -171,14 +174,14 @@ No latency target has ever been agreed for MedRail. The following are the decisi
 
 | # | Decision | Considerations the team must weigh |
 |---|---|---|
-| D-P1 | p95 latency target for `GET /v1/consent/status` | Two sequential algod round-trips over shared public infrastructure. The single cold observation was 505 ms; a warm figure is unknown. Any target must be set against a *measured* warm distribution, not against M-1. |
+| D-P1 | p95 latency target for `GET /v1/consent/status` | Two sequential algod round-trips over shared public infrastructure. The single cold observation was 505 ms; a warm figure is unknown. Any target must be set against a *measured* warm distribution, not against M-1. Related and separate: the 60/min rate limit was chosen without a throughput curve behind it, so W1 should be used to decide whether it is the right number as well as what the endpoint costs. |
 | D-P2 | p95 latency target for `POST /v1/triage` and `/v1/interaction-check` | Dominated by the facilitator round-trip (C4), which is outside MedRail's control. The target is really a target for an acceptable *third-party* dependency, and should be expressed as such. |
 | D-P3 | p95 latency target for `POST /v1/records/summary` | Contains an awaited on-chain confirmation (C8). Any target below Algorand's confirmation time is unachievable without the PERF-004 fix in §5.1. Decide the fix first, then the target. |
-| D-P4 | Minimum acceptable settlement success rate | A settlement failure is a failed payment. Related: R-2 means a *successful* settlement can still yield a 500. |
+| D-P4 | Minimum acceptable settlement success rate | A settlement failure is a failed payment and the caller receives nothing — but they are also not charged, because `@x402/hono` settles only on a sub-400 response. The related question worth measuring is the **`auditStatus: "pending"` rate**: a request that succeeds for the caller while failing to record the access is a silent data-integrity event, and it is the one outcome that currently produces no metric and no alert (**G-15**). |
 | D-P5 | Maximum acceptable error rate under W6 | Must exclude intended 402/403 from the numerator. |
 | D-P6 | Target concurrency the service must sustain | Bounded today by §6's hard scaling blocker, not by CPU. |
 | D-P7 | Per-patient audit-write rate the design must support | Structurally capped — see §5.2. If the required rate exceeds the cap, the contract-side fix in §6 is mandatory, not optional. |
-| D-P8 | Behaviour required when the facilitator is unavailable | Currently HTTP 500 with no `PAYMENT-REQUIRED` header (R-1). REL-001 asks for graceful degradation; the specific contract (503 + `Retry-After`? cached payment kinds?) is undecided. |
+| D-P8 | Behaviour required when the facilitator is unavailable | **Decided and implemented:** priced routes return `503` with `Retry-After: 30` and `{"error":{"code":"PAYMENT_FACILITATOR_UNAVAILABLE","retryable":true,"facilitator":"…"}}`, free routes are unaffected (**G-04** / REL-001 closed in code). What remains open is the *quantitative* half: how long the retry advice should be, whether MedRail should cache the last-known payment kinds and serve a 402 from them instead, and how the 503 path behaves under sustained load. W8 is the run that informs all three. |
 
 ### 4.6 Reporting
 
@@ -193,15 +196,24 @@ Identified by reading the code. Each is a hypothesis about where time goes, stat
 ### 5.1 The audit write is inline on the paid response path — PERF-004
 
 ```ts
-// api/src/routes/records.ts:49
-const logResult = await logAccess(patientId, requesterAddress, SCOPE, ENDPOINT, "consent_checked");
+// api/src/routes/records.ts — the write is guarded, but still awaited
+try {
+  const logResult = await logAccess(patientId, requesterAddress, SCOPE, ENDPOINT, "consent_checked");
+  auditTxId = logResult.txId;
+  auditSequence = logResult.sequence.toString();
+} catch (err) {
+  auditStatus = "pending";
+  // structured audit_write_failed event, then fall through to a 200
+}
 ```
 
-`logAccess` submits a real transaction and waits for confirmation via `atc.execute(algod, 4)` (`algorand.ts:175`). **Algorand's confirmation latency is therefore directly inside the user's critical path**, and `/v1/records/summary` cannot respond faster than the chain confirms — no matter how fast MedRail's own code is. The 4-round wait is also the failure timeout: a request that cannot be confirmed in 4 rounds throws, and (per finding R-2) returns HTTP 500 *after* the payment has settled.
+`logAccess` submits a real transaction and waits for confirmation via `atc.execute(algod, 4)` (`algorand.ts:175`). **Algorand's confirmation latency is therefore directly inside the user's critical path**, and `/v1/records/summary` cannot respond faster than the chain confirms — no matter how fast MedRail's own code is. The 4-round wait is also the failure timeout, roughly 14 seconds on Algorand, and it is the worst-case contribution of C8 to the endpoint's latency.
 
-The response already returns `auditTxId` and `auditSequence` to the caller, so the coupling is not accidental — it is a deliberate choice to give the caller a receipt. That is a defensible product decision, but it must be recognised as the decision that sets the endpoint's latency floor.
+**What the `try/catch` changed, and what it did not.** It changed the *failure* behaviour: a rejected or timed-out write now yields `200` with `auditStatus: "pending"` and null `auditTxId`/`auditSequence`, plus a structured `audit_write_failed` event, instead of throwing. That matters — an authorised, paying caller no longer loses their response to a transient chain problem. It changed nothing about *latency*: the request still waits the full 4 rounds before giving up, so the guard converts a slow failure into a slow success rather than into a fast one. **PERF-004 remains NOT IMPLEMENTED.**
 
-**Options, each with a cost:** respond immediately and return a poll URL for the audit receipt; submit without awaiting confirmation and return the transaction id optimistically; or keep the current behaviour and set D-P3 accordingly. The choice belongs to the team; this document records that the choice has not been made and that PERF-004 is **NOT IMPLEMENTED**.
+The response returns `auditTxId` and `auditSequence` to the caller, so the coupling is not accidental — it is a deliberate choice to give the caller a receipt. That is a defensible product decision, but it must be recognised as the decision that sets the endpoint's latency floor.
+
+**Options, each with a cost:** respond immediately and return a poll URL for the audit receipt; submit without awaiting confirmation and return the transaction id optimistically; or keep the current behaviour and set D-P3 accordingly. Note the `auditStatus` field already gives the response shape somewhere to say "not yet", which is most of what an asynchronous design needs from the API contract — the field was added for failure handling and happens to be the same field an async write would use. The choice belongs to the team; this document records that it has not been made.
 
 ### 5.2 `withPatientLock` serialises all audit writes for a patient
 
@@ -228,7 +240,9 @@ Secondary observation: `patientQueues` is a `Map` that is written on every call 
 
 `logAccess` calls `getAuditCount(patient)` (`algorand.ts:158`) before composing its transaction. `getAuditCount` performs its **own** `getTransactionParams` (`:106`) followed by its **own** `simulate` (`:119`). So each audit write costs two extra sequential algod round-trips before the transaction is even built, and those round-trips sit **inside** the per-patient lock — they extend the serialised critical section for every queued caller, not just the current one.
 
-At minimum, the `getTransactionParams` result already fetched at `algorand.ts:156` could be passed down and reused, halving this cost for free. The read cannot be removed entirely without changing how the audit box is addressed — see §6.3.
+**Half of that is free to remove and has not been removed.** `logAccess` already fetched suggested params at `algorand.ts:156`, immediately before calling `getAuditCount`, and does not pass them down — so the same `getTransactionParams` call is made twice, back to back, on every audit write. This is **G-33**, open. It is the smallest performance defect in this document and the only one with a fix that requires no design decision: pass the params through.
+
+The `simulate` half cannot be removed without changing how the audit box is addressed — see §6.3.
 
 ### 5.4 The facilitator round-trip is unavoidable and outside MedRail's control
 

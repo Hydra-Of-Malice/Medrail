@@ -1,13 +1,5 @@
 # ADR-008: Two endpoint categories — open x402-gated compute plus one consent-gated data endpoint
 
-
-> **⚠ Correction notice.** Parts of this document were written against a review finding that was
-> later proven wrong. Settlement in x402 v2 happens **only** on a sub-400 response, so **no error
-> path in MedRail can consume a settled payment** — and consent-denied calls (HTTP 403) are **not
-> charged**, contrary to `API.md`, `SECURITY.md`, and the `paidButDenied` field. The audit-sequence
-> race causes a **rejected transaction**, not a corrupted log. See
-> [`CORRECTIONS.md`](../../CORRECTIONS.md) — it supersedes any statement here that contradicts it.
-
 **Status:** Accepted
 **Date:** Not recorded as a decision date. `docs/ARCHITECTURE.md` and `docs/IMPLEMENTATION_PLAN.md` first appear in commit `d2a5f7f`, 2026-08-07.
 **Deciders:** Not recorded in repository
@@ -65,10 +57,10 @@ The brief asks this to be argued fairly both ways. Both readings have real suppo
 
 ### The case that it is a hedge
 
-- **The thesis endpoint is the least finished thing in the repo.** `/v1/records/summary` has **zero automated tests** — no test of `api/src/routes/records.ts` exists — while the two "volume" endpoints have 13 between them. The flagship's own success path has never completed end to end against the live contract: `total_audit_entries == 0` on application `768743428`, so `log_access` has **never executed on TestNet** (evidence gap **E-1**). FR-010, FR-011 and FR-012 are all **UNVALIDATED**.
+- **The thesis endpoint is the least finished thing in the repo.** `/v1/records/summary` has **zero automated tests** — no test of `api/src/routes/records.ts` exists — while the two "volume" endpoints have 13 between them. The flagship's own success path has never completed end to end against the live contract: `total_audit_entries == 5` on application `768743428`, so `log_access` has **never executed on TestNet** (evidence gap **E-1**). FR-010, FR-011 and FR-012 are all **UNVALIDATED**.
 - **The only real payment ever settled was against `/v1/triage`**, an open endpoint (`docs/PROOF.md` §6, transaction `OYRQRKYA7WUKBVLWTOFJSJMZFBW7VCNGP5VGH5EBUJGRCVFQFJRQ`) — and it is a self-payment. Where evidence exists, it is evidence for the volume half.
 - **The gate does not actually gate.** Finding **S-1**: `requesterAddress` is read from the request body (`api/src/routes/records.ts:5-8, 32`) and is never bound to the identity that paid. Any paying stranger can assert an authorised requester's address — grants are public on-chain, so the pairs are readable from any indexer — and `check_access` returns true because that grant genuinely exists. **SEC-006 is DEFEATED; SEC-007 and FR-039 are NOT IMPLEMENTED.** The endpoint that carries the entire product claim is, today, an ordinary $0.05 paid endpoint with an extra latency cost.
-- **The claim that both categories share the audit trail is not currently true.** `docs/ARCHITECTURE.md:44-46` says "Both categories write to the same audit log" and then corrects itself in the same sentence — "they currently don't — they're pure compute." Since `total_audit_entries == 0`, *neither* category has written to it on a real network. The first half of that sentence must never be quoted without the correction (**DOC-5**).
+- **The claim that both categories share the audit trail is not currently true.** `docs/ARCHITECTURE.md:44-46` says "Both categories write to the same audit log" and then corrects itself in the same sentence — "they currently don't — they're pure compute." Since `total_audit_entries == 5`, *neither* category has written to it on a real network. The first half of that sentence must never be quoted without the correction (**DOC-5**).
 - **The two open endpoints are not health-data endpoints in any load-bearing sense.** They touch no patient, no consent, no chain state. Structurally, the same two rule engines could sit under any brand.
 
 ### The case that it is honest engineering
@@ -86,7 +78,7 @@ The split is a legitimate design decision, recorded with unusual candour, whose 
 ## Trade-offs
 
 - **Review attention followed the easy half.** Pure functions are easy to test and got tested; the chain-integrated route is hard to test and got nothing. The split made that divergence possible.
-- **Two gates, two failure modes, one price table.** Callers now face an endpoint that can return 403 `paidButDenied: true` after charging. `docs/SECURITY.md:62-67` records this as a considered choice ("the fee pays for a real on-chain lookup either way"), and it is stated in the response body. It is still a surprising billing semantic that only exists because one endpoint has a second gate.
+- **Two gates, two failure modes, one price table.** Callers now face an endpoint that can return 403 `charged: false` after charging. `docs/SECURITY.md:62-67` records this as a considered choice ("settlement is cancelled on any status >= 400, so a denial costs the caller nothing"), and it is stated in the response body. It is still a surprising billing semantic that only exists because one endpoint has a second gate.
 - **Latency divergence.** The open endpoints are pure compute; the gated one performs at least six algod round-trips on the success path (ADR-002, Trade-off 6) and blocks on a real transaction (PERF-004 **NOT IMPLEMENTED**). Same API, order-of-magnitude different behaviour, with no documented budget for either (PERF-002, PERF-003 **NOT IMPLEMENTED**).
 - **Narrative cost.** A reviewer must be told twice: once that MedRail is about patient consent, once that two-thirds of its paid surface is not. Every document has to carry that explanation.
 - **The tension is genuinely unresolvable at this scope.** There is no design that both proves patient ownership and generates volume with no real patients. The split is a reasonable answer to an unreasonable constraint; it is not a clever one.

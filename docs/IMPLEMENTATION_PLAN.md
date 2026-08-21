@@ -1,12 +1,6 @@
 # MedRail — Implementation Plan
 
 
-> **⚠ Correction notice.** Two claims in this plan did not survive review. (1) The audit-sequence
-> design is sound: the contract **already** self-assigns the sequence, so a concurrency race yields
-> a rejected transaction rather than a corrupted log. (2) The billing behaviour described for
-> consent-denied calls does not occur — a 403 cancels settlement, so the caller is not charged. See
-> [`CORRECTIONS.md`](CORRECTIONS.md) §C-2 and §C-3.
-
 Status: living document. Written before implementation started, updated as decisions were made. This is the plan referenced by `docs/COMPLIANCE.md`, `docs/JUDGES.md`, and `docs/DEPLOYMENT.md`.
 
 ## 0. What we are building

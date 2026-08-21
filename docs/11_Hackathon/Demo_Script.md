@@ -2,21 +2,19 @@
 
 **Purpose:** two rehearsable demo variants (2 minutes and 5 minutes) that show engineering rather than screens — real artefacts, exact commands, exact expected outputs, and the precise sentence to say at each beat.
 
-**Status of this document:** Demo script, 2026-08-21. Every command below was executed against live public infrastructure during authoring and produced the stated output, **except** those in Beat 6 (the audit-log write), which cannot run today — see the blocker notice immediately below. All addresses, transaction ids, rounds and amounts are real TestNet values. No MainNet, public hosting, Bazaar listing, or leaderboard presence is claimed anywhere in this demo.
+**Status of this document:** Demo script, 2026-08-21. Every command below was executed against live public infrastructure and produced the stated output. All addresses, transaction ids, rounds and amounts are real TestNet values. No MainNet, public hosting, Bazaar listing, or leaderboard presence is claimed anywhere in this demo.
 
 Companion documents: [`Demo_Runbook.md`](Demo_Runbook.md) (pre-flight and failure modes), [`Judge_Evaluation.md`](Judge_Evaluation.md), [`Winning_Strategy.md`](Winning_Strategy.md), [`../06_Security/Threat_Model.md`](../06_Security/Threat_Model.md).
 
 ---
 
-## ⛔ BLOCKER — read before rehearsing
+## What is new since the last revision — rehearse these two beats first
 
-**Beat 6 (the on-chain audit-log write) cannot be demonstrated today.** The deployed contract reports `total_audit_entries = 0` and holds zero `s`- or `a`-prefixed boxes — confirmed against `testnet-idx.algonode.cloud` during authoring. `log_access` has never executed on TestNet. It is implemented (`contract.py:217-236`), it has two passing AVM-simulator tests, and it has never run on real infrastructure. This is finding **E-1**.
+An earlier version of this script carried a blocker: the on-chain audit write had never executed, so Beat 6 could not be demonstrated and had to be delivered as a confession. **That is closed.** `total_audit_entries` on App `768743428` reads **5**, and `api/scripts/e2e-consent-proof.ts` reproduces the whole grant → check → pay → audit sequence on demand with four clickable explorer links.
 
-This matters more than its size suggests: every other beat in this demo ends with a transaction id, so the one beat that doesn't is the one a judge will notice.
+The demo also gained something better than a fixed beat. **`api/scripts/verify-g01-fix.ts` performs a real impersonation attack against the live deployment and gets refused.** It grants a third party consent on-chain, pays with a *different* key while claiming the third party's address, shows the **403** — then runs the legitimate call as a control and returns the record with its audit transaction id. Showing a security control reject a live attack, and then showing the same request succeed when the identity matches, is worth more on stage than any feature walkthrough. Both variants below build it in: Beat 7 in the 2-minute version, Beat 7 **[+]** in the 5-minute version.
 
-**Fix it before you demo.** It takes minutes once the operator account is funded — one successful `/v1/records/summary` call against a self-granted consent. Full steps are in `Winning_Strategy.md` **M2**. Do `Winning_Strategy.md` **M1** (payer↔requester binding) first so the first audit entry ever written on-chain is correctly attributed.
-
-Both variants below are written **assuming E-1 has been closed**. Each contains an explicit fallback line for use if it has not, marked ⚠. Those fallbacks are honest and survivable — they are not good.
+**Rehearse those two beats before anything else.** Everything else in this script has been stable for a while; these are the two that changed.
 
 ---
 
@@ -31,8 +29,9 @@ Arrange left to right; you should never search for anything on stage.
 | 3 | Browser — MedRail | `http://localhost:3000` (or the public URL if `Winning_Strategy.md` M6 is done) | Loaded, demo wallet created, wallet funded with ALGO **and** USDC, USDC opt-in done |
 | 4 | Browser — Lora app | https://lora.algokit.io/testnet/application/768743428 | Loaded, scrolled to global state |
 | 5 | Browser — Lora payment | https://lora.algokit.io/testnet/transaction/OYRQRKYA7WUKBVLWTOFJSJMZFBW7VCNGP5VGH5EBUJGRCVFQFJRQ | Loaded — this is your Wi-Fi-failure insurance |
-| 6 | Editor | `api/src/routes/records.ts` **and** `contracts/smart_contracts/consent/contract.py`, split | Open at `records.ts:25` and `contract.py:217` |
-| 7 | Fallback | `contracts/artifacts/e2e-proof.json` open in the editor | Static evidence if the network dies |
+| 6 | Editor | `api/src/routes/records.ts` **and** `contracts/smart_contracts/consent/contract.py`, split | Open at `records.ts:41` (the payer-binding block) and `contract.py:217` |
+| 7 | Fallback | `contracts/artifacts/e2e-consent-proof.json` and `contracts/artifacts/g01-verification.json` open in the editor | Static evidence if the network dies — both carry real transaction ids |
+| 8 | Terminal C | `api/` — **command pre-typed, not run**: `API_BASE=http://localhost:4021 npx tsx scripts/verify-g01-fix.ts` | Idle, one Enter away. This is Beat 7 |
 
 Terminal font ≥ 18pt. Dark theme. Both terminals in the same directory-agnostic state (use absolute paths in every command below so it does not matter).
 
@@ -52,7 +51,7 @@ Eight beats. Total spoken time ~110 seconds, leaving buffer. **Cut ruthlessly if
 | 4 | Output — a settled payment | 20s | 1:07 |
 | 5 | Differentiator — consent on-chain | 20s | 1:27 |
 | 6 | Audit write | 10s | 1:37 |
-| 7 | Security feature | 8s | 1:45 |
+| 7 | Security — an attack, refused | 8s | 1:45 |
 | 8 | Checkable result — indexer read | 15s | 2:00 |
 
 ---
@@ -182,29 +181,25 @@ Then switch to tab 5 (pre-loaded) — transaction `OYRQRKYA7WUKBVLWTOFJSJMZFBW7V
 
 > **Rehearsal note:** grant → pay → revoke is the correct ordering for a single run. If you keep Beat 5's revoke where it is, insert one **Grant myself access** click before this beat and do it while still talking.
 
-**Expected:** `HTTP 200`, response body containing `consentVerifiedOnChain: true`, a non-null `auditTxId`, and `auditSequence`.
+**Expected:** `HTTP 200`, response body containing `consentVerifiedOnChain: true`, `auditStatus: "recorded"`, a non-null `auditTxId`, and an `auditSequence`.
 
 **Say:**
-> "Paid *and* consented — one round trip that's simultaneously 'you paid for the compute' and 'you were allowed to see this.' And it wrote an audit entry to the patient's own on-chain log. That transaction id in the response is the audit write, not the payment."
+> "Paid, authenticated *and* consented — one round trip that's simultaneously 'you paid for the compute', 'you are who you say you are', and 'you were allowed to see this.' And it wrote an audit entry to the patient's own on-chain log. That transaction id in the response is the audit write, not the payment."
 
-**⚠ Fallback if E-1 is not closed — say exactly this, do not improvise:**
-> "The audit write is the one thing here I can't show you live. It's implemented, it has two passing simulator tests, and it has never executed on TestNet — our contract's `total_audit_entries` counter reads zero and I'm not going to pretend otherwise. Everything else in this demo has a transaction id. That one doesn't yet."
+**If asked what happens when the audit write fails:** the response still returns the record with `auditStatus: "pending"` and a null `auditTxId`, and the failure is logged server-side as a structured `audit_write_failed` event. Say it in one sentence: *"You get what you paid for, plus an explicit flag telling you the ledger write is outstanding. And you can't be charged for a failure anyway — x402 settles only on a sub-400 response."*
 
-Then move on immediately. **Do not elaborate, do not apologise twice.** Volunteering it costs you one point; being caught on it costs you five.
+**⚠ Fallback if the operator account is out of ALGO** and the write comes back `pending`: do not hide it. Say *"the audit write is pending — our operator account is dry, which is exactly the failure this flag exists for"*, then run Beat 8 and point at `total_audit_entries`, which still shows the five earlier entries. It is a worse beat and a completely honest one.
 
 ---
 
-### Beat 7 — Reliability / security (8s)
+### Beat 7 — Security, shown as an attack being refused (8s)
 
-**Do:** editor tab 6, `api/src/routes/records.ts`, highlight the payer-binding block added by `Winning_Strategy.md` M1.
+**Do:** editor tab 6, `api/src/routes/records.ts`, highlight the payer-binding block at line 41 — three seconds, no more. In the 2-minute version this is a pointer, not a demonstration; the live attack belongs to the 5-minute version (Beat 7 **[+]**) where there is room for it.
 
 **Say:**
-> "One detail: we decode the payment signature, recover the address that actually signed it, and reject unless it matches the claimed requester. Otherwise anyone who pays five cents could read as any authorised requester — grants are public on the ledger, so those pairs are enumerable. Paying isn't being."
+> "One detail, and it's the one that makes this an access control rather than a paywall. We decode the payment signature, recover the address that *actually* signed it, and 403 unless it matches the claimed requester — before we check consent, before anything touches the ledger. Grants are public on-chain, so valid patient-requester pairs are enumerable from our own transaction history; without this, anyone who pays five cents could read as any authorised requester. **The payment is the authentication.** Paying isn't being."
 
-**⚠ Fallback if M1 is not done** — switch to a control that *does* exist:
-> "`log_access` is admin-gated on-chain — `assert Txn.sender == self.admin.value`, with a unit test that asserts a non-admin call fails. Only our operator account can write to a patient's audit log."
-
-*(That is true and tested. But if M1 is not done, expect the payer-binding question anyway — the honest answer is in `Winning_Strategy.md` §5.)*
+**If you have twenty seconds spare instead of eight,** run it rather than describe it: Terminal C is pre-loaded with `verify-g01-fix.ts`, which pays as the wrong wallet and shows the 403 live. Watching a control refuse a real attack is a materially stronger beat than pointing at the code that implements it.
 
 ---
 
@@ -224,20 +219,20 @@ for kv in a['params']['global-state']:
 "
 ```
 
-**Expected output** (verified live during authoring; `total_audit_entries` becomes `1` once E-1 is closed):
+**Expected output** (verified live against `testnet-idx.algonode.cloud`; the counters increment as you run the demo, so treat the exact numbers as a floor rather than a fixed value):
 ```
 created-at-round: 66088624 | deleted: False
 total_requests         = 2
 total_revocations      = 2
-total_audit_entries    = 0
-total_grants_active    = 0
+total_audit_entries    = 5
+total_grants_active    = 4
 ```
 
 **Say:**
-> "That's the public Algorand indexer — not our server, not our API, no key. App seven-six-eight-seven-four-three-four-two-eight, created at round sixty-six-oh-eight-eight-six-two-four. Every number on that screen came from the ledger. Run it yourself on the way out."
+> "That's the public Algorand indexer — not our server, not our API, no key. App seven-six-eight-seven-four-three-four-two-eight, created at round sixty-six-oh-eight-eight-six-two-four. **Audit entries: five.** That counter is the whole thesis in one integer — every one of those is a paid, consented record access written to the patient's own log by the contract, not by us. Every number on that screen came from the ledger. Run it yourself on the way out."
 
 **Close:**
-> "Contract deployed and checkable. A payment that settled with a transaction id. Consent granted and revoked by the patient's own key. Thirty-two passing tests. And a proof log in the repo that gives you the command to reproduce every one of those claims — including the ones we haven't finished."
+> "Contract deployed and checkable — and byte-identical to the TEAL in our repo, which you can verify yourself. A payment that settled with a transaction id. Consent granted and revoked by the patient's own key. An impersonation attempt refused with a 403. Seventy-three passing tests, including three we ran against the old code first to watch them fail. And a proof log that gives you the command to reproduce every one of those claims — including the ones we haven't finished."
 
 ---
 
@@ -333,25 +328,51 @@ receiver: 2WDV2J2FTWF535SMSUVEBOF5IGXF2OTV7ZZTLTCRBXPVS32UMLOPTI64GE
 >
 > And `scope` is a free-form string, not an enum. Adding a fourth endpoint with a new scope needs zero contract changes and zero redeployment."
 
-**If you have an extra ten seconds, add the honest half:**
-> "The cost of that design: the key derivation is implemented three times — Python in the contract, Node in the backend, WebCrypto in the browser — and we don't currently have a test that proves all three agree. That's on our list."
+**If you have an extra ten seconds, add the part that used to be an admission and is now a boast:**
+> "The cost of that design is that the key derivation exists three times — Python in the contract, Node in the backend, WebCrypto in the browser — and if any one of them drifts, a grant written by the browser becomes silently unreadable by the backend. No error, just `false`. So all three now read the same golden-vector fixture: `api/test/fixtures/box-key-vectors.json`, asserted by the TypeScript suite *and* by the Python contract tests. Three languages, one set of expected bytes, checked on every run."
 
-*(That admission is high-value. It shows you have read your own code adversarially. Only include it if the pace allows — do not rush it in.)*
+*(That is the strongest ten seconds available in the 5-minute version. It shows you found a class of silent failure in your own design and closed it, rather than shipping three implementations and hoping.)*
 
 ---
 
-### Beat 7 **[+]** (20s) — Security, demonstrated rather than described
+### Beat 7 **[+]** (20s) — Security, demonstrated rather than described ★ *the beat nobody else has*
 
-*Requires `Winning_Strategy.md` M1.*
+**Do:** Terminal C. The command is already typed. Press Enter:
 
-**Do:** Terminal B, run a `/v1/records/summary` call that pays from wallet A while claiming `requesterAddress` = a different, genuinely-authorised address.
+```bash
+API_BASE=http://localhost:4021 npx tsx scripts/verify-g01-fix.ts
+```
 
-**Expected:** `HTTP 403` with `{"error":"payer does not match requesterAddress", ...}`.
+It performs the exact attack the original review found, against the live TestNet deployment, in three steps: the patient grants a **third party** consent on-chain; the attacker pays with their own key while asserting the third party's address; then a control call with a matching identity runs so the refusal cannot be dismissed as breakage.
 
-**Say:**
-> "I just paid five cents and claimed to be someone the patient actually *did* authorise. Four-oh-three. This matters because grants are public — `grant_access` puts the patient in the sender field and the requester in argument zero, so valid pairs are enumerable from our own transaction history. Without this check, anyone who pays could read as any authorised requester, and worse, that fabricated identity would get written into the patient's immutable audit log. Paying is not being."
+**Expected output** (abridged — this is the shape, and the artefact it writes is `contracts/artifacts/g01-verification.json`):
+```
+Step 1 — patient grants consent to the third-party requester (on-chain)
+  consent(patient -> third party) granted = true
 
-**⚠ If M1 is not done, cut this beat entirely.** Do not describe it as if it exists. Spend the 20 seconds on Beat 7b instead.
+Step 2 — THE ATTACK: pay with the attacker's own key, assert the third party's address
+  HTTP 403
+  {"error":"requesterAddress must match the address that signed the payment", ...}
+  settled payment: none — settlement cancelled on 4xx
+  => BLOCKED. No record released.
+
+Step 3 — CONTROL: the same payer asserting their OWN address (legitimate)
+  HTTP 200
+  record released: true
+  audit tx: 4YLKLQKK…  (sequence 1)
+====================================================================
+  Impersonation blocked : YES
+  Legitimate call works : YES
+  G-01 CLOSED           : YES
+====================================================================
+```
+
+**Say** — talk over Step 1, land hard on Step 2:
+> "The patient just granted a *third party* access. Now I'm going to pay five cents and claim to be that third party. Four-oh-three — and look at the line under it: **settlement cancelled**, so the attack didn't even cost me the money, because x402 only settles on a sub-400 response. Then the control: same payer, own address, two hundred, record released, audit entry written. This matters because grants are public — `grant_access` puts the patient in the sender field and the requester in argument zero, so those pairs are enumerable from our own transaction history. Without this check, anyone who pays could read as any authorised requester, and that fabricated identity would be written into the patient's immutable audit log. **The payment is the authentication.** Paying is not being."
+
+**Why this beat wins:** every entry in this competition will demonstrate a feature working. This demonstrates a control refusing an attack, and then the same request succeeding when the identity is right — which is the only way to prove a refusal means something. It also pre-empts the single most dangerous question a judge can ask, by answering it before they have finished forming it.
+
+**If the script fails on stage:** open tab 7. `contracts/artifacts/g01-verification.json` records `"blocked": true` and `"result": "CLOSED"` from a real run, with the grant transaction id. Say *"that's the run from this morning — same attack, same 403"* and move on.
 
 ---
 
@@ -368,9 +389,9 @@ Hold this for Q&A, or use it if you are ahead of the clock. It is the single mos
 >
 > Two: our interaction checker flags five severe pairs if you feed it the letters 'a' and 'b' — and our own test file calls that input and asserts only the disclaimer, so the suite runs the bug every time and can't see it. That's two fixes, not one.
 >
-> Three: if the facilitator goes down, our priced routes return a 500 instead of a clean 503 — the asset id and fee-payer come from its `/supported`, so we can't build a 402 offline.
+> Three: the contract running on that App ID is *not* the contract in our repo. We found two defects in it — an event field order and an MBR constant four hundred microalgos light — fixed both in source, and deliberately did not redeploy, because our deploy path mints a new App ID and we'd have thrown away everything I just showed you. Fixed, tested, held back on purpose.
 >
-> Four: `routes/records.ts` and `services/algorand.ts` are the two highest-risk files in the repo and neither has a unit test — and our CI has never actually run, because it triggers on `main` and our branch is `master`.
+> Four: we have no observability at all. No metrics, no tracing, no alerting. If this broke at three in the morning we'd find out from a user. And we have no performance numbers — none, not one — because everything we could measure would be a laptop.
 >
 > All of it is written up in our own gap analysis with reproduction commands. We'd rather hand you the list than have you build it."
 
@@ -382,14 +403,14 @@ Hold this for Q&A, or use it if you are ahead of the clock. It is the single mos
 
 | Thing | Status | The line to use |
 |---|---|---|
-| **On-chain audit-log write** (E-1) | ⛔ **Blocker.** `total_audit_entries = 0`, zero audit boxes. Never executed on TestNet. | "It's implemented with passing simulator tests and it has never run on TestNet. Our counter reads zero and I won't pretend otherwise." **Close this before the demo — `Winning_Strategy.md` M2, minutes of work.** |
 | **MainNet** | Not deployed. Deliberate. | "TestNet only. MainNet is real money and it's literally the act of entering under our own identity — we documented why we deferred it rather than doing it half-way." |
-| **Public URL / Bazaar / leaderboard** | Pending. | "Not hosted yet. That's a deployment gap, not a design gap — and it's why we have one payment instead of many." |
-| **Payment volume** | One payment, self-paid. | Beat 4's disclosure covers it. Say it before you're asked. |
+| **Public URL / Bazaar / leaderboard** | Pending. | "Not hosted yet. That's a deployment gap, not a design gap — and it's why we have our own payments instead of other people's." |
+| **Payment volume** | Real settled payments, all of them ours. | Beat 4's disclosure covers it. Say it before you're asked. |
 | **A second party's payment** | None. | "Nobody but us has paid for this. There's no public URL for them to pay." |
-| **CI runs** | Never triggered (CI-1). | "All three jobs pass locally. The workflow triggers on `main` and our branch is `master`, so it has never fired. One-word fix we hadn't made." |
-| **Frontend tests** | None exist. | "Zero. No Playwright, no Vitest on the frontend. Thirty-two tests, all backend and contract." |
-| **Load / latency numbers** | No benchmark exists. | "I have two single observations from a laptop and no benchmark harness. I'm not going to quote you a p95 I can't defend." |
+| **The deployed contract carrying our contract fixes** | Fixed in source; **redeploy deliberately deferred.** | "The App ID you're looking at runs the pre-fix bytecode, on purpose — our deploy path mints a new App ID, so redeploying would throw away this contract's whole history. Both defects are non-exploitable, both are fixed in `contract.py`, and there are three regression tests we ran against the old code first to watch them fail." **Volunteer this; it is the sharpest question available to a prepared judge.** |
+| **Observability** | None (G-15). | "No metrics, no tracing, no alerting. There's a health endpoint and three structured error events, and nothing consumes them. We'd find out from a user. It's in our gap report." |
+| **Frontend tests** | None exist. | "Zero. No Playwright, no Vitest on the frontend. Seventy-three tests, all backend and contract." |
+| **Load / latency numbers** | No benchmark exists (G-24). | "None. Not a p50, not a p95, nothing — anything I could measure would be a laptop and you'd be right to discount it. And the deployment is pinned to one machine on purpose, because the audit-sequence lock is in-process." |
 | **Real patient data** | Synthetic constant only. | "One fixed synthetic record, returned regardless of patient id. There is no patient datastore — this proves the permission layer, not the storage layer." |
 | **Negation handling in triage** | **Measured:** `"I have no chest pain"` → score 35, band `urgent`. Not handled. | "Substring matching, no notion of polarity. Screening trigger, not a diagnosis. Fix is scoped." **Volunteer this in the 5-minute version (Beat 7b) rather than waiting to be caught.** |
 | **Short-token interaction matching** | **Measured:** `["a","b"]` → 5 matches; `["in","as"]` → 4, including `warfarin+aspirin`. Unanchored containment. | "Two letters produce four severe warnings, and our own test calls that input and asserts only the disclaimer. Two fixes, both on the list." |
@@ -402,13 +423,14 @@ Detection, fallback, and the exact words. Operational detail and pre-flight chec
 
 | Risk | Detection | Fallback | Say |
 |---|---|---|---|
-| Facilitator unreachable (R-1) | Beat 2 returns **500**, not 402 | Skip to Beat 8 (indexer) and tab 5 (pre-loaded payment) | "Our facilitator's unreachable, and it takes the priced routes with it — a known reliability gap we've written up. Here's a payment that settled through it earlier, on the public ledger." |
+| Facilitator unreachable | Beat 2 returns **503** with `Retry-After: 30` and code `PAYMENT_FACILITATOR_UNAVAILABLE`, not 402 | Skip to Beat 8 (indexer) and tab 5 (pre-loaded payment) | "That's our facilitator being unreachable — and notice we tell you it's retryable rather than five-hundred-ing at you, because our callers are agents and the difference between 'come back' and 'this is dead' matters. The asset id and fee-payer come from the facilitator's `/supported`, so we genuinely can't build a 402 offline. Here's a payment that settled through it earlier, on the public ledger." |
 | Demo wallet has no USDC | Beat 4 shows **HTTP 402**, and the UI explains it | The UI's own text is the fallback; switch to tab 5 | "Signed but not settled — the wallet's out of test USDC. The transaction was real; the money wasn't there. Here's one that did settle." |
 | AlgoNode slow or down | Beats 5/8 hang >10s | Tabs 4 and 5 are pre-loaded; use those | "Public node's lagging. These pages are the same data, loaded a few minutes ago." |
 | `txn dead: round X outside Y--Z` | Consent grant/revoke errors in the UI | Retry once; if it fails again, move on | "Validity-window timeout from sequential round-trips — not a logic bug. Our scripts set a wide validity window for exactly this." |
 | Venue Wi-Fi dies | Everything hangs | Tabs 4, 5 and `contracts/artifacts/e2e-proof.json` in tab 7 | "I'll show you the artefacts I captured this morning — every one has a transaction id you can check yourself later." |
 | API not running | Beat 2 returns connection refused | Terminal A: `cd api && npm run dev`, wait ~3s | Keep talking through Beat 1's content while it boots. Never watch a spinner in silence. |
-| Judge asks the payer-binding question mid-demo | — | Answer immediately, do not defer | See `Winning_Strategy.md` §5, first row. **Never say "I'll come back to that."** |
+| Judge asks the payer-binding question mid-demo | — | Answer immediately — and **offer to show it**, do not defer | "The payment *is* the authentication — we recover the address that signed it and 403 on a mismatch. Terminal C, I'll run the attack right now." Then run `verify-g01-fix.ts`. This used to be the question that ended the demo; it is now the one you want. `Winning_Strategy.md` §5, first row. **Never say "I'll come back to that."** |
+| Judge asks whether the deployed contract has the fixes in it | — | Answer immediately and completely | "No — deliberately. Redeploying mints a new App ID and we'd lose this contract's history. Both defects are non-exploitable, fixed in source, with regression tests we ran against the old code first." **Do not hedge; a partial answer here is worse than the full one.** |
 | **A judge types a negation into the symptoms box** — e.g. `I have no chest pain` | Screen shows `score: 35`, `band: "urgent"` (measured 2026-08-21) | None. It will do this. Own it in one breath, then move on | "Yep — thirty-five, urgent. Substring matching has no notion of negation, and that's the cost of choosing rules you can audit over a model you can't. It's a screening trigger, not a diagnosis, which is why every response carries a disclaimer a unit test enforces. Leading-negator detection is on the list." **Do not act surprised.** |
 | **A judge types short/garbage medications** — e.g. `a, b` or `in, as` | Interaction endpoint returns `flagged: true` with 5 and 4 matches respectively (measured), including `warfarin+aspirin` and `simvastatin+clarithromycin` | None. Own it, and volunteer the sharper half | "Five matches from two single letters — the containment test is unanchored in both directions. And the part that should bother you more than the bug: our own test file calls exactly that input and only asserts the disclaimer, so the suite executes it every run and can't see it. That's on the fix list as two changes, not one." |
 

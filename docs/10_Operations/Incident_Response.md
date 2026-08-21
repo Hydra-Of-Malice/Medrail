@@ -1,13 +1,6 @@
 # MedRail — Incident Response
 
 
-> **⚠ Correction notice.** Parts of this document were written against a review finding that was
-> later proven wrong. Settlement in x402 v2 happens **only** on a sub-400 response, so **no error
-> path in MedRail can consume a settled payment** — and consent-denied calls (HTTP 403) are **not
-> charged**, contrary to `API.md`, `SECURITY.md`, and the `paidButDenied` field. The audit-sequence
-> race causes a **rejected transaction**, not a corrupted log. See
-> [`CORRECTIONS.md`](../CORRECTIONS.md) — it supersedes any statement here that contradicts it.
-
 **Purpose:** executable runbooks for the failure modes that actually exist in this system, written so someone who did not write the code can work them.
 
 **Status of this document:** authored 2026-08-21 against commit `32ffd73`. **No incident has ever occurred, because nothing is publicly hosted.** These runbooks are derived from failure modes that were reproduced during review (R-1, R-3), traced through source (R-2, R-4, D-1, D-2, D-7), or verified on-chain. **No on-call rota, escalation contact, paging integration, or incident-management tooling exists** — see §9.2. Every runbook below assumes the responder has: shell access to wherever the API runs, the platform CLI, and read access to a public Algorand indexer. **Detection is the weakest link throughout** — there is no monitoring or alerting (`Monitoring.md`), so for most of these the honest detection answer is "a human notices".
@@ -155,7 +148,7 @@ Then reason:
 | **50000** µUSDC ($0.05) | a `/v1/records/summary` call — **this is the only route that writes an audit entry** |
 | **20000** µUSDC ($0.02) | `/v1/triage` or `/v1/interaction-check`. These never touch the chain, so they are **not** affected by this incident |
 
-**A $0.05 payment in the window with no corresponding `log_access` transaction from the operator shortly after is a candidate lost payment.** Candidate, not certainty — the 403 `paidButDenied` path also produces a payment with a swallowed (and silently discarded) audit write, and you cannot tell the two apart from the ledger alone.
+**A $0.05 payment in the window with no corresponding `log_access` transaction from the operator shortly after is a candidate lost payment.** Candidate, not certainty — the 403 `charged` path also produces a payment with a swallowed (and silently discarded) audit write, and you cannot tell the two apart from the ledger alone.
 
 **Practical limits of this method, stated honestly:**
 

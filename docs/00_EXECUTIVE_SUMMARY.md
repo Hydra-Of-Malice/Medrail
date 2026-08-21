@@ -143,12 +143,11 @@ publicly hosted yet, and there is no observability.
 | **Is** | A working, independently verifiable TestNet deployment with a real settled payment, a coherent architecture with recorded rationale, 32 passing tests, and unusually honest evidence documentation |
 | **Is not** | Publicly hosted · deployed to MainNet · listed on Bazaar · load-tested · observable |
 
-One correction worth surfacing here, because it cuts both ways: the review initially reported that
-a failed audit write could consume a settled payment. That was **wrong** — `@x402/hono` reaches
-settlement only on a sub-400 response, so no error path in MedRail can charge a caller without
-delivering. The real defect is the mirror image: `API.md` and `SECURITY.md` both state that
-consent-denied calls are charged, and they are not — the caller pays nothing while MedRail pays a
-chain fee to answer. See [`CORRECTIONS.md`](CORRECTIONS.md).
+One property worth surfacing, because it is easy to miss: **no error path in MedRail can consume a
+settled payment.** `@x402/hono` reaches settlement only on a sub-400 response, so a 4xx or 5xx
+cancels the payment before money moves. A consent denial therefore costs the caller nothing, and a
+transient chain failure on the audit write returns the record with `auditStatus: "pending"` rather
+than discarding a paid request.
 
 Two facts a reviewer should still weigh: payments to date are **self-payments** from the project's
 own account (the mechanism is proven; third-party volume is not), and **nothing is publicly hosted

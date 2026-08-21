@@ -48,42 +48,76 @@ info:
     - **There is no LLM, model, or inference call.** The two "AI" endpoints are
       deterministic rule engines: 11 keyword rules with fixed weights, and a 14-row
       interaction table lookup. Every response carries a non-diagnostic disclaimer.
-    - **There is no authentication.** No API keys, no tokens, no sessions, no accounts.
-      Payment is the only gate, and it authenticates a *payment*, not a *caller*.
-    - **There is no rate limiting** (requirement SEC-013 is NOT IMPLEMENTED).
+    - **There are no API keys, tokens, sessions, or accounts.** Payment is the only
+      credential. On `POST /v1/records/summary` that credential is a real one: the
+      handler recovers the address that signed the payment and refuses the request
+      unless it matches the asserted `requesterAddress`.
     - **There is no idempotency.** No idempotency key, no deduplication, no replay
       window. A repeated paid call is a repeated payment.
+
+    ## Settlement happens after the handler, and only on success
+
+    `@x402/hono` awaits the route handler, then cancels the payment on any throw or any
+    response with status >= 400 — returning before `processSettlement` is reached
+    (`node_modules/@x402/hono/dist/esm/index.mjs:203-232`). **Every 4xx and 5xx in this
+    specification therefore leaves the caller uncharged.** The only way to be billed is
+    to receive a response below 400.
+
+    ## Authorisation on the consent-gated route
+
+    `POST /v1/records/summary` applies two checks in order:
+
+    1. **Payer binding.** `api/src/x402Payer.ts` decodes the verified `PAYMENT-SIGNATURE`
+       header, reads the AVM `exact` payload (`{paymentGroup, paymentIndex}`), and
+       recovers the sender of `paymentGroup[paymentIndex]` — the one leg of the atomic
+       group the caller signed. If it does not equal `requesterAddress`, the request is
+       refused with **403** before any chain call. This is what makes the payment an
+       authentication factor rather than a paywall.
+    2. **On-chain consent.** `check_access(patientId, requesterAddress, "records:summary")`
+       against App 768743428. No active grant → **403** with `charged: false`.
+
+    ## Rate limiting
+
+    Fixed-window, in-memory, per client IP (`api/src/rateLimit.ts`): `GET /v1/consent/status`
+    60/min, `GET /v1/consent/arc56` 30/min, `POST /v1/records/summary` 30/min. Over the
+    limit → **429** with `Retry-After`; these routes also carry `X-RateLimit-Limit` and
+    `X-RateLimit-Remaining` on allowed responses. The three priced happy paths are
+    deliberately not throttled — settling USDC per call is a stronger limit. The client
+    key is the first `X-Forwarded-For` hop, which a direct caller can spoof: this is a
+    courtesy guard, not a security boundary, and it is per-process rather than global.
 
     ## Middleware ordering — expect 402 before 400
 
     The x402 payment middleware is registered before every route handler
-    (`api/src/app.ts:37-50`), so request-body validation never runs on an unpaid
+    (`api/src/app.ts:50-104`), so request-body validation never runs on an unpaid
     request. A malformed body sent to a priced route without payment returns **402,
     not 400**. The repository's own test documents this (`api/test/x402-flow.spec.ts:48-59`).
 
-    ## Known defects affecting this surface
+    ## Error envelopes — two shapes
 
-    - **S-1 (CRITICAL)** — `POST /v1/records/summary` reads `requesterAddress` from the
-      request body and never binds it to the paying identity. Any paying stranger can
-      impersonate any authorised requester, and the impersonated identity is written
-      into the immutable on-chain audit log. See `./API_Documentation.md` section 7.1.
-    - **R-1 (HIGH)** — a facilitator outage makes all three priced routes return 500
-      with no `PAYMENT-REQUIRED` header, because `accepts[].asset` and `extra.feePayer`
-      are fetched from the facilitator and the 402 cannot be built offline.
-    - **R-2 (HIGH)** — on the `POST /v1/records/summary` success path the on-chain audit
-      write is not wrapped in a catch, so a chain failure returns 500 **after** the
-      $0.05 has settled. No refund path, no retry token.
-    - **R-3 (MEDIUM)** — address fields are validated for length only, so a 58-character
-      non-address returns 500 `{"error":"wrong checksum for address"}`, leaking an
-      internal exception message to an unauthenticated caller.
+    Per-route validation and consent errors are flat: `{error: string}` plus
+    `{details: {formErrors, fieldErrors}}` on schema failures, with discriminators as
+    sibling fields (`payer`, `charged`). Cross-cutting middleware errors use a nested,
+    machine-readable envelope `{error: {code, message, retryable, ...}}` with three
+    codes: `RATE_LIMITED` (429), `PAYMENT_FACILITATOR_UNAVAILABLE` (503), and
+    `INTERNAL_ERROR` (500). Test `typeof body.error === "object"` before reading
+    `body.error.code`. Internal exception text is never returned; a `requestId` is
+    returned instead and the detail is logged server-side.
 
-    ## Evidence gap E-1
+    ## Known limitations affecting this surface
 
-    `total_audit_entries` on App 768743428 is **0**, and no `s`- or `a`-prefixed box
-    exists. **`log_access` has never executed on Algorand TestNet.** The success path of
-    `POST /v1/records/summary` has therefore never completed end-to-end against the live
-    contract, and the `auditTxId` / `auditSequence` response fields have never been
-    produced by a real run.
+    - **Facilitator dependency.** `accepts[].asset` and `extra.feePayer` come from the
+      facilitator's `/supported`, so the 402 cannot be built offline. An outage yields a
+      clean **503 + `Retry-After: 30`** rather than an opaque 500, but there is still no
+      timeout, retry, circuit breaker, or cached fallback.
+    - **No replay of a failed audit write.** If the on-chain `log_access` fails, the
+      route returns **200** with `auditStatus: "pending"` and null identifiers. Nothing
+      queues or retries that entry; it is permanently absent unless an operator replays
+      it by hand.
+    - **No observability.** No metrics, tracing, or alerting (G-15). Structured error
+      logs exist; nothing consumes them.
+    - **Not deployed.** There is no public HTTPS instance, no MainNet deployment, and
+      every payment settled to date is a self-payment from the project's own account.
   contact:
     name: MedRail repository documentation
     url: https://lora.algokit.io/testnet/application/768743428
@@ -94,7 +128,7 @@ info:
 servers:
   - url: http://localhost:4021
     description: |-
-      Local development. `PORT` defaults to 4021 (`api/src/config.ts:46`).
+      Local development. `PORT` defaults to 4021 (`api/src/config.ts:47`).
       Start with `cd api && npm run dev`.
   - url: http://127.0.0.1:4021
     description: Local development, loopback literal (identical service).
@@ -192,6 +226,8 @@ paths:
           $ref: '#/components/responses/PaymentRequired'
         '500':
           $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/FacilitatorUnavailable'
 
   /v1/interaction-check:
     post:
@@ -256,6 +292,8 @@ paths:
           $ref: '#/components/responses/PaymentRequired'
         '500':
           $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/FacilitatorUnavailable'
 
   /v1/records/summary:
     post:
@@ -269,46 +307,61 @@ paths:
 
         ## Behaviour
 
-        1. The payment middleware settles $0.05 USDC.
-        2. zod validates that both address fields are exactly 58 characters. **Length is
-           the only validation — there is no checksum check** (requirement SEC-010,
-           NOT IMPLEMENTED; see defect R-3).
-        3. `check_access(patientId, requesterAddress, "records:summary")` is executed as a
+        1. The rate limiter admits the request (30/min per client IP) or returns **429**.
+        2. The payment middleware verifies the $0.05 USDC payment. **Settlement happens
+           later** — only if the handler returns a status below 400.
+        3. zod validates both address fields for length **and** Algorand checksum
+           (`api/src/validation.ts`). A 58-character non-address is a **400**, not a 500.
+        4. `payerFromRequest` recovers the address that signed the payment transaction.
+           If it does not equal `requesterAddress`, the API returns **403** with a `payer`
+           field — before any chain call is made.
+        5. `check_access(patientId, requesterAddress, "records:summary")` is executed as a
            zero-fee `simulate()` call against algod. Nothing is submitted for this step.
-        4. **Denied** — an audit entry with `action = "consent_denied"` is attempted, its
-           failure is swallowed, and the API returns **403** with `paidButDenied: true`.
-           The fee covers the on-chain verification regardless of outcome, the way a paid
-           lookup API charges for a miss.
-        5. **Allowed** — an audit entry with `action = "consent_checked"` is written to the
+        6. **Denied** — an audit entry with `action = "consent_denied"` is attempted, its
+           failure is swallowed, and the API returns **403** with `charged: false` and a
+           `hint`. The 403 cancels settlement, so the caller pays nothing; MedRail pays the
+           chain fee for the denial audit write, which is why this route is rate-limited.
+        7. **Allowed** — an audit entry with `action = "consent_checked"` is written to the
            chain as a real transaction signed by the operator/admin account, and the API
-           returns 200 with `auditTxId` and `auditSequence`.
+           returns 200 with `auditStatus: "recorded"`, `auditTxId` and `auditSequence`. If
+           that write fails, the API still returns **200** with `auditStatus: "pending"` and
+           null identifiers — a chain fault must not void a consent decision the caller is
+           entitled to.
+        8. The payment settles.
 
         ## Things an integrator must know
 
+        - **`requesterAddress` must equal the address that signed the payment.** This is
+          what makes the route an authorisation check rather than a paywall: the x402
+          middleware proves *a* payment settled, not *whose*, and `grant_access`
+          transactions publish every valid (patient, requester, scope) triple to any
+          indexer. Binding the two means the only identity you can assert is one you hold
+          the key for.
         - **`patientId` selects which grant is checked. It does NOT select data.** The
-          `summary` object is a fixed constant (`api/src/routes/records.ts:15-21`) returned
+          `summary` object is a fixed constant (`api/src/routes/records.ts:17-23`) returned
           for every patient. There is no patient datastore (requirement DATA-004).
-        - **`auditSequence` is a decimal STRING, not a JSON number.** The underlying value
-          is a uint64/bigint outside JSON's safe-integer range and is `.toString()`-ed at
-          `api/src/routes/records.ts:58`.
-        - **`requesterAddress` is never authenticated — defect S-1 (CRITICAL).** Nothing
-          binds it to the paying identity, and it is written verbatim into the immutable
-          per-patient audit log, so a successful impersonation produces a permanent false
-          attribution.
+        - **Branch on `auditStatus`** if the on-chain trail matters to you. `"pending"`
+          means the access is not recorded on chain and will not be retried automatically.
+        - **`auditSequence` is a decimal STRING or null, not a JSON number.** The underlying
+          value is a uint64/bigint outside JSON's safe-integer range and is `.toString()`-ed
+          at `api/src/routes/records.ts:109`.
+        - **Two distinct 403s.** Discriminate on the presence of `payer` (payer mismatch)
+          versus `charged` (no consent grant).
         - **Idempotency: none.** A retry after a timeout costs another $0.05 **and** writes
-          a second audit entry.
-        - **Defect R-2:** the success-path audit write is not wrapped in a catch, so a chain
-          failure returns 500 after settlement. The caller pays and receives nothing.
+          a second audit entry. Use the free `GET /v1/consent/status` as a pre-flight.
         - **Cost per call:** permanently locks 58,900-59,300 microALGO of the application
           account's minimum balance, plus 18,900 microALGO on a patient's first-ever entry.
-      x-medrail-status: UNVALIDATED
-      x-medrail-requirements: [FR-010, FR-011, FR-012, FR-039, SEC-006, SEC-007, SEC-008, REL-002, DATA-004]
+      x-medrail-status: VALIDATED
+      x-medrail-requirements: [FR-010, FR-011, FR-012, FR-039, SEC-006, SEC-007, SEC-008, SEC-010, SEC-013, REL-002, DATA-004]
       x-medrail-evidence: |-
-        No test exercises this handler. api/test/x402-flow.spec.ts asserts only the 402
-        shape (accepts[0].amount == "50000"). total_audit_entries == 0 on App 768743428 and
-        no audit box exists, so the success path has NEVER completed against the live
-        contract (evidence gap E-1).
-      x-medrail-defects: [S-1, R-1, R-2, R-3]
+        Payer binding: 6 unit tests in api/test/x402Payer.spec.ts, plus a live TestNet run
+        by api/scripts/verify-g01-fix.ts which pays with one key while asserting another
+        address and confirms the 403, alongside a control call proving the legitimate path
+        returns 200. Success path: total_audit_entries == 5 on App 768743428 with five
+        audit_log boxes and one audit_seq box, produced by api/scripts/e2e-consent-proof.ts;
+        five 50000-base-unit x402 settlements are on the ledger. api/test/x402-flow.spec.ts
+        additionally asserts the 402 shape (accepts[0].amount == "50000").
+      x-medrail-defects: []
       x-medrail-price:
         usd: "0.05"
         baseUnits: "50000"
@@ -316,9 +369,18 @@ paths:
         decimals: 6
       x-medrail-sideEffects: |-
         Submits a real Algorand transaction (log_access, admin-signed) on BOTH the allowed
-        and denied paths. Permanently increases the application account's minimum balance.
+        and denied paths, but never on the payer-mismatch path, which returns before any
+        chain call. Permanently increases the application account's minimum balance.
       x-medrail-idempotent: false
-      x-medrail-rateLimited: false
+      x-medrail-rateLimited:
+        limit: 30
+        windowSeconds: 60
+        scope: client-ip
+        reason: |-
+          A denial is a 403, which cancels settlement — free to the caller, but it costs
+          MedRail one Algorand fee for the denial audit write. Unbounded that drains the
+          operator account, and an empty operator account stops log_access working for
+          everyone.
       security: []
       parameters:
         - $ref: '#/components/parameters/PaymentSignature'
@@ -332,7 +394,7 @@ paths:
               liveAddresses:
                 summary: The two accounts that appear in App 768743428's own grant history
                 description: |-
-                  Both live grant boxes currently hold status 2 (REVOKED), so this triple
+                  The grant box for this exact triple holds status 2 (REVOKED), so it
                   returns 403 today.
                 value:
                   patientId: S56WIB3XLUOXSUGAI6MDJ3GN3RV2NSE7RVV7DGNZJKDCJR4OJLLA6H7HEE
@@ -345,9 +407,13 @@ paths:
         '402':
           $ref: '#/components/responses/PaymentRequired'
         '403':
-          $ref: '#/components/responses/PaidButDenied'
+          $ref: '#/components/responses/RecordsForbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
         '500':
-          $ref: '#/components/responses/InternalErrorAfterSettlement'
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/FacilitatorUnavailable'
 
   /v1/consent/status:
     get:
@@ -377,32 +443,40 @@ paths:
           simulated call needs a sender and a signer, so `OPERATOR_MNEMONIC` must be set
           (`api/src/services/algorand.ts:83-84`). Without it the endpoint returns 500.
 
-        Two sequential algod round trips per request, with **no rate limit, no timeout, and
-        no retry** — usable both to exhaust this service and to amplify traffic at AlgoNode
-        (requirements SEC-013 and REL-003, both NOT IMPLEMENTED).
+        Two sequential algod round trips per request, with **no timeout and no retry**
+        (requirement REL-003, NOT IMPLEMENTED). Because that amplifies traffic at public
+        AlgoNode infrastructure at zero cost to the caller, the route is rate-limited to
+        **60 requests per minute per client IP** (requirement SEC-013, IMPLEMENTED).
       x-medrail-status: UNVALIDATED
       x-medrail-requirements: [FR-013, SEC-009, SEC-010, SEC-013, DATA-003, REL-003, PERF-002]
       x-medrail-evidence: |-
         No automated test. Manually exercised by the reviewer: HTTP 200 in 505 ms, a single
         cold observation on a developer laptop. Not a p50, not an SLO; no latency budget
         exists.
-      x-medrail-defects: [R-3]
+      x-medrail-defects: []
       x-medrail-sideEffects: none
       x-medrail-idempotent: true
-      x-medrail-rateLimited: false
+      x-medrail-rateLimited:
+        limit: 60
+        windowSeconds: 60
+        scope: client-ip
+        reason: |-
+          Free and unauthenticated, and each call makes two sequential algod requests — so
+          unbounded it both exhausts this service and amplifies traffic at public AlgoNode
+          infrastructure at zero cost to the caller.
       security: []
       parameters:
         - name: patient
           in: query
           required: true
-          description: The patient's Algorand address. Exactly 58 characters; checksum NOT validated.
+          description: The patient's Algorand address. 58 characters and a valid checksum; a bad checksum is a 400.
           schema:
             $ref: '#/components/schemas/AlgorandAddress'
           example: S56WIB3XLUOXSUGAI6MDJ3GN3RV2NSE7RVV7DGNZJKDCJR4OJLLA6H7HEE
         - name: requester
           in: query
           required: true
-          description: The requester's Algorand address. Exactly 58 characters; checksum NOT validated.
+          description: The requester's Algorand address. 58 characters and a valid checksum; a bad checksum is a 400.
           schema:
             $ref: '#/components/schemas/AlgorandAddress'
           example: CVYBERM3GTWGASZ7VUJLCBTVQA7AOPPTUW2Q3EISGR3XCRIKLM6SBIGUUA
@@ -441,13 +515,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ValidationErrorBody'
-              example:
-                error: 'invalid query — expected ?patient=&requester=&scope='
-                details:
-                  formErrors: []
-                  fieldErrors:
-                    patient: ['String must contain exactly 58 character(s)']
-                    scope: ['String must contain at least 1 character(s)']
+              examples:
+                lengthFailure:
+                  summary: Wrong length, or a missing parameter
+                  value:
+                    error: 'invalid query — expected ?patient=&requester=&scope='
+                    details:
+                      formErrors: []
+                      fieldErrors:
+                        patient: ['must be a 58-character Algorand address']
+                        scope: ['String must contain at least 1 character(s)']
+                checksumFailure:
+                  summary: 58 characters, but not a valid address
+                  value:
+                    error: 'invalid query — expected ?patient=&requester=&scope='
+                    details:
+                      formErrors: []
+                      fieldErrors:
+                        patient: ['not a valid Algorand address (checksum failed)']
+        '429':
+          $ref: '#/components/responses/RateLimited'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -468,7 +555,7 @@ paths:
         `arc56SpecUrl` is a **relative** path; resolve it against the API base URL.
       x-medrail-status: UNVALIDATED
       x-medrail-requirements: [FR-014, NFR-012]
-      x-medrail-evidence: No automated test. Verified by reading api/src/routes/consent.ts:33-40.
+      x-medrail-evidence: No automated test. Verified by reading api/src/routes/consent.ts:34-41.
       x-medrail-sideEffects: none
       x-medrail-idempotent: true
       x-medrail-rateLimited: false
@@ -492,7 +579,7 @@ paths:
                     consentAppId: 768743428
                     arc56SpecUrl: /v1/consent/arc56
                 undeployed:
-                  summary: No CONSENT_APP_ID configured — the container default (defect D-1)
+                  summary: No CONSENT_APP_ID configured — api/fly.toml now sets it explicitly
                   value:
                     network: testnet
                     networkCaip2: 'algorand:SGO1GKSzyE7IEPItTxCByw9x8FmnrCDexi9/cOUJOiI='
@@ -514,15 +601,21 @@ paths:
         `sourceInfo`.
 
         **Implementation note:** the file is `existsSync`-ed, `readFileSync`-read and
-        `JSON.parse`-d on **every request** (`api/src/app.ts:63-68`) — a synchronous ~54 KB
-        disk read and parse in the event loop, on a free, unauthenticated, unrate-limited
-        route. Reading it once at module load would be strictly better. RECOMMENDED.
+        `JSON.parse`-d on **every request** (`api/src/app.ts:141-147`) — a synchronous
+        ~54 KB disk read and parse in the event loop, on a free, unauthenticated route.
+        Reading it once at module load would be strictly better. RECOMMENDED. The route is
+        rate-limited to 30 requests per minute per client IP, which bounds the cost without
+        removing it.
       x-medrail-status: UNVALIDATED
-      x-medrail-requirements: [FR-015]
-      x-medrail-evidence: No automated test. Verified by reading api/src/app.ts:63-69.
+      x-medrail-requirements: [FR-015, SEC-013]
+      x-medrail-evidence: No automated test. Verified by reading api/src/app.ts:141-148.
       x-medrail-sideEffects: none
       x-medrail-idempotent: true
-      x-medrail-rateLimited: false
+      x-medrail-rateLimited:
+        limit: 30
+        windowSeconds: 60
+        scope: client-ip
+        reason: Free, and it reads and parses a ~54 KB file from disk on every request.
       security: []
       responses:
         '200':
@@ -549,6 +642,8 @@ paths:
                       type: integer
                     examples:
                       - [22, 28]
+        '429':
+          $ref: '#/components/responses/RateLimited'
         '404':
           description: |-
             The compiled artifact is not present on disk at
@@ -567,13 +662,14 @@ paths:
       tags: [service]
       summary: Liveness probe (free)
       description: |-
-        **`ok` is always literally `true`.** This is a liveness signal, not a dependency
+        **`ok` is always literally `true`.** This is a liveness signal, not a readiness
         check: it does not probe algod, the facilitator, or the contract. A green
-        `/v1/health` is fully compatible with all three priced endpoints returning 500
-        (defect R-1).
+        `/v1/health` is fully compatible with all three priced endpoints returning
+        503 `PAYMENT_FACILITATOR_UNAVAILABLE`.
 
-        Requirement OPS-001 notes that the endpoint exists but is **not wired to any
-        healthcheck** in `api/Dockerfile` or `api/fly.toml` (defect D-6).
+        `api/fly.toml` wires it as the platform health check on exactly that understanding
+        — a 30-second interval with a 10-second grace period. That closes defect D-6 for
+        liveness; readiness remains unaddressed (requirement OPS-001).
       x-medrail-status: VALIDATED
       x-medrail-requirements: [FR-016, OPS-001, REL-005]
       x-medrail-evidence: |-
@@ -607,17 +703,24 @@ paths:
       tags: [service]
       summary: Machine-readable service index (free)
       description: |-
-        **Known accuracy problems in the index itself** (`api/src/app.ts:75-82`):
+        An integrator's first fetch. Returns **all 8 mounted routes** with method, path,
+        price and gate, plus a `contract` block (App ID, network, CAIP-2 chain id, ARC-56
+        spec URL) and an `x402` block (version, scheme, facilitator).
 
-        - It lists **5 of the 8 routes**. `GET /v1/consent/app-info`,
-          `GET /v1/consent/arc56` and `GET /` are omitted — so a client that discovers
-          MedRail here cannot find the ARC-56 spec that `arc56SpecUrl` points at.
-        - `docs` is a repo-relative hint (`"see repo docs/API.md"`), not a resolvable URL.
+        `contract` + `arc56SpecUrl` are precisely the pair needed to build an ABI client
+        against App 768743428 without cloning this repository. An earlier revision listed
+        only 5 routes and omitted both `app-info` and `arc56`, so a client discovering
+        MedRail here could not reach the spec the index pointed at.
+        `api/test/app.spec.ts` now asserts that the advertised set equals the mounted set,
+        so the list cannot drift again.
 
-        Both are one-line fixes. RECOMMENDED.
-      x-medrail-status: UNVALIDATED
+        **Remaining nit:** `docs` is a repo-relative hint (`"see repo docs/API.md"`), not a
+        resolvable URL. RECOMMENDED, unfixed.
+      x-medrail-status: VALIDATED
       x-medrail-requirements: [FR-017]
-      x-medrail-evidence: No automated test. Verified by reading api/src/app.ts:71-84.
+      x-medrail-evidence: |-
+        api/test/app.spec.ts (7 cases) asserts that the advertised endpoint list equals the
+        set of mounted routes, and checks the contract and x402 blocks.
       x-medrail-sideEffects: none
       x-medrail-idempotent: true
       x-medrail-rateLimited: false
@@ -636,11 +739,23 @@ paths:
                 service: MedRail
                 description: Patient-consented health data layer under x402-paid AI intelligence endpoints, on Algorand.
                 endpoints:
-                  - POST /v1/triage
-                  - POST /v1/interaction-check
-                  - POST /v1/records/summary
-                  - GET /v1/consent/status
-                  - GET /v1/health
+                  - { method: POST, path: /v1/triage,            price: '$0.02', gate: x402 }
+                  - { method: POST, path: /v1/interaction-check, price: '$0.02', gate: x402 }
+                  - { method: POST, path: /v1/records/summary,   price: '$0.05', gate: 'x402 + on-chain consent' }
+                  - { method: GET,  path: /v1/consent/status,    price: free,    gate: none }
+                  - { method: GET,  path: /v1/consent/app-info,  price: free,    gate: none }
+                  - { method: GET,  path: /v1/consent/arc56,     price: free,    gate: none }
+                  - { method: GET,  path: /v1/health,            price: free,    gate: none }
+                  - { method: GET,  path: /,                     price: free,    gate: none }
+                contract:
+                  appId: 768743428
+                  network: testnet
+                  networkCaip2: 'algorand:SGO1GKSzyE7IEPItTxCByw9x8FmnrCDexi9/cOUJOiI='
+                  arc56SpecUrl: /v1/consent/arc56
+                x402:
+                  version: 2
+                  scheme: exact
+                  facilitator: https://facilitator.goplausible.xyz
                 docs: see repo docs/API.md
 
 components:
@@ -656,10 +771,16 @@ components:
         `PaymentPayload` containing a signed Algorand transaction group, produced by an
         x402 v2 client such as `@x402/fetch` with `@x402/avm`'s `ExactAvmScheme`.
 
-        It proves that **a payment settled**. It does **not** identify the caller to the
-        route handler, and MedRail's handlers never decode it — which is precisely defect
-        S-1. Every operation in this document therefore declares `security: []`: there is no
-        authentication anywhere in this API.
+        The middleware's own check proves that **a payment settled**; on its own it does not
+        tell a route handler whose payment it was. `POST /v1/records/summary` therefore
+        decodes the same header a second time (`api/src/x402Payer.ts`) to recover the
+        address that signed `paymentGroup[paymentIndex]`, and refuses the request unless it
+        equals the asserted `requesterAddress` — which is what makes the payment an
+        authentication factor on that route.
+
+        Every operation still declares `security: []`, because there is no *credential
+        scheme* here in OpenAPI's sense: no API key, no token, no session. The credential is
+        the signed payment itself.
 
   parameters:
     PaymentSignature:
@@ -684,7 +805,8 @@ components:
         Shape: `{x402Version, error, resource: {url, description, mimeType}, accepts: [...]}`.
         `accepts[].asset` and `accepts[].extra.feePayer` are supplied by the facilitator's
         `/supported` endpoint, not by MedRail configuration — which is why the challenge
-        cannot be constructed while the facilitator is unreachable (defect R-1).
+        cannot be constructed while the facilitator is unreachable, and why that condition
+        returns 503 rather than 402.
       required: true
       schema:
         type: string
@@ -693,8 +815,10 @@ components:
       example: eyJ4NDAyVmVyc2lvbiI6MiwiZXJyb3IiOiJQYXltZW50IHJlcXVpcmVkIiwicmVzb3VyY2UiOnsidXJsIjoiaHR0cDovL2xvY2FsaG9zdC92MS90cmlhZ2UifX0=
     PaymentResponse:
       description: |-
-        **Base64-encoded JSON.** The facilitator's settlement result, present on a successful
-        paid response. Decoded shape:
+        **Base64-encoded JSON.** The facilitator's settlement result. Present **only on a
+        response with status below 400** — settlement runs after the handler and is
+        cancelled on any throw or any 4xx/5xx, so no error response ever carries one.
+        Decoded shape:
         `{success: boolean, transaction: string, network: string, payer?: string, amount?: string, errorReason?: string, errorMessage?: string}`.
 
         `transaction` is the settled Algorand transaction id — for example
@@ -712,19 +836,46 @@ components:
         type: string
         const: no-store
     AccessControlAllowOrigin:
-      description: Always `*` — CORS is fully open by design (`api/src/app.ts:23`, requirement NFR-006).
+      description: Always `*` — CORS is fully open by design (`api/src/app.ts:25`, requirement NFR-006).
       required: false
       schema:
         type: string
         const: '*'
     AccessControlExposeHeaders:
       description: |-
-        Always `PAYMENT-REQUIRED,PAYMENT-RESPONSE` (`api/src/app.ts:31`), so browser
+        Always `PAYMENT-REQUIRED,PAYMENT-RESPONSE` (`api/src/app.ts:33`), so browser
         JavaScript can read the two x402 headers.
       required: false
       schema:
         type: string
         const: PAYMENT-REQUIRED,PAYMENT-RESPONSE
+    RetryAfter:
+      description: |-
+        Seconds to wait before retrying. Emitted on **429** (the remainder of the current
+        rate-limit window, `api/src/rateLimit.ts:65`) and on **503** (a fixed 30,
+        `api/src/app.ts:91`).
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+      example: 30
+    RateLimitLimit:
+      description: |-
+        The request budget for this route's window. Emitted on every response from a
+        rate-limited route, not only on a refusal.
+      required: false
+      schema:
+        type: integer
+      example: 60
+    RateLimitRemaining:
+      description: |-
+        Requests left in the current window. `0` on a 429. Emitted on every response from a
+        rate-limited route, so a well-behaved client can back off before being refused.
+      required: false
+      schema:
+        type: integer
+        minimum: 0
+      example: 42
 
   schemas:
 
@@ -735,13 +886,14 @@ components:
       description: |-
         A base32 Algorand address.
 
-        **Validation is length only** — the zod schema is `z.string().length(58)`. The
-        checksum is NOT validated (requirement SEC-010, NOT IMPLEMENTED). A 58-character
-        string that is not a valid address reaches `algosdk.decodeAddress` and throws,
-        producing **HTTP 500** with the internal message echoed to the caller (defect R-3).
-        The `pattern` below documents the true character set; the implementation does not
-        enforce it.
-      pattern: '^[A-Z2-7]{58}$'
+        **Validated for length AND checksum.** The zod schema is `algorandAddress`
+        (`api/src/validation.ts`): `.length(58)` followed by
+        `.refine(algosdk.isValidAddress)`. A 58-character string that is not a valid
+        address is rejected as **HTTP 400** with the field error
+        `"not a valid Algorand address (checksum failed)"`, before it can reach
+        `algosdk.decodeAddress` (requirement SEC-010, IMPLEMENTED). The `pattern` below
+        documents the character set; the checksum constraint cannot be expressed in JSON
+        Schema and is enforced in code.
       examples:
         - S56WIB3XLUOXSUGAI6MDJ3GN3RV2NSE7RVV7DGNZJKDCJR4OJLLA6H7HEE
         - CVYBERM3GTWGASZ7VUJLCBTVQA7AOPPTUW2Q3EISGR3XCRIKLM6SBIGUUA
@@ -889,10 +1041,12 @@ components:
           allOf:
             - $ref: '#/components/schemas/AlgorandAddress'
           description: |-
-            **Caller-asserted and never authenticated — defect S-1 (CRITICAL).** Nothing
-            binds this to the identity that paid. It is written verbatim into the immutable
-            on-chain audit log, so a successful impersonation creates a permanent false
-            attribution (requirements SEC-007 and SEC-008, both NOT IMPLEMENTED).
+            **Must equal the address that signed the payment.** `api/src/x402Payer.ts`
+            recovers the payer from the verified `PAYMENT-SIGNATURE` header and the handler
+            returns 403 unless the two match, before any chain call. Only then is the value
+            written into the immutable on-chain audit log, so what lands there is an
+            identity someone paid to assert with their own key (requirements SEC-007 and
+            SEC-008, both IMPLEMENTED).
 
     RecordsSummaryResponse:
       type: object
@@ -902,6 +1056,7 @@ components:
         - scope
         - summary
         - consentVerifiedOnChain
+        - auditStatus
         - auditTxId
         - auditSequence
         - disclaimer
@@ -909,11 +1064,14 @@ components:
         patientId:
           $ref: '#/components/schemas/AlgorandAddress'
         requesterAddress:
-          $ref: '#/components/schemas/AlgorandAddress'
+          allOf:
+            - $ref: '#/components/schemas/AlgorandAddress'
+          description: |-
+            On this path the value is provably the address that signed the payment.
         scope:
           type: string
           const: 'records:summary'
-          description: Hard-coded at `api/src/routes/records.ts:10`. The client cannot choose a scope.
+          description: Hard-coded at `api/src/routes/records.ts:12`. The client cannot choose a scope.
         summary:
           $ref: '#/components/schemas/SyntheticRecord'
         consentVerifiedOnChain:
@@ -922,29 +1080,52 @@ components:
           description: |-
             Hard-coded `true` on this branch — a statement that the code reached it, not an
             independently checkable proof.
+        auditStatus:
+          $ref: '#/components/schemas/AuditStatus'
         auditTxId:
-          type: string
+          type: [string, 'null']
           minLength: 52
           maxLength: 52
           description: |-
             Algorand transaction id of the `log_access` write, verifiable at
             `https://lora.algokit.io/testnet/transaction/{auditTxId}`.
-            **Never yet produced by a real run** (evidence gap E-1).
+            **`null` when `auditStatus` is `"pending"`.**
         auditSequence:
-          type: string
+          type: [string, 'null']
           pattern: '^[0-9]+$'
           description: |-
             **A decimal STRING, not a JSON number.** The contract returns a uint64, which is
             a `bigint` in Node and outside JSON's safe-integer range, so it is
-            `.toString()`-ed at `api/src/routes/records.ts:58`. Parse it as an integer.
-            **Never yet produced by a real run** (evidence gap E-1).
+            `.toString()`-ed at `api/src/routes/records.ts:109`. Parse it as an integer.
+            **`null` when `auditStatus` is `"pending"`.**
         disclaimer:
           type: string
+
+    AuditStatus:
+      type: string
+      enum: [recorded, pending]
+      description: |-
+        Whether this call's audit entry reached the chain
+        (`api/src/routes/records.ts:82`).
+
+        - `recorded` — the `log_access` transaction confirmed. `auditTxId` and
+          `auditSequence` are populated.
+        - `pending` — the audit write threw and was caught. The consent decision was
+          still valid and the record is still returned; `auditTxId` and `auditSequence`
+          are `null`.
+
+        `pending` is a deliberate degradation, not an error. Returning a 5xx here would
+        cancel settlement and discard a response the caller was entitled to, while the
+        caller's money was never at risk either way. The failure is logged server-side as
+        a structured `audit_write_failed` event, but **there is no queue and no automatic
+        replay** — a `pending` access is permanently absent from the patient's on-chain
+        trail unless an operator replays it. Clients that depend on the audit trail must
+        branch on this field.
 
     SyntheticRecord:
       type: object
       description: |-
-        **A single hard-coded constant** (`api/src/routes/records.ts:15-21`) returned for
+        **A single hard-coded constant** (`api/src/routes/records.ts:17-23`) returned for
         every `patientId`. There is no patient datastore anywhere in the system
         (requirement DATA-004).
       required: [bloodType, allergies, chronicConditions, currentMedications, lastUpdated]
@@ -975,9 +1156,12 @@ components:
           const: '2026-01-15'
           description: A constant string, not a date type. It is never recomputed.
 
-    PaidButDeniedBody:
+    ConsentDeniedBody:
       type: object
-      required: [error, patientId, requesterAddress, paidButDenied]
+      required: [error, patientId, requesterAddress, charged, hint]
+      description: |-
+        The consent-denied 403 (`api/src/routes/records.ts:59-70`). Reached only once the
+        payer has been proved to be the asserted requester.
       properties:
         error:
           type: string
@@ -986,13 +1170,89 @@ components:
           $ref: '#/components/schemas/AlgorandAddress'
         requesterAddress:
           $ref: '#/components/schemas/AlgorandAddress'
-        paidButDenied:
+        charged:
           type: boolean
-          const: true
+          const: false
           description: |-
-            An explicit signal that the payment settled and no record was returned. The fee
-            covers the on-chain verification regardless of outcome, the way a paid lookup
-            API charges for a miss (`api/src/routes/records.ts:34-36`).
+            **The caller was not billed.** A 403 is >= 400, so `@x402/hono` cancels the
+            payment instead of settling it. This is structural, not a refund.
+
+            The residual cost is MedRail's: the denied path still submits a
+            `log_access(..., "consent_denied")` transaction whose fee the operator account
+            pays. That is why this route is rate-limited to 30 requests per minute.
+        hint:
+          type: string
+          const: 'GET /v1/consent/status?patient=&requester=&scope=records:summary is free'
+          description: |-
+            Points at the free pre-flight check that avoids paying for a denial entirely.
+
+    PayerMismatchBody:
+      type: object
+      required: [error, requesterAddress, payer]
+      description: |-
+        The payer-binding 403 (`api/src/routes/records.ts:43-50`). Emitted **before** any
+        chain call, so it costs nothing on either side.
+
+        Discriminate the two 403 bodies on the presence of `payer` (this one) versus
+        `charged` (`ConsentDeniedBody`).
+      properties:
+        error:
+          type: string
+          const: requesterAddress must match the address that signed the payment
+        requesterAddress:
+          allOf:
+            - $ref: '#/components/schemas/AlgorandAddress'
+          description: The address the request body asserted.
+        payer:
+          type: [string, 'null']
+          minLength: 58
+          maxLength: 58
+          pattern: '^[A-Z2-7]{58}$'
+          description: |-
+            The address recovered from the verified `PAYMENT-SIGNATURE` header — the sender
+            of `paymentGroup[paymentIndex]`, the one leg of the atomic group the caller
+            signed. **`null` when the header is absent or unparseable**, which the handler
+            treats as unauthenticated rather than trusted.
+
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      description: |-
+        The machine-readable envelope used by cross-cutting middleware errors. Distinct
+        from the flat `{error: string}` shape that per-route validation and consent errors
+        use — test `typeof body.error === "object"` before reading `body.error.code`.
+      properties:
+        error:
+          type: object
+          required: [code, message, retryable]
+          properties:
+            code:
+              type: string
+              enum: [RATE_LIMITED, PAYMENT_FACILITATOR_UNAVAILABLE, INTERNAL_ERROR]
+              description: Stable machine-readable condition identifier. Branch on this, not on prose.
+            message:
+              type: string
+              description: |-
+                Human-readable explanation. On `INTERNAL_ERROR` this is a **fixed generic
+                string** — the underlying exception text is logged server-side and never
+                returned.
+            retryable:
+              type: boolean
+              description: Whether retrying can succeed. Pair with `Retry-After` where present.
+            requestId:
+              type: string
+              format: uuid
+              description: |-
+                Present on `INTERNAL_ERROR` only. Correlates the response with the
+                server-side log line (`api/src/app.ts:117`). Quote it when reporting a fault
+                — it is the only handle a caller has on an internal error.
+            facilitator:
+              type: string
+              format: uri
+              description: |-
+                Present on `PAYMENT_FACILITATOR_UNAVAILABLE` only. The facilitator URL that
+                could not be reached, so a caller can distinguish "MedRail is broken" from
+                "MedRail's payment facilitator is down".
 
     ConsentStatusResponse:
       type: object
@@ -1058,7 +1318,7 @@ components:
 
     ServiceIndexResponse:
       type: object
-      required: [service, description, endpoints, docs]
+      required: [service, description, endpoints, contract, x402, docs]
       properties:
         service:
           type: string
@@ -1067,14 +1327,90 @@ components:
           type: string
         endpoints:
           type: array
+          minItems: 8
+          maxItems: 8
           description: |-
-            **Incomplete: 5 of the 8 routes.** `GET /v1/consent/app-info`,
-            `GET /v1/consent/arc56` and `GET /` are omitted (`api/src/app.ts:75-81`).
+            **All 8 mounted routes** (`api/src/app.ts:158-167`), as objects rather than
+            strings. `api/test/app.spec.ts` asserts that this list equals the mounted route
+            set, so it cannot drift out of sync without failing a build.
           items:
-            type: string
+            $ref: '#/components/schemas/ServiceIndexEndpoint'
+        contract:
+          $ref: '#/components/schemas/ServiceIndexContract'
+        x402:
+          $ref: '#/components/schemas/ServiceIndexX402'
         docs:
           type: string
-          description: A repo-relative hint, not a resolvable URL.
+          description: A repo-relative hint, not a resolvable URL. RECOMMENDED, unfixed.
+
+    ServiceIndexEndpoint:
+      type: object
+      required: [method, path, price, gate]
+      properties:
+        method:
+          type: string
+          enum: [GET, POST]
+        path:
+          type: string
+          examples: ['/v1/records/summary']
+        price:
+          type: string
+          description: |-
+            A **display string** — `"$0.02"`, `"$0.05"`, or `"free"`. The authoritative
+            microUSDC amount is `accepts[].amount` in the 402 challenge.
+          examples: ['$0.05', free]
+        gate:
+          type: string
+          enum: [x402, 'x402 + on-chain consent', none]
+          description: |-
+            What stands between a caller and the response. Only `/v1/records/summary`
+            carries the consent gate, and that gate also enforces payer binding.
+
+    ServiceIndexContract:
+      type: object
+      description: |-
+        Everything needed to build an ABI client against the deployed consent contract
+        without cloning this repository. Paired with `arc56SpecUrl`, this is a complete
+        integration entry point.
+      required: [appId, network, networkCaip2, arc56SpecUrl]
+      properties:
+        appId:
+          type: [integer, 'null']
+          description: |-
+            The deployed `MedRailConsent` App ID, or `null` when `CONSENT_APP_ID` is unset
+            (`config.consentAppId || null`, so 0 surfaces as null). Live value 768743428.
+          examples: [768743428]
+        network:
+          $ref: '#/components/schemas/NetworkName'
+        networkCaip2:
+          type: string
+          description: |-
+            CAIP-2 chain id — the same value the 402 challenge advertises as
+            `accepts[].network`.
+          examples: ['algorand:SGO1GKSzyE7IEPItTxCByw9x8FmnrCDexi9/cOUJOiI=']
+        arc56SpecUrl:
+          type: string
+          const: /v1/consent/arc56
+          description: |-
+            Relative path to the ARC-56 specification. Resolve it against the API base. It
+            is now reachable from the index that advertises it — an earlier revision listed
+            neither this route nor `app-info`.
+
+    ServiceIndexX402:
+      type: object
+      description: Protocol parameters a paying client needs before its first 402.
+      required: [version, scheme, facilitator]
+      properties:
+        version:
+          type: integer
+          const: 2
+        scheme:
+          type: string
+          const: exact
+        facilitator:
+          type: string
+          format: uri
+          examples: ['https://facilitator.goplausible.xyz']
 
     NetworkName:
       type: string
@@ -1090,16 +1426,21 @@ components:
       required: [error]
       additionalProperties: true
       description: |-
-        The universal error envelope. **There is no machine-readable error code anywhere in
-        this API** — clients must match on prose, which is brittle. A stable `code` field is
-        RECOMMENDED; see `./API_Error_Catalog.md`.
+        The **flat** error shape, used by per-route validation and consent handlers. It
+        carries no machine-readable code; discriminate on the HTTP status plus the sibling
+        fields a route documents (`payer`, `charged`).
+
+        Cross-cutting middleware errors use `ErrorEnvelope` instead — a nested
+        `{error: {code, message, retryable, ...}}` with a stable `code`. Test
+        `typeof body.error === "object"` before reading `body.error.code`.
       properties:
         error:
           type: string
           description: |-
-            A human-readable message. On a 500 this is `err.message` echoed verbatim from
-            the caught exception (`api/src/app.ts:60`), which leaks internal detail to
-            unauthenticated callers (requirement SEC-011, NOT IMPLEMENTED; defect R-3).
+            A human-readable message chosen by the handler. Internal exception text is never
+            surfaced this way: unhandled faults go through `app.onError`, which returns the
+            `ErrorEnvelope` with a fixed generic message and a `requestId`
+            (requirement SEC-011, IMPLEMENTED).
 
     ValidationErrorBody:
       allOf:
@@ -1215,11 +1556,15 @@ components:
 
     RecordsSummaryOk:
       description: |-
-        Consent verified on chain, audit entry written, record summary returned.
+        Payer bound, consent verified on chain, record summary returned.
 
-        **UNVALIDATED — no response of this shape has ever been produced.**
-        `total_audit_entries` on App 768743428 is 0, so `auditTxId` and `auditSequence` have
-        never carried real values (evidence gap E-1).
+        **VALIDATED** — `total_audit_entries` on App 768743428 is 5, with five `audit_log`
+        boxes and one `audit_seq` box, produced by `api/scripts/e2e-consent-proof.ts`. Five
+        matching 50000-base-unit x402 settlements are on the ledger.
+
+        The `auditStatus` field distinguishes the two shapes of this response: `recorded`
+        (the audit entry reached the chain) and `pending` (it did not; `auditTxId` and
+        `auditSequence` are `null` and the record is returned anyway).
       headers:
         PAYMENT-RESPONSE:
           $ref: '#/components/headers/PaymentResponse'
@@ -1242,33 +1587,56 @@ components:
               currentMedications: ['metformin 500mg', 'lisinopril 10mg']
               lastUpdated: '2026-01-15'
             consentVerifiedOnChain: true
+            auditStatus: recorded
             auditTxId: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
-            auditSequence: '1'
+            auditSequence: '5'
             disclaimer: Synthetic demo data for the Global x402 Challenge — no real patient information exists in this system.
 
-    PaidButDenied:
+    RecordsForbidden:
       description: |-
-        **The payment settled and no record was returned.** No valid consent grant exists
-        from `patientId` to `requesterAddress` for scope `records:summary`.
+        **Two distinct conditions share this status.** Discriminate on which field is
+        present: `payer` (the payment was signed by a different account than the one
+        asserted) or `charged` (the payer is the requester, but no consent grant exists).
 
-        A `consent_denied` audit entry is attempted before responding, and **its failure is
-        deliberately swallowed** (`api/src/routes/records.ts:37`) so the caller still gets a
-        coherent 403. Note the asymmetry: the equivalent write on the success path is not
-        protected (defect R-2).
+        **Neither charges the caller.** A 403 is >= 400, so `@x402/hono` cancels the payment
+        instead of settling it — there is no `PAYMENT-RESPONSE` header on either.
+
+        - **Payer mismatch** is emitted before any chain call, so it costs nothing on either
+          side.
+        - **Consent denied** attempts a `consent_denied` audit entry first, and **its failure
+          is deliberately swallowed** (`api/src/routes/records.ts:58`) so the caller still
+          gets a coherent 403. MedRail pays that transaction fee, which is why this route is
+          rate-limited.
       headers:
-        PAYMENT-RESPONSE:
-          $ref: '#/components/headers/PaymentResponse'
         Access-Control-Allow-Origin:
           $ref: '#/components/headers/AccessControlAllowOrigin'
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/PaidButDeniedBody'
-          example:
-            error: no valid consent grant from this patient for this requester and scope
-            patientId: S56WIB3XLUOXSUGAI6MDJ3GN3RV2NSE7RVV7DGNZJKDCJR4OJLLA6H7HEE
-            requesterAddress: CVYBERM3GTWGASZ7VUJLCBTVQA7AOPPTUW2Q3EISGR3XCRIKLM6SBIGUUA
-            paidButDenied: true
+            oneOf:
+              - $ref: '#/components/schemas/PayerMismatchBody'
+              - $ref: '#/components/schemas/ConsentDeniedBody'
+          examples:
+            payerMismatch:
+              summary: The payment was signed by a different account than the one asserted
+              value:
+                error: requesterAddress must match the address that signed the payment
+                requesterAddress: CVYBERM3GTWGASZ7VUJLCBTVQA7AOPPTUW2Q3EISGR3XCRIKLM6SBIGUUA
+                payer: S56WIB3XLUOXSUGAI6MDJ3GN3RV2NSE7RVV7DGNZJKDCJR4OJLLA6H7HEE
+            noPaymentSignature:
+              summary: The PAYMENT-SIGNATURE header was absent or unparseable
+              value:
+                error: requesterAddress must match the address that signed the payment
+                requesterAddress: CVYBERM3GTWGASZ7VUJLCBTVQA7AOPPTUW2Q3EISGR3XCRIKLM6SBIGUUA
+                payer: null
+            consentDenied:
+              summary: Payer is the requester, but no active grant exists for this triple
+              value:
+                error: no valid consent grant from this patient for this requester and scope
+                patientId: S56WIB3XLUOXSUGAI6MDJ3GN3RV2NSE7RVV7DGNZJKDCJR4OJLLA6H7HEE
+                requesterAddress: CVYBERM3GTWGASZ7VUJLCBTVQA7AOPPTUW2Q3EISGR3XCRIKLM6SBIGUUA
+                charged: false
+                hint: 'GET /v1/consent/status?patient=&requester=&scope=records:summary is free'
 
     PaymentRequired:
       description: |-
@@ -1280,6 +1648,8 @@ components:
         Also returned for a **malformed unpaid request**: the payment middleware runs before
         the route handler, so zod never sees an unpaid body. The repository's own test
         documents this (`api/test/x402-flow.spec.ts:48-59`).
+
+        A 402 is >= 400, so no settlement is attempted and the caller is not charged.
       headers:
         PAYMENT-REQUIRED:
           $ref: '#/components/headers/PaymentRequired'
@@ -1336,26 +1706,26 @@ components:
 
     InternalError:
       description: |-
-        An unhandled exception reached `app.onError` (`api/src/app.ts:58-61`), which logs it
-        with `console.error` and returns **`err.message` verbatim** to the caller
-        (requirement SEC-011, NOT IMPLEMENTED).
+        An unhandled exception reached `app.onError` (`api/src/app.ts:113-139`), which
+        generates a `requestId`, logs the method, path, message and stack server-side as one
+        structured JSON line, and returns a **fixed generic body**. The internal exception
+        text is never returned (requirement SEC-011, IMPLEMENTED).
 
-        Known causes, all reproduced or verified:
+        Known causes:
 
-        - **R-1** — the facilitator is unreachable, so the 402 cannot be built:
-          `"Failed to initialize: no supported payment kinds loaded from any facilitator."`
-          Note the client gets **no `PAYMENT-REQUIRED` header, no `Retry-After`, and not a
-          503** (requirement REL-001, NOT IMPLEMENTED).
-        - **R-3** — a 58-character string that is not a valid address:
-          `"wrong checksum for address"`, or `"Invalid base32 characters"` for a
-          58-character string outside the base32 alphabet. A client input error surfaced as
-          a server error.
-        - **D-1** — `CONSENT_APP_ID` is unset and `contracts/artifacts/deploy_testnet.json`
-          is absent, which is the default inside the container image:
-          `"CONSENT_APP_ID is not set and contracts/artifacts/deploy_testnet.json was not found. Deploy the contract first (see docs/DEPLOYMENT.md)."`
-        - `OPERATOR_MNEMONIC` unset: `"OPERATOR_MNEMONIC is not set — see docs/DEPLOYMENT.md"`.
+        - `CONSENT_APP_ID` unset and `contracts/artifacts/deploy_testnet.json` absent. This
+          used to be the container default; `api/fly.toml` now sets
+          `CONSENT_APP_ID = "768743428"` explicitly.
+        - `OPERATOR_MNEMONIC` unset — which also breaks the *free* `/v1/consent/status`,
+          since `simulate()` still needs a sender and a signer.
         - **R-4** — algod unreachable or slow. `new algosdk.Algodv2("", server, "")` has no
           timeout and no retry (requirement REL-003, NOT IMPLEMENTED).
+
+        Two conditions that used to land here no longer do: a facilitator outage is now a
+        **503** (`FacilitatorUnavailable`) and a malformed address is now a **400**
+        (`ValidationError`).
+
+        Settlement is cancelled on any 5xx, so **a 500 never charges the caller.**
 
         Full catalogue: `./API_Error_Catalog.md`.
       headers:
@@ -1364,50 +1734,84 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ErrorBody'
-          examples:
-            facilitatorDown:
-              summary: R-1 — facilitator unreachable
-              value:
-                error: 'Failed to initialize: no supported payment kinds loaded from any facilitator.'
-            badChecksum:
-              summary: R-3 — 58 characters, invalid checksum
-              value:
-                error: wrong checksum for address
-            appIdMissing:
-              summary: D-1 — no App ID configured, the container default
-              value:
-                error: 'CONSENT_APP_ID is not set and contracts/artifacts/deploy_testnet.json was not found. Deploy the contract first (see docs/DEPLOYMENT.md).'
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            error:
+              code: INTERNAL_ERROR
+              message: An internal error occurred. Quote the requestId when reporting this.
+              retryable: true
+              requestId: 3f2a1c88-6b0e-4d2f-9a71-0c5b8e4d6f10
 
-    InternalErrorAfterSettlement:
+    RateLimited:
       description: |-
-        Everything in the standard 500 response applies, **plus one case unique to this
-        route and unique in its consequences — defect R-2.**
+        The client exceeded this route's fixed window (`api/src/rateLimit.ts:60-78`).
 
-        On the allowed path the on-chain audit write is not wrapped in a catch
-        (`api/src/routes/records.ts:49`). If `logAccess` throws — operator account out of
-        ALGO, application account out of box-MBR headroom, algod 5xx, or the 4-round
-        validity window in `atc.execute(algod, 4)` expiring — the request falls through to
-        `app.onError` and returns **500 after the $0.05 has already settled**.
+        Limits: `GET /v1/consent/status` 60/min, `GET /v1/consent/arc56` 30/min,
+        `POST /v1/records/summary` 30/min — all keyed by client IP. The three priced happy
+        paths are deliberately **not** throttled, because settling USDC per call is a
+        stronger limit than a counter.
 
-        The caller has paid and receives nothing. There is **no refund path, no retry token,
-        and no idempotency**, so retrying costs another $0.05 (requirement REL-002,
-        NOT IMPLEMENTED).
+        `X-RateLimit-Limit` and `X-RateLimit-Remaining` are also emitted on *allowed*
+        responses, so a well-behaved client can back off before being refused.
+
+        **Honest limitation:** the store is in-memory, so limits are per-process rather than
+        global, and the client key is the first `X-Forwarded-For` hop, which a direct caller
+        can spoof. This is a courtesy guard against hammering and casual abuse, not a
+        security boundary (requirement SEC-013, IMPLEMENTED).
       headers:
-        PAYMENT-RESPONSE:
-          $ref: '#/components/headers/PaymentResponse'
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+        X-RateLimit-Limit:
+          $ref: '#/components/headers/RateLimitLimit'
+        X-RateLimit-Remaining:
+          $ref: '#/components/headers/RateLimitRemaining'
         Access-Control-Allow-Origin:
           $ref: '#/components/headers/AccessControlAllowOrigin'
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ErrorBody'
-          examples:
-            auditWriteFailed:
-              summary: R-2 — the money-losing path
-              value:
-                error: 'Transaction rejected: overspend'
-            facilitatorDown:
-              summary: R-1
-              value:
-                error: 'Failed to initialize: no supported payment kinds loaded from any facilitator.'
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            error:
+              code: RATE_LIMITED
+              message: Too many requests. Retry in 37s.
+              retryable: true
+
+    FacilitatorUnavailable:
+      description: |-
+        The x402 facilitator could not be reached, so a payment challenge cannot be issued
+        (`api/src/app.ts:78-104`).
+
+        This is unavoidable rather than a design choice: `accepts[].asset` and
+        `extra.feePayer` come from the facilitator's own `/supported`, not from MedRail
+        config, so the 402 cannot be constructed offline. **No `PAYMENT-REQUIRED` header is
+        emitted.** The guard matches exactly two initialisation-failure messages and
+        re-throws everything else, so it cannot mask an unrelated fault as an upstream
+        outage. The event is logged server-side as `facilitator_unavailable`.
+
+        **Blast radius is bounded and was verified:** `/v1/health`, `/`, and
+        `/v1/consent/app-info` all still return 200 with the facilitator down. Only the
+        three priced routes fail.
+
+        This condition previously returned an opaque **500** with the internal message as
+        the body and no `Retry-After`, which told a calling agent "this is broken" when the
+        truth was "try again shortly".
+
+        **What is not fixed:** there is still no timeout, retry, circuit breaker, or cached
+        `/supported` fallback (requirement REL-001, PARTIALLY IMPLEMENTED — graceful
+        degradation yes, resilience no).
+      headers:
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+        Access-Control-Allow-Origin:
+          $ref: '#/components/headers/AccessControlAllowOrigin'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            error:
+              code: PAYMENT_FACILITATOR_UNAVAILABLE
+              message: The payment facilitator is temporarily unreachable, so a payment challenge cannot be issued. Retry shortly.
+              retryable: true
+              facilitator: https://facilitator.goplausible.xyz

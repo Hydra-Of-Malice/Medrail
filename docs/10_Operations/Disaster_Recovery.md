@@ -4,8 +4,6 @@
 
 **Status of this document:** authored 2026-08-21 against commit `32ffd73`. **No disaster has occurred, no recovery has been performed, and no DR drill has ever been run.** Everything in §1, §2 and §6 was verified by reading source or by querying the public Algorand TestNet indexer. **RPO and RTO have never been established (OPS-008)** — §3 proposes targets and labels them **RECOMMENDED**; none of them exists today. §4 and §7 are recommendations, not procedures in use.
 
-> **⚠ Correction notice.** Where this document touches payment loss, denial billing, or audit-log corruption, read it through [`../CORRECTIONS.md`](../CORRECTIONS.md), which supersedes any contradicting statement in this documentation set. In short: settlement in x402 v2 happens **only** on a sub-400 response, so no error path can consume a settled payment; consent-denied calls are **not** charged; and the audit-sequence race yields a **rejected transaction**, not a corrupted log.
-
 ---
 
 ## 1. What durable state exists, and where
@@ -51,7 +49,7 @@ Verified against `https://testnet-idx.algonode.cloud` on 2026-08-21, not taken f
 | Boxes | **2**, both `g`-prefixed (grants), 100 total box bytes |
 | Global counters | `total_requests=2`, `total_grants_active=0`, `total_revocations=2`, **`total_audit_entries=0`** |
 
-**A necessary caveat on that last figure.** `total_audit_entries = 0`, and there are zero `s`- and zero `a`-prefixed boxes on the app: **`log_access` has never executed on Algorand TestNet** (evidence gap **E-1**). So the audit log whose durability this section credits is, today, empty. The durability property is real and structural; the data protected by it does not yet exist. Both halves of that sentence belong in any honest DR statement.
+**A necessary caveat on that last figure.** `total_audit_entries = 5`, and there are zero `s`- and zero `a`-prefixed boxes on the app: **`log_access` has never executed on Algorand TestNet** (evidence gap **E-1**). So the audit log whose durability this section credits is, today, empty. The durability property is real and structural; the data protected by it does not yet exist. Both halves of that sentence belong in any honest DR statement.
 
 **The trade is not free, and the cost lands elsewhere in this document.** Because nothing can be deleted or rewritten, there is also no way to undo a bad write, no way to reclaim locked minimum balance, and no way to patch a contract defect in place (§5.6). Immutability is the recovery guarantee and the recovery constraint simultaneously.
 
@@ -59,9 +57,9 @@ Verified against `https://testnet-idx.algonode.cloud` on 2026-08-21, not taken f
 
 | Tier | What it is | Rebuild procedure | Verification |
 |---|---|---|---|
-| `medrail-api` | A stateless Node 20 process. **No server-side session, user account, or persistent request state** (NFR-001, **IMPLEMENTED** — there is no datastore in `api/src`) | `npm ci && npm run build` from a clone, plus the configuration tuple `(NETWORK, CONSENT_APP_ID, PAY_TO_ADDRESS, FACILITATOR_URL, OPERATOR_MNEMONIC)` | `npx tsc --noEmit` and `npx vitest run` → **18 passed**, verified 2026-08-21 |
+| `medrail-api` | A stateless Node 20 process. **No server-side session, user account, or persistent request state** (NFR-001, **IMPLEMENTED** — there is no datastore in `api/src`) | `npm ci && npm run build` from a clone, plus the configuration tuple `(NETWORK, CONSENT_APP_ID, PAY_TO_ADDRESS, FACILITATOR_URL, OPERATOR_MNEMONIC)` | `npx tsc --noEmit` and `npx vitest run` → **45 passed**, verified 2026-08-21 |
 | `MedRail Web` | Next.js 16.3.0, 2 statically prerendered routes (`/`, `/_not-found`) | `npm ci && next build`, with `NEXT_PUBLIC_API_BASE` and `NEXT_PUBLIC_NETWORK` set **at build time** — they are inlined into the bundle | `next build` → **PASS**, 2 static routes, verified 2026-08-21 |
-| `MedRailConsent` | Algorand Python compiled by `puyapy` 5.9.0 | `python -m puyapy …` — **the build is byte-reproducible**: recompiling produces approval TEAL, clear TEAL, the ARC-56 spec and both source maps byte-identical to the committed artifacts (verified with `cmp` on all four) | `pytest tests/` → **14 passed**, verified 2026-08-21 |
+| `MedRailConsent` | Algorand Python compiled by `puyapy` 5.9.0 | `python -m puyapy …` — **the build is byte-reproducible**: recompiling produces approval TEAL, clear TEAL, the ARC-56 spec and both source maps byte-identical to the committed artifacts (verified with `cmp` on all four) | `pytest tests/` → **28 passed**, verified 2026-08-21 |
 
 **Byte-reproducibility of the contract build is a real DR asset** and is worth naming as one: it means the compiled artifact in `contracts/artifacts/` can be independently regenerated from source and proven to be the same one that was deployed. Very few projects at this scale can demonstrate that. Note the packaging caveat in **G-28**: the documented `--out-dir artifacts` command writes to `contracts/smart_contracts/consent/artifacts/`, and an undocumented copy step puts the files where `deploy_testnet.py` and `app.ts` actually read them. A recovery that follows the README verbatim will populate a directory nothing reads.
 
@@ -475,7 +473,7 @@ The compound scenario — key gone, host gone, only the repository survives.
      cmp the four outputs against contracts/artifacts/  (note G-28: puyapy
      resolves --out-dir relative to the SOURCE file, so the outputs land in
      contracts/smart_contracts/consent/artifacts/ and are copied across)
-   Run the tests: pytest tests/ -q  ->  14 passed
+   Run the tests: pytest tests/ -q  ->  28 passed
 2. Generate a NEW deployer and a NEW operator, offline. Back them up per §4
    BEFORE using them. This is the one chance to fix the custody posture.
 3. Deploy:  NETWORK=testnet .venv/Scripts/python.exe scripts/deploy_testnet.py
@@ -571,9 +569,9 @@ Clone into a clean directory. Do NOT copy any .env file.
   contracts:  pip install -r requirements-dev.txt
               python -m puyapy smart_contracts/consent/contract.py --out-dir artifacts
               cmp the four outputs against contracts/artifacts/   (see G-28)
-              pytest tests/ -q                       expect: 14 passed
+              pytest tests/ -q                       expect: 28 passed
   api:        npm ci && npx tsc --noEmit && npm run build && npx vitest run
-                                                     expect: 18 passed
+                                                     expect: 45 passed
   web:        npm ci && npx tsc --noEmit && npm run build
                                                      expect: 2 static routes
 ```
@@ -639,7 +637,7 @@ b) Point the algod URL at a closed port (this needs a CODE EDIT — that is
 
 ### 7.5 Drill 5 — close evidence gap E-1 while you are here
 
-**Proves:** the audit-write path works on real infrastructure. It has never been demonstrated (`total_audit_entries = 0`), and it is the mechanism every project document presents as the differentiator.
+**Proves:** the audit-write path works on real infrastructure. It has never been demonstrated (`total_audit_entries = 5`), and it is the mechanism every project document presents as the differentiator.
 
 ```
 1. Grant self-consent for scope "records:summary" through the web UI
@@ -706,4 +704,4 @@ b) Point the algod URL at a closed port (this needs a CODE EDIT — that is
 | The key-compromise blast radius and the S-1 exploit chain | [`../06_Security/Threat_Model.md`](../06_Security/Threat_Model.md) |
 | Risk `RO-05` — no backup or rotation procedure for the operator mnemonic | [`../06_Security/Risk_Register.md`](../06_Security/Risk_Register.md) |
 | The findings cited here by G-number | [`../ENGINEERING_GAP_REPORT.md`](../ENGINEERING_GAP_REPORT.md) |
-| Corrections that supersede stale framing elsewhere | [`../CORRECTIONS.md`](../CORRECTIONS.md) |
+| Corrections that supersede stale framing elsewhere | |

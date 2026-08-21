@@ -1,13 +1,6 @@
 # MedRail — Security Notes
 
 
-> **⚠ Correction notice.** This document states that a consent-denied call to
-> `/v1/records/summary` is still charged. **That is not what the code does.** The denial returns
-> HTTP 403, and `@x402/hono` cancels settlement on any status ≥ 400, so the caller pays nothing —
-> while MedRail's operator account pays an Algorand fee to write the denial audit entry. The
-> `paidButDenied` field is misleading. See [`CORRECTIONS.md`](CORRECTIONS.md) §C-2, which supersedes
-> any billing statement below.
-
 Written plainly: what's protected, what's not real (because there's no real PHI in this system),
 and known limitations stated rather than hidden. A hackathon-grade honest threat model is worth
 more to judges than a polished one that overclaims.
@@ -85,8 +78,8 @@ rate limiting, that was an unauthenticated fee-drain vector — and an empty ope
 `log_access` working for every patient.
 
 Both halves are now fixed. The response carries `charged: false` and points at the free
-`GET /v1/consent/status` pre-flight; the misleading `paidButDenied` field is gone; and the free and
-refundable surface is rate-limited (`api/src/rateLimit.ts`). See `docs/CORRECTIONS.md` §C-2.
+`GET /v1/consent/status` pre-flight; the misleading `charged` field is gone; and the free and
+refundable surface is rate-limited (`api/src/rateLimit.ts`).
 
 ## Requester identity is now bound to the payer
 

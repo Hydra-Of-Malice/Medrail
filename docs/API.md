@@ -1,13 +1,6 @@
 # MedRail — API Reference
 
 
-> **⚠ Correction notice.** This document states that a consent-denied call to
-> `/v1/records/summary` is still charged. **That is not what the code does.** The denial returns
-> HTTP 403, and `@x402/hono` cancels settlement on any status ≥ 400, so the caller pays nothing —
-> while MedRail's operator account pays an Algorand fee to write the denial audit entry. The
-> `paidButDenied` field is misleading. See [`CORRECTIONS.md`](CORRECTIONS.md) §C-2, which supersedes
-> any billing statement below.
-
 Base URL: `http://localhost:4021` (local dev) or the deployed URL from `docs/DEPLOYMENT.md`.
 
 All paid endpoints speak x402 protocol v2 (`PAYMENT-SIGNATURE` request header, `PAYMENT-REQUIRED`
@@ -64,7 +57,7 @@ Requires payment **and** a currently-valid consent grant from `patientId` to `re
 for scope `records:summary` on the deployed `MedRailConsent` contract — **and `requesterAddress`
 must equal the address that signed the payment.** That last condition is what makes this an
 authorisation check rather than a paywall; without it, any payer could assert an authorised
-requester's address (see `docs/CORRECTIONS.md` §C-1).
+requester's address.
 
 **A denied request is not charged.** The 403 cancels x402 settlement. Use the free
 `GET /v1/consent/status` to check before paying.

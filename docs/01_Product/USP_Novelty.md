@@ -1,16 +1,8 @@
 # MedRail — Unique Selling Proposition and Novelty Assessment
 
-
-> **⚠ Correction notice.** Parts of this document were written against a review finding that was
-> later proven wrong. Settlement in x402 v2 happens **only** on a sub-400 response, so **no error
-> path in MedRail can consume a settled payment** — and consent-denied calls (HTTP 403) are **not
-> charged**, contrary to `API.md`, `SECURITY.md`, and the `paidButDenied` field. The audit-sequence
-> race causes a **rejected transaction**, not a corrupted log. See
-> [`CORRECTIONS.md`](../CORRECTIONS.md) — it supersedes any statement here that contradicts it.
-
 **Purpose:** Separate, with no benefit of the doubt, what in MedRail is genuinely new from what is standard practice, borrowed, or simply small — and state exactly how much of the defensible claim is currently proven.
 
-**Status of this document:** Authored 2026-08-21 against the verified fact ledger and source at commit `32ffd73`. This is written to be read by a hostile reviewer. Every novelty claim below is stated with the evidence for it **and** the strongest available argument against it. Where a claim is weak, the weakness is in the same paragraph, not in a footnote. **The central claim's third leg has never executed on Algorand TestNet**, which is disclosed in §1 rather than buried.
+**Status of this document:** Authored 2026-08-21 against the verified fact ledger and source at commit `3b387df`. This is written to be read by a hostile reviewer. Every novelty claim below is stated with the evidence for it **and** the strongest available argument against it. Where a claim is weak, the weakness is in the same paragraph, not in a footnote. **All three legs of the central claim have now executed on Algorand TestNet**, and §0 states exactly how many times and by whom.
 
 ---
 
@@ -22,30 +14,30 @@
 
 | Leg | Mechanism | Proven on live infrastructure? |
 |---|---|---|
-| 1. Settled payment | x402 v2 `exact`, GoPlausible facilitator, USDC ASA `10458941` | **Yes** — tx `OYRQRKYA7WUKBVLWTOFJSJMZFBW7VCNGP5VGH5EBUJGRCVFQFJRQ`, 20000 base units, round 66091768, `fee: 0`. **One payment; sender == receiver.** |
-| 2. Authorisation evaluation | `check_access` via `simulate()` — free, submits nothing | **Partially.** The contract read is proven (tx `X2BQ5FD4…` → `check_access = True` → tx `OV2J2T5V…` → `False`). **The gate around it is not an access control** — finding S-1. |
-| 3. Audit append | `log_access`, admin-gated, per-patient append-only | **No. Never executed on Algorand TestNet.** `total_audit_entries == 0` on App `768743428`; zero `s`- or `a`-prefixed boxes exist. Coverage is AVM-simulator unit tests only. |
+| 1. Settled payment | x402 v2 `exact`, GoPlausible facilitator, USDC ASA `10458941` | **Yes** — first at tx `OYRQRKYA7WUKBVLWTOFJSJMZFBW7VCNGP5VGH5EBUJGRCVFQFJRQ`, 20000 base units, round 66091768, `fee: 0`, and repeatedly since on the gated route (`5DKFUULW…`, `QZIQWHN5…`). **Every payment is a self-payment from the project's own account.** |
+| 2. Authorisation evaluation | `check_access` via `simulate()` — free, submits nothing — behind a payer-identity binding | **Yes.** The contract read is proven (tx `X2BQ5FD4…` → `check_access = True` → tx `OV2J2T5V…` → `False`), and the gate around it is now an access control: `payerFromRequest` binds the asserted requester to the address that signed the payment (`api/src/x402Payer.ts`), verified live with both an attack and a control by `api/scripts/verify-g01-fix.ts`. |
+| 3. Audit append | `log_access`, admin-gated, per-patient append-only | **Yes.** First at tx `4YLKLQKKWXXFW3UT5APJVYKXI7T7A6OACTAWCC5YBAN3XGOGHRVQ`, sequence 1. `total_audit_entries` on App `768743428` now reads **5**, with `s`- and `a`-prefixed boxes present and the app account's minimum balance reconciling exactly against the box inventory. |
 
 ```mermaid
 flowchart LR
     Call["ONE paid HTTP call<br/>POST /v1/records/summary — $0.05"]
     L1["LEG 1 — Settlement<br/>x402 v2 exact via GoPlausible<br/>USDC ASA 10458941"]
-    L2["LEG 2 — Authorisation<br/>check_access on App 768743428<br/>simulate() — zero fee, submits nothing"]
+    L2["LEG 2 — Authorisation<br/>payer binding + check_access<br/>on App 768743428<br/>simulate() — zero fee, submits nothing"]
     L3["LEG 3 — Audit append<br/>log_access, admin-signed<br/>per-patient append-only box"]
-    V1["PROVEN ON-CHAIN<br/>tx OYRQRKYA… round 66091768"]
-    V2["MECHANISM PROVEN<br/>GATE DEFEATED by S-1<br/>requesterAddress is caller-asserted"]
-    V3["NEVER EXECUTED ON TESTNET<br/>total_audit_entries = 0"]
+    V1["PROVEN ON-CHAIN<br/>tx OYRQRKYA… round 66091768<br/>+ 5DKFUULW…, QZIQWHN5…"]
+    V2["PROVEN ON-CHAIN<br/>impersonation rejected 403<br/>control call admitted 200"]
+    V3["PROVEN ON-CHAIN<br/>tx 4YLKLQKK… seq 1<br/>total_audit_entries = 5"]
 
     Call --> L1 --> V1
     Call --> L2 --> V2
     Call --> L3 --> V3
 
     style V1 stroke-width:2px
-    style V2 stroke-dasharray: 6 3,stroke-width:2px
-    style V3 stroke-dasharray: 3 3,stroke-width:3px
+    style V2 stroke-width:2px
+    style V3 stroke-width:2px
 ```
 
-Two of three legs have touched real infrastructure. **The composition as a whole has never run.** Everything below is written on that footing.
+**All three legs have touched real infrastructure, in a single call, repeatably** — `api/scripts/e2e-consent-proof.ts` performs grant → check → paid call → audit append end to end and can be re-run at will. What remains unproven is not the mechanism but the *adoption*: every payment is a self-payment, nothing is publicly hosted, and there is no MainNet deployment or Bazaar listing. Everything below is written on that footing.
 
 ---
 
@@ -71,7 +63,7 @@ The reasoning is in the contract's own header (`contract.py:11-17`): local state
 
 `sha256(patient ‖ requester ‖ scope)` yields a fixed 32-byte key for an unbounded relationship space, with `scope` free-form so a new endpoint needs no contract change (DATA-003).
 
-**Novelty grade: LOW.** Hashing a composite key is elementary. Worth noting the **real cost**: three independent implementations of this derivation exist — `contract.py:95-98` (Python/AVM), `api/src/services/algorand.ts:63-79` (Node `crypto`), `web/lib/consent.ts:26-34` (browser `crypto.subtle`) — with **no cross-implementation test**. NFR-011 **UNVALIDATED**, severity MEDIUM. A change to the prefix or hash input silently breaks two of the three. The clever key derivation created a triplication problem the repository has not solved.
+**Novelty grade: LOW.** Hashing a composite key is elementary. Worth noting the **real cost, and how it is now paid**: three independent implementations of this derivation exist — `contract.py:95-98` (Python/AVM), `api/src/services/algorand.ts:63-79` (Node `crypto`), `web/lib/consent.ts:26-34` (browser `crypto.subtle`) — and a change to the prefix or hash input would silently break two of the three. That is pinned by a single shared golden-vector fixture, `api/test/fixtures/box-key-vectors.json`, asserted from **both** sides of the language boundary: `api/test/boxKeyParity.spec.ts` checks the Node and browser-`crypto.subtle` paths and `contracts/tests/test_box_keys.py` checks the Python path, against the same bytes. The tests also cover order-sensitivity (swapping patient and requester changes the key) and scope-sensitivity. NFR-011 **VALIDATED** (G-08 closed). The clever key derivation created a triplication problem, and the fixture is the cheapest honest answer to it: one file that all three runtimes must agree with.
 
 ### N-4 — Per-patient monotonic audit sequencing in box storage
 
@@ -79,7 +71,7 @@ The reasoning is in the contract's own header (`contract.py:11-17`): local state
 
 **Novelty grade: LOW-MEDIUM.** An append-only log keyed by `(subject, sequence)` is a textbook pattern. The Algorand-specific wrinkle is real: the backend must **predict** the next box key before submitting, because box references must be declared in the transaction. That produces a read-then-write race, mitigated by `withPatientLock` — an in-process per-patient promise chain (`algorand.ts:129-138`).
 
-**Counter-argument:** the mitigation is honest but weak, and it is contradicted by the deployment configuration. `api/fly.toml` sets `auto_start_machines = true` with `min_machines_running = 1` — a floor, not a ceiling — so horizontal scaling silently reintroduces the race that [`../SECURITY.md`](../SECURITY.md) describes as mitigated (D-7; REL-004 **PARTIALLY IMPLEMENTED**). The document names the correct fix — move sequence assignment fully on-chain — and does not implement it.
+**Counter-argument:** the mitigation is honest but weak, and it now constrains the deployment rather than being contradicted by it. `api/fly.toml` sets `max_machines_running = 1` deliberately, so the configuration no longer promises horizontal scaling the lock cannot survive — but that is a ceiling accepted to preserve correctness, which is a real limitation, not a fix. It is tracked as an open finding (G-11; REL-004 **PARTIALLY IMPLEMENTED**). Worth being precise about the failure mode: two instances racing would produce a **rejected transaction**, not a corrupted log — the contract's own sequence assertion refuses the second write — so this is an availability problem, not an integrity one. With the audit write now guarded (§N-5), a rejection degrades to `auditStatus: "pending"` rather than an error. The correct fix — move sequence assignment fully on-chain — is named in [`../SECURITY.md`](../SECURITY.md) and still not implemented.
 
 ### N-5 — The composition itself
 
@@ -87,17 +79,19 @@ This is the only claim worth defending as technically novel.
 
 Three properties normally produced by three different systems, on three different timescales, under three different trust models — payment settlement (a payments provider, batched), authorisation (an identity provider, session-scoped), and audit (a logging system, eventually consistent) — are produced here as three facts about **one HTTP request**, verifiable by anyone against a public ledger, with no account on either side.
 
-**Novelty grade: MEDIUM-HIGH as a design; UNPROVEN as an artefact.**
+**Novelty grade: MEDIUM-HIGH as a design; PROVEN as an artefact, at demonstration scale.**
 
-Everything a hostile reviewer should say against it:
+**The most interesting property of the composition, and the one worth leading with: the payment *is* the authentication.** MedRail issues no API keys, holds no sessions, and has no user table, so there is apparently no identity to check the asserted `requesterAddress` against — which is exactly why the first version of this endpoint took the caller's word for it. But an x402 payment is a *signed Algorand transaction*, and a signature is an identity assertion. The credential was already inside the request, unread. `payerFromRequest` (`api/src/x402Payer.ts`) decodes the verified `PAYMENT-SIGNATURE` header, reads the AVM `exact` payload `{paymentGroup, paymentIndex}`, and recovers the sender of the one leg the caller signed — the rest of the atomic group is the facilitator's fee-payer transactions and identifies nobody relevant. `records.ts:41-51` returns **403** unless that address equals `requesterAddress`, and treats a failed recovery as a mismatch rather than a fallback. Turning a paywall into an authorisation check therefore costs one header decode and **no account system, no credential issuance, and no server-side state at all**. The stranger-callable property that created the attack surface is what makes the defence free — which is the composition arguing for itself.
 
-1. **Leg 3 has never run.** `total_audit_entries == 0`. The differentiator's most distinctive component has been exercised only in an AVM simulator. FR-025 **UNVALIDATED on-chain**.
-2. **Leg 2's gate is broken.** `requesterAddress` is read from the request body (`api/src/routes/records.ts:5-8`) and never bound to the payer. Grants are public on Algorand — patient = sender, requester = ABI arg 0 — so an attacker enumerates pairs from the app's own transaction history, pays the ordinary $0.05, and is admitted, because the grant genuinely exists. SEC-006 **DEFEATED BY S-1**; SEC-007, SEC-008, FR-039 **NOT IMPLEMENTED**. See [`./Use_Cases.md`](./Use_Cases.md) UC-011.
-3. **The composition is not atomic.** Payment settles through the facilitator; `log_access` is a follow-up transaction moments later. This is a deliberate interoperability trade-off — a generic x402 client cannot know MedRail's App ID or method signature, so bundling would break off-the-shelf callers ([`../ARCHITECTURE.md`](../ARCHITECTURE.md); [`../IMPLEMENTATION_PLAN.md`](../IMPLEMENTATION_PLAN.md) §3). It is argued well and disclosed plainly. It still means "one call" is a description of the HTTP interaction, not of the ledger.
-4. **The non-atomicity has a money consequence.** `logAccess` on the allowed path is awaited without a catch (`records.ts:49`), unlike the denied path (`:37`). A failure there returns HTTP 500 *after* settlement: the caller has paid $0.05 and receives nothing, with no refund path and no retry token. REL-002 **NOT IMPLEMENTED** (R-2).
-5. **There is no test for any of it.** `api/src/routes/records.ts` and `api/src/services/algorand.ts` — the two modules that implement the composition — have **zero automated coverage**.
+Everything a hostile reviewer should still say against it:
 
-**Honest summary of N-5:** the composition is a good idea, coherently designed, argued from first principles, and **currently unproven, insecure, and untested**. It is a strong *thesis* with a weak *artefact*. A reviewer who accepts the thesis and rejects the artefact is being fair.
+1. **Leg 3 has run five times, all self-initiated.** `total_audit_entries = 5` on App `768743428`, first at tx `4YLKLQKK…` sequence 1, with the `s`- and `a`-prefixed boxes present and the MBR arithmetic reconciling exactly (`docs/PROOF.md` §9). That closes the evidence gap. It does not make it usage: every one of those entries was written by the project's own scripts against its own accounts. FR-025 **VALIDATED on-chain**, and no more than that.
+2. **Leg 2's gate holds, and was tested adversarially rather than assumed.** `api/scripts/verify-g01-fix.ts` grants a genuine third-party requester consent, pays from a *different* key while asserting that third party, and confirms the **403** — then runs a control with payer and requester matched and confirms the **200**. A gate that rejects everything is not a fix, so the control is the half that makes the result meaningful. Six unit cases in `api/test/x402Payer.spec.ts` cover the recovery itself, including facilitator legs ahead of the payment, a merely-asserted address, an absent header, a malformed header, and an out-of-range index. SEC-006, SEC-007, SEC-008 and FR-039 **VALIDATED**. See [`./Use_Cases.md`](./Use_Cases.md) UC-011.
+3. **The composition is not atomic.** Payment settles through the facilitator; `log_access` is a follow-up transaction moments earlier in the same handler. This is a deliberate interoperability trade-off — a generic x402 client cannot know MedRail's App ID or method signature, so bundling would break off-the-shelf callers ([`../ARCHITECTURE.md`](../ARCHITECTURE.md); [`../IMPLEMENTATION_PLAN.md`](../IMPLEMENTATION_PLAN.md) §3). It is argued well and disclosed plainly. It still means "one call" is a description of the HTTP interaction, not of the ledger.
+4. **The non-atomicity has no money consequence, and this was misdiagnosed for a while.** An earlier review recorded it as a lost-payment defect. That was factually wrong: `@x402/hono` (`node_modules/@x402/hono/dist/esm/index.mjs:203-232`) reaches `processSettlement` only when the handler returns a status below 400, and dispatches `cancellationDispatcher.cancel(...)` otherwise. **No error path in MedRail can consume a settled payment.** REL-002 is **VALIDATED — satisfied structurally by the SDK**, and that credit belongs to x402 v2, not to MedRail. What *was* genuinely at risk was the sale rather than the caller's money: an unguarded `logAccess` turned a legitimate paid request into a 500. It is now wrapped in `try/catch` (`records.ts:83-99`), returning **200** with `auditStatus: "pending"`, null `auditTxId`/`auditSequence`, and a structured `audit_write_failed` log. The caller gets the data and can see the receipt is outstanding.
+5. **The coverage is real but uneven.** `api/src/routes/records.ts` is now exercised by `x402Payer.spec.ts`, `app.spec.ts` and two live scripts; the box-key derivation is pinned across three runtimes. **`api/src/services/algorand.ts` still has no dedicated unit-test file** (G-05), and the frontend has no automated tests of any kind.
+
+**Honest summary of N-5:** the composition is a good idea, coherently designed, argued from first principles, and **now demonstrated end to end on live infrastructure with its central attack tested and rejected**. What it is not is adopted: the volume is self-generated, nothing is hosted, and the deployed contract still runs pre-fix bytecode for two low-severity defects (§3). A reviewer who marks it "proven mechanism, unproven traction" is correct, and this document does not ask for better.
 
 ---
 
@@ -119,22 +113,22 @@ The resolution: two categories, one trust layer.
 | Purpose | broad repeatable volume | the ownership proof |
 | State touched | none — pure compute | `check_access` + `log_access` |
 
-Argued in [`../JUDGES.md`](../JUDGES.md) and [`../ARCHITECTURE.md`](../ARCHITECTURE.md), and reflected in the code: `api/src/app.ts:37-50` declares all three prices in one place, and `web/components/PricingTable.tsx` publishes the gate for each.
+Argued in [`../JUDGES.md`](../JUDGES.md) and [`../ARCHITECTURE.md`](../ARCHITECTURE.md), and reflected in the code: `api/src/app.ts:50-60` declares all three prices in one place, `GET /` advertises every route with its `price` and `gate`, and `web/components/PricingTable.tsx` publishes the gate for each.
 
 **Novelty grade: MEDIUM-HIGH.** It identifies a real structural tension, names it, and resolves it with an architecture rather than a slogan. It is also *falsifiable*, which is the mark of a real claim: if consent-gated calls were high-volume, the split would be unnecessary.
 
 **Counter-arguments:**
 - The split is partly a competition artefact. It optimises for a leaderboard that scores payment volume. A different scoring rule might not justify it.
-- **The volume half has not materialised.** Exactly one settled payment exists, and its sender equals its receiver (disclosed in [`../PROOF.md`](../PROOF.md) §6). The strategy is sound; the outcome is unrealised. Nothing here may be described as "payment volume."
-- [`../ARCHITECTURE.md`](../ARCHITECTURE.md) says "Both categories write to the same audit log" and then corrects itself in the same sentence. The correction is the accurate half — and since `total_audit_entries == 0`, **neither** category has ever written to it on-chain (DOC-5). Any restatement of this claim must carry the correction.
+- **The volume half has not materialised.** Every settled payment on record is a self-payment from the project's own account (disclosed in [`../PROOF.md`](../PROOF.md) §6). The strategy is sound; the outcome is unrealised. Nothing here may be described as "payment volume."
+- [`../ARCHITECTURE.md`](../ARCHITECTURE.md) says "Both categories write to the same audit log" and then corrects itself in the same sentence. The correction is the accurate half: only the consent-gated category writes to the trail, and the open endpoints are pure compute that persist nothing (DOC-5). Any restatement of this claim must carry the correction.
 
 ### P-2 — Pricing the verification, not the data
 
-`/v1/records/summary` charges $0.05 whether or not consent is valid, returning `403` with `paidButDenied: true` (`api/src/routes/records.ts:38-46`). The stated rationale: the fee covers a real on-chain lookup either way, the same way a paid lookup API charges for a miss ([`../SECURITY.md`](../SECURITY.md)).
+The intent was that `/v1/records/summary` charge $0.05 whether or not consent is valid: the fee covers a real on-chain lookup either way, the same way a paid lookup API charges for a miss ([`../SECURITY.md`](../SECURITY.md)). **The implementation has never actually done this**, and the documentation has now been corrected to match the code rather than the other way round. A denial returns 403, and `@x402/hono` cancels settlement on any status ≥ 400 — so the caller pays nothing. The response says so explicitly (`charged: false`) and points at the free pre-flight check (`api/src/routes/records.ts:59-70`); the old `charged` field is gone.
 
-**Novelty grade: LOW-MEDIUM.** Charging for a miss is not new. What is slightly unusual is what is being sold: the *authorisation verdict* is the product, and the record is a by-product of a positive verdict. That reframing is coherent and is stated in the response body rather than buried in terms of service — which is the right way to do it.
+**Novelty grade: LOW-MEDIUM as an idea, and it is worth noting that the idea is not what shipped.** Charging for a miss is not new. What is slightly unusual is what is being sold: the *authorisation verdict* is the product, and the record is a by-product of a positive verdict. That reframing is coherent — but the system as built gives the verdict away on the negative branch and charges only for the positive one.
 
-**Counter-argument:** a requester whose grant was silently revoked pays to be told so, with no in-call free path to discover it beforehand. `GET /v1/consent/status` provides a free pre-flight check, but nothing in the paid flow points a caller at it. And per UC-007 E1, if the denial's audit write fails it is swallowed by `.catch(() => undefined)` with no log, metric, or alert — so the very record that justifies the charge can vanish silently.
+**Counter-argument, now pointing the other way.** The party that pays for a denial is MedRail: `records.ts:58` submits a real `logAccess` transaction whose Algorand fee the operator account covers, so an attacker can make the operator spend money for free. That is bounded rather than eliminated — `POST /v1/records/summary` carries a 30 requests/minute limit (`api/src/app.ts:46`, `api/src/rateLimit.ts`) — and the limiter is in-memory and keyed on a spoofable `X-Forwarded-For`, so it is a courtesy guard, not a security boundary. And per UC-007 E1, if the denial's audit write fails it is still swallowed by `.catch(() => undefined)` with no log, metric, or alert (G-15) — so the record that justifies the spend can vanish silently, on the one path that did not get the structured-logging treatment.
 
 ### P-3 — Consent as infrastructure rather than as a feature
 
@@ -154,7 +148,10 @@ Held to a strict standard: *novel*, not merely *competent*. By that standard, **
 |---|---|---|
 | Hand-constructed `ABIMethod` literals instead of parsing ARC-56, with the reason in a comment | `api/src/services/algorand.ts:16-46` | **Defensive, not novel.** Correct call for SDK-version stability; the cost is that a contract signature change produces no type error. |
 | CORS `allowHeaders` deliberately unset so Hono reflects the browser's preflight, with a documented note about a prior regression | `api/src/app.ts:25-30` | **Good engineering evidence.** A comment that records a real bug and why the fix is shaped that way is worth more than the fix. Not novel. |
-| Per-patient in-process promise-chain lock | `api/src/services/algorand.ts:129-138` | **Pragmatic and honestly bounded.** Contradicted by `fly.toml` (D-7). |
+| Per-patient in-process promise-chain lock | `api/src/services/algorand.ts:129-138` | **Pragmatic and honestly bounded**, and the deployment configuration now agrees with it: `api/fly.toml` sets `max_machines_running = 1` deliberately. That is a limitation accepted openly rather than a contradiction papered over — and it remains an open finding (G-11). |
+| Payer identity recovered from the payment itself, rather than trusted from the body | `api/src/x402Payer.ts`; `api/src/routes/records.ts:41-51` | **The single best change in the codebase.** Not novel — the SDK exports every primitive it uses — but it is the right ten lines in the right place, it fails closed on an unreadable header, and it was verified adversarially with a control rather than assumed. |
+| Shared golden-vector fixture asserted from three runtimes | `api/test/fixtures/box-key-vectors.json` + `boxKeyParity.spec.ts` + `contracts/tests/test_box_keys.py` | **Correct answer to a triplication problem.** One file that Python, Node and the browser must all agree with, rather than three tests that each agree with themselves. |
+| Errors classified by cause: 400 for bad input, 403 for a failed authorisation, 429 for rate limit, 503 + `Retry-After` for a facilitator outage, generic 500 with a `requestId` for anything else | `api/src/app.ts:73-105`, `:113-139`; `api/src/validation.ts` | **Competent and, for an agent caller, load-bearing.** A program cannot ask a human what a 500 meant. Not novel. |
 | Idempotent deployment that preserves `fund_txid` across re-runs and funds only on `Create` | `contracts/scripts/deploy_testnet.py:99-137` | **Correct.** FR-100. This is also why `create_txid` in `deploy_testnet.json` is `null` — the recorded run detected an existing app rather than creating one. The app genuinely exists; the create transaction ID simply was not captured. Worth stating rather than glossing. |
 | Counter keyed off prior *status*, not prior *existence*, so a re-grant after revoke reactivates without double-counting | `contract.py:157-167`, with the reasoning in a comment | **A genuinely subtle correctness detail, correctly handled and tested.** `test_regrant_after_revoke_reactivates`. Not novel; simply right. |
 | Deliberately not hard-coding the audit-box MBR because `AuditEntry` is variable-length | `contract.py:53-55` | **Correct restraint.** Notable because the *fixed* constant next to it is wrong — see below. |
@@ -164,12 +161,14 @@ Held to a strict standard: *novel*, not merely *competent*. By that standard, **
 
 **Engineering defects that a novelty claim must not paper over:**
 
-- **C-1 (MEDIUM):** `contract.py:146` emits `AccessRequested(Txn.sender, patient, scope)` while the struct is declared `patient, requester`. `Txn.sender` is the *requester*, so every emitted event labels the two parties backwards. Any ARC-28 consumer receives inverted data. Survives because `test_request_access_emits_event_and_counts` asserts only the counter and never inspects the payload. One-line fix.
-- **C-2 (LOW):** `contract.py:52` computes `GRANT_BOX_MBR = 2_500 + 400 * (32 + 17)` = 22,100 µALGO, omitting the BoxMap's one-byte `"g"` prefix from the key length. True cost is **22,500**, confirmed on-chain: app min-balance 145,000 − 100,000 base = 45,000 = 2 × 22,500. The public ABI method `get_grant_box_mbr()`, advertised at `:249-252` as a constant the backend can quote, under-reports by ~1.8% per box.
-- **CI-1 (HIGH):** the workflow triggers on `push: branches: [main]`; the only branch is `master`. Every job passes locally (ledger §18) — the code is not failing, the trigger is wrong — but **no push has ever triggered CI**.
-- **CI-2 (MEDIUM):** `api/test/x402-flow.spec.ts` makes a live call to `facilitator.goplausible.xyz` at module import, so CI depends on a third party being reachable from a GitHub runner.
-- **D-1/D-2 (HIGH):** `contracts/artifacts/deploy_testnet.json` is not copied into the image and `api/fly.toml` sets no `CONSENT_APP_ID`, while hard-coding `NETWORK = "mainnet"` where no contract exists. A `fly deploy` today produces a broken service.
-- **AI-006 (LOW-MEDIUM):** unanchored bidirectional substring matching (`interactionChecker.ts:42-43`) produces false positives on short or malformed medication names; the existing test passes `["a","b"]` and asserts only the disclaimer.
+- **C-1 / G-12 (MEDIUM) — fixed in source, redeploy deferred by design.** The contract previously emitted `AccessRequested(Txn.sender, patient, scope)` against a struct declared `patient, requester`, so every event labelled the two parties backwards and any ARC-28 consumer received inverted data. It now emits `AccessRequested(patient, Txn.sender, scope)`, with a regression test that inspects the payload rather than only the counter, verified to fail against the old code. **App `768743428` still runs the pre-fix bytecode**, because `deploy_testnet.py` uses `OnUpdate.AppendApp` — redeploying would mint a new App ID and discard the on-chain history every proof in this document set cites. That is a deliberate trade, and it means the *deployed* application retains this defect.
+- **C-2 / G-20 (LOW) — same status.** `GRANT_BOX_MBR` omitted the BoxMap's one-byte `"g"` prefix from the key length, computing 22,100 µALGO where the true cost is **22,500** (confirmed on-chain at the two-box stage: 145,000 − 100,000 base = 45,000 = 2 × 22,500). The source now reads `2_500 + 400 * (33 + 17)`, with a regression test. The deployed `get_grant_box_mbr()` still under-reports by ~1.8% per box.
+- **CI-2 (MEDIUM) — still open.** `api/test/x402-flow.spec.ts` makes a live call to `facilitator.goplausible.xyz` at module import, so CI depends on a third party being reachable from a GitHub runner.
+- **AI-006 / G-21 (LOW-MEDIUM) — still open.** Unanchored bidirectional substring matching (`interactionChecker.ts:42-43`) produces false positives on short or malformed medication names; the existing test passes `["a","b"]` and asserts only the disclaimer.
+- **G-05 (MEDIUM) — still open.** `api/src/services/algorand.ts` — the module that talks to the chain on every gated call — has no dedicated unit-test file.
+- **G-15 (MEDIUM) — still open.** No metrics, no tracing, no alerting. Structured JSON logs exist and nothing consumes them.
+
+**Resolved since the review, and credited rather than quietly dropped:** the CI workflow now triggers on `main` and `master` plus `workflow_dispatch`, with dependency caching, `npm audit --audit-level=high` on both packages and an artifact-freshness gate (G-06); `api/fly.toml` sets `NETWORK = "testnet"`, `CONSENT_APP_ID = "768743428"`, a `/v1/health` check and `max_machines_running = 1`, with `.dockerignore` files and `npm ci` in both Dockerfiles (G-07, G-13, G-14); and `npm audit fix` has been run in both packages, which now report **0 vulnerabilities** (G-16, G-27).
 
 ---
 
@@ -193,13 +192,13 @@ Held to a strict standard: *novel*, not merely *competent*. By that standard, **
 
 The 402 carries `extra.feePayer = ZMFK2OI7ZBD2U27ISERZC4S6LKM6WMFJPZQ4MYNJDZ2VNBNMBA67RA22AA` and the settled transaction shows `fee: 0`, so a caller needs USDC but not ALGO.
 
-**Novelty grade: ZERO for MedRail.** This is the **facilitator's** feature. MedRail neither built nor configured it — `accepts[].asset` and `extra.feePayer` are fetched from the facilitator's `/supported` at startup and are not in MedRail's configuration at all. Benefiting from someone else's infrastructure is not novelty, and the same coupling is the root cause of R-1: with the facilitator unreachable, the 402 cannot be constructed offline and all three priced routes return **HTTP 500 with no `PAYMENT-REQUIRED` and no `Retry-After`**.
+**Novelty grade: ZERO for MedRail.** This is the **facilitator's** feature. MedRail neither built nor configured it — `accepts[].asset` and `extra.feePayer` are fetched from the facilitator's `/supported` at startup and are not in MedRail's configuration at all. Benefiting from someone else's infrastructure is not novelty. The same coupling means the 402 genuinely cannot be constructed offline, so a facilitator outage still takes the priced routes down; what MedRail added is only the classification — that condition is now a **503 with `Retry-After: 30`** and a `PAYMENT_FACILITATOR_UNAVAILABLE` code rather than an opaque 500 (`api/src/app.ts:73-105`). Telling a calling agent "retry shortly" instead of "broken" is competent error handling, not novelty.
 
 ### I-4 — A single artefact bridging three runtimes
 
 One contract's semantics are consumed by Algorand Python (AVM), Node/TypeScript (`algosdk` + ATC), and the browser (`algosdk` + `crypto.subtle`) — with byte-identical box-key derivation required across all three.
 
-**Novelty grade: LOW, and it is currently a liability rather than an asset.** Three implementations, no cross-check test (NFR-011 **UNVALIDATED**). This belongs in the risk register as much as in a novelty assessment.
+**Novelty grade: LOW, and it stopped being a liability once it was pinned.** Three implementations against one shared golden-vector fixture, asserted from the Node, browser and Python paths (NFR-011 **VALIDATED**, G-08). The triplication is still a cost — three places to change — but it is now a cost with a tripwire rather than a silent divergence risk.
 
 ---
 
@@ -214,7 +213,7 @@ One contract's semantics are consumed by Algorand Python (AVM), Node/TypeScript 
 | U-5 | **Live network state, not a static badge.** | `web/components/NetworkBadge.tsx` polls `GET /v1/health` | **Small and correct.** |
 | U-6 | **Non-diagnostic framing is visible in the product**, not only in the terms. | Every intelligence response carries a `disclaimer`; tests assert it | **A real safety property.** AI-002, AI-003. |
 
-**UX gaps:** exactly one web route exists (`/`); there is no audit-trail view (and nothing to show in it); no grant-management view; no real wallet; and `web/` has **zero automated tests** — no Vitest, Jest, Playwright, or Cypress configuration exists.
+**UX gaps:** exactly one web route exists (`/`); there is no audit-trail view, and now that there are five entries on-chain that absence is a missing feature rather than an empty one; no grant-management view; no real wallet; and `web/` has **zero automated tests** — no Vitest, Jest, Playwright, or Cypress configuration exists.
 
 ---
 
@@ -233,9 +232,10 @@ The section that decides whether the rest of this document is credible.
 | NN-7 | **Stablecoin micropayments for APIs.** | The general idea long predates this submission. |
 | NN-8 | **Patient-controlled health records as a concept.** | Decades old. MedRail contributes a mechanism sketch, not the idea. |
 | NN-9 | **The tech stack.** | Hono, Next.js 16, React 19, Tailwind 4, zod, vitest, Algorand Python. Current and sensibly chosen; entirely conventional. |
-| NN-10 | **"Immutable audit trail on a blockchain."** | The oldest claim in the category — and here it is the **least proven** part of the system: `log_access` has never executed on TestNet. |
+| NN-10 | **"Immutable audit trail on a blockchain."** | The oldest claim in the category. It is now proven here — `total_audit_entries = 5`, first entry at tx `4YLKLQKK…` — which moves it from *unproven* to *unremarkable*, not to *novel*. Five self-generated entries is a working mechanism, not a track record. |
 | NN-11 | **Being deployed on TestNet.** | Expected of every entrant. Not a differentiator. |
-| NN-12 | **Having one settled payment.** | A minimum bar, not an achievement — and this one is a self-payment. |
+| NN-12 | **Having settled payments at all.** | A minimum bar, not an achievement — and every one of them is a self-payment. |
+| NN-13 | **Recovering the payer from a signed payment.** | `decodePaymentSignatureHeader` and `getSenderFromTransaction` are both SDK exports. Using them is the correct thing to do, and the *idea* that a payment can serve as authentication is the interesting half (§N-5) — but the mechanism is fifteen lines of documented API calls. |
 
 ---
 
@@ -245,20 +245,23 @@ The section that decides whether the rest of this document is credible.
 
 > MedRail places a patient-controlled, publicly verifiable consent registry directly inside the request path of a stranger-callable, per-call-paid HTTP API — so that one call is both a settled payment and a live authorisation evaluation against a permission no organisation mediates. It pairs that with a deliberate two-tier endpoint design that makes the patient-ownership story and real payment volume achievable in the same system rather than trading one against the other.
 
-Every clause above is backed: FR-001…FR-003 (**VALIDATED**), FR-013 / SEC-009 (**IMPLEMENTED**), FR-018 / FR-020 / SEC-003 (**VALIDATED**, three transaction IDs), NFR-008 (**IMPLEMENTED**), FR-101 (**IMPLEMENTED**).
+Every clause above is backed: FR-001…FR-003 (**VALIDATED**), FR-013 / SEC-009 (**IMPLEMENTED**), FR-018 / FR-020 / SEC-003 (**VALIDATED**, three transaction IDs), FR-039 / SEC-007 / SEC-008 (**VALIDATED**, `contracts/artifacts/g01-verification.json`), FR-012 / FR-025 (**VALIDATED on-chain**, audit tx `4YLKLQKK…`), NFR-008 (**IMPLEMENTED**), NFR-011 (**VALIDATED**), FR-101 (**IMPLEMENTED**).
+
+And one clause can now be added to it:
+
+> The requester's identity is not asserted, it is recovered — from the signature on the payment that bought the call. The consent gate is an authorisation check with no account system behind it, and the impersonation attack it was built against has been executed against the live service and rejected, alongside a control call proving the legitimate path still works.
 
 **Not defensible today, and must be said in the same breath:**
 
-> The composition's third leg — the immutable audit append — has never executed on Algorand TestNet. `total_audit_entries == 0`. And the authorisation leg is not an access control: the requester identity is caller-asserted, so any paying stranger can impersonate any party the patient has authorised, and a successful impersonation writes a false attribution into the very audit trail whose value depends on being trustworthy.
+> Nothing is publicly hosted. There is no MainNet deployment, no Bazaar listing, and no third-party payment volume — every settled payment on record is a self-payment from the project's own account, and every one of the five audit entries was written by the project's own scripts. The deployed contract at App `768743428` still runs bytecode that predates two source fixes (C-1, C-2), because redeploying would mint a new App ID and discard the very history these proofs rest on. Twelve engineering findings remain open, including no observability of any kind and no direct test coverage of the chain client.
 
-**What that costs the claim.** The composition is currently **one proven leg, one designed-but-defeated leg, and one designed-but-never-executed leg.** As an argument it is strong. As a demonstration it is one-third complete. A reviewer who marks it as "promising design, unproven artefact" is correct, and this document does not ask for better.
+**What that costs the claim.** The composition is **three proven legs and no traction.** As an argument it is strong; as a demonstration it is complete at hackathon scale; as a product it has one user, and that user is the author. A reviewer who marks it "proven mechanism, unproven traction" is correct, and this document does not ask for better.
 
-**What would make it fully defensible** — both changes are small, and neither is implemented:
+**What would raise it further** — none of this is implemented, and none of it is a code change:
 
-1. **Bind payer to requester.** Decode the `PAYMENT-SIGNATURE` header with `decodePaymentSignatureHeader` (`@x402/core/http`), recover the payer with `getSenderFromTransaction` (`@x402/avm`), and return 403 unless `payer === requesterAddress` — or use `.onProtectedRequest(...)` from `@x402/hono` to stash the verified payer on the context. Both APIs are verified present in the installed SDK. Roughly 10–15 lines plus a test. Closes FR-039, SEC-007, SEC-008.
-2. **Run the flagship endpoint once, successfully, against App `768743428`.** Record the `auditTxId` and `auditSequence` in [`../PROOF.md`](../PROOF.md). Moves FR-012 and FR-025 from **UNVALIDATED** to **VALIDATED** and completes the composition.
-
-Until both land, the correct description of MedRail is: **a well-reasoned composition, proven in two of three legs, with a known critical authorisation flaw and a documented path to closing it.**
+1. **A public deployment**, so a third party can call the endpoints without cloning the repository. The Fly configuration is correct and nothing is running on it.
+2. **A payment from an account that is not the project's own.** That, and only that, converts "the mechanism settles" into "someone bought something."
+3. **A read surface for the audit trail.** Five entries exist on-chain and no endpoint or UI exposes them, so the patient-facing half of the ownership story is still told rather than shown.
 
 ---
 
@@ -266,12 +269,12 @@ Until both land, the correct description of MedRail is: **a well-reasoned compos
 
 | Category | Grade | One-line justification |
 |---|---|---|
-| Technical novelty | **MEDIUM-HIGH as design, LOW as proven artefact** | The composition is the idea; one leg never ran and one is defeated. |
+| Technical novelty | **MEDIUM-HIGH as design, MEDIUM as proven artefact** | The composition is the idea, and all three legs now run on live infrastructure — at demonstration scale, self-generated. |
 | Product novelty | **MEDIUM-HIGH** | The open/gated split is a real, falsifiable answer to a real structural tension — with the volume half unrealised. |
-| Engineering novelty | **NONE** | Competent, well-commented, honestly bounded. Not novel, and six verified defects (C-1, C-2, CI-1, CI-2, D-1/D-2, AI-006) remain open. |
+| Engineering novelty | **NONE** | Competent, well-commented, honestly bounded. The best change in the codebase (payer binding) is fifteen lines of documented SDK calls, and twelve findings remain open. |
 | Integration novelty | **LOW-MEDIUM** | Publishing the ABI and designing out key ingress are good instincts; fee sponsorship is the facilitator's. |
-| UX differentiation | **MEDIUM** | Zero-install real payment and protocol-literate error states are genuine; the surface is one route with no tests. |
-| Overall | **A strong thesis with a one-third-proven artefact.** | |
+| UX differentiation | **MEDIUM** | Zero-install real payment and protocol-literate error states are genuine; the surface is one route with no tests and no audit-trail view. |
+| Overall | **A strong thesis with a proven mechanism and no traction.** | |
 
 ---
 

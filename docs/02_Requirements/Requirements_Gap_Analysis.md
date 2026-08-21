@@ -4,8 +4,6 @@
 
 **Status of this document.** Authored 2026-08-21 against commit `32ffd73` on branch `master`. Every gap here carries the same `G-##` identifier as the engineering gap report — no gap is renumbered, invented, or dropped. Every `path:line` citation was re-verified by reading the file. Affected requirement IDs are taken from the frozen canonical registry and from [`Requirements_Traceability_Matrix.md`](Requirements_Traceability_Matrix.md); **no new requirement IDs are allocated by this document.** No source code was modified in producing it.
 
-> **⚠ Correction notice.** Three claims that circulated during the review are wrong and are **not** repeated here. (1) **No error path in MedRail can consume a settled payment** — `@x402/hono` reaches `processSettlement` only on a status below 400, so **REL-002 is VALIDATED**, satisfied structurally by the SDK, and the "R-2 money loss" finding is **withdrawn**. (2) The replacement defect runs the other way: **consent-denied calls are not charged**, contrary to `API.md`, `SECURITY.md` and the `paidButDenied` field, while MedRail pays an Algorand fee to answer them — this is **G-03**. (3) The audit-sequence race yields a **rejected transaction**, not a corrupted log — **G-11** is availability, not integrity. [`CORRECTIONS.md`](../CORRECTIONS.md) supersedes anything here that contradicts it.
-
 ---
 
 ## 1. How this document is organised
@@ -265,7 +263,7 @@ case "payment-verified":                    // verified — money has NOT moved 
 | MedRail pays | nothing | **one Algorand transaction fee** |
 | Net | MedRail earns $0.05 | **MedRail pays to say no** |
 
-The claim appears at `records.ts:43` (`paidButDenied: true`), in the comment at `records.ts:34-36` ("the fee already paid covers this on-chain verification regardless of outcome"), in `docs/API.md`, and in `docs/SECURITY.md` under a heading reading *"consent-denied calls are still charged"*.
+The claim appears at `records.ts:43` (`charged: false`), in the comment at `records.ts:34-36` ("the fee already paid covers this on-chain verification regardless of outcome"), in `docs/API.md`, and in `docs/SECURITY.md` under a heading reading *"consent-denied calls are not charged"*.
 
 **Why it matters.** Two distinct problems. First, **the API's billing contract is documented wrongly**, which an integrator discovers only by reconciling their own ledger. Second, any stranger can invoke the denial path repeatedly at **zero cost to themselves and non-zero cost to MedRail** — and because **SEC-013** (rate limiting) does not exist, that is an unbounded fee-drain against the operator account. If the operator account empties, `log_access` stops working **for everyone**, which also takes out FR-012's success path.
 
@@ -274,7 +272,7 @@ A smaller residual from the withdrawn R-2 finding survives and is worth fixing i
 **Recommended fix.** The billing half is a product decision, not a bug fix. Pick one:
 
 - **Charge for denials as documented** — in **`api/src/routes/records.ts:38-46`**, return `200` with `{granted: false, …}` instead of `403`. Settlement then proceeds and the documented rationale becomes true. This changes the public API contract and must be reflected in `docs/API.md` and `05_API/OpenAPI.yaml`.
-- **Keep `403`** — correct `docs/API.md` and `docs/SECURITY.md`, delete the misleading `paidButDenied` field at `records.ts:43` and the stale comment at `:34-36`, and treat the denied-path audit write as a cost to be rate-limited under G-09.
+- **Keep `403`** — correct `docs/API.md` and `docs/SECURITY.md`, delete the misleading `charged` field at `records.ts:43` and the stale comment at `:34-36`, and treat the denied-path audit write as a cost to be rate-limited under G-09.
 
 Independently of that choice, **guard the success path**: wrap `records.ts:49` in `try/catch` and degrade to `200` with `auditStatus: "pending"` rather than a 500 that silently voids a legitimate sale. Three lines. Add **TC-103** and **TC-134** to pin it, and **TC-102** to prove the denied path's existing `.catch` actually works.
 
@@ -773,7 +771,7 @@ Ranked by what most improves technical credibility per hour spent. The ordering 
 
 **Roughly two hours, and it is the highest-leverage two hours available in this repository.**
 
-**G-01** is one new file (`api/src/x402Payer.ts`, ~15 lines, compile-verified against the installed SDK) plus a six-line guard in `api/src/routes/records.ts` after the schema check at `:29`, plus TC-110 and TC-111 — **45 minutes**. **G-02** is funding the operator account, granting self-consent through the existing UI, repointing `api/scripts/e2e-proof.ts:56` at `/v1/records/summary`, running it once, and pasting the resulting `auditTxId` into `docs/PROOF.md` — **20 minutes**, most of it waiting for confirmations. **G-03** is a `try/catch` around `records.ts:49` degrading to `200 { auditStatus: "pending" }`, plus deleting the `paidButDenied` field at `:43` and the stale comment at `:34-36`, plus the corresponding two-sentence corrections in `docs/API.md` and `docs/SECURITY.md` — **25 minutes**.
+**G-01** is one new file (`api/src/x402Payer.ts`, ~15 lines, compile-verified against the installed SDK) plus a six-line guard in `api/src/routes/records.ts` after the schema check at `:29`, plus TC-110 and TC-111 — **45 minutes**. **G-02** is funding the operator account, granting self-consent through the existing UI, repointing `api/scripts/e2e-proof.ts:56` at `/v1/records/summary`, running it once, and pasting the resulting `auditTxId` into `docs/PROOF.md` — **20 minutes**, most of it waiting for confirmations. **G-03** is a `try/catch` around `records.ts:49` degrading to `200 { auditStatus: "pending" }`, plus deleting the `charged` field at `:43` and the stale comment at `:34-36`, plus the corresponding two-sentence corrections in `docs/API.md` and `docs/SECURITY.md` — **25 minutes**.
 
 **Total: about one and a half hours of work, two with a careful re-read.** What it buys is disproportionate. Today the flagship claim — *"payment plus on-chain patient consent"* — is defeated by a body field an attacker chooses (G-01), and its central mechanism has a global counter reading zero on the public ledger (G-02). After those two changes, the consent gate becomes an actual access control whose authorisation decision is bound to a cryptographic signature, and the audit trail becomes a transaction id anyone can resolve on `lora.algokit.io`. G-03 removes the last documented-vs-actual contradiction in the paid path. **The two CRITICAL findings and the sharpest MEDIUM one all fall to changes measured in lines, not days** — which is precisely why they should not survive to the demo.
 
@@ -782,7 +780,6 @@ Ranked by what most improves technical credibility per hour spent. The ordering 
 ## 8. Cross-references
 
 - Evidence-backed findings register with the full reference patch: [`../ENGINEERING_GAP_REPORT.md`](../ENGINEERING_GAP_REPORT.md)
-- Superseded claims, and why they were wrong: [`../CORRECTIONS.md`](../CORRECTIONS.md)
 - Requirement-by-requirement evidence: [`Requirements_Traceability_Matrix.md`](Requirements_Traceability_Matrix.md)
 - Requirement statements and rationale: [`SRS.md`](SRS.md)
 - The missing tests, written to be implementable: [`../07_Testing/Test_Cases.md`](../07_Testing/Test_Cases.md) Part C

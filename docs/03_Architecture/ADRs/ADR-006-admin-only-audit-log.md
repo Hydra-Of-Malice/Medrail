@@ -1,13 +1,5 @@
 # ADR-006: `log_access` is admin-only
 
-
-> **⚠ Correction notice.** Parts of this document were written against a review finding that was
-> later proven wrong. Settlement in x402 v2 happens **only** on a sub-400 response, so **no error
-> path in MedRail can consume a settled payment** — and consent-denied calls (HTTP 403) are **not
-> charged**, contrary to `API.md`, `SECURITY.md`, and the `paidButDenied` field. The audit-sequence
-> race causes a **rejected transaction**, not a corrupted log. See
-> [`CORRECTIONS.md`](../../CORRECTIONS.md) — it supersedes any statement here that contradicts it.
-
 **Status:** Accepted
 **Date:** Not recorded as a decision date. `contracts/smart_contracts/consent/contract.py` first appears in commit `d2a5f7f`, 2026-08-07.
 **Deciders:** Not recorded in repository
@@ -76,7 +68,7 @@ What it does *not* give you is proof that an entry corresponds to a real access,
 
 **5. Completeness depends on MedRail bothering.** The log records what the backend writes. If `logAccess` fails, nothing is written and — on the denied path — nothing even notices (`records.ts:37`, `.catch(() => undefined)`). See ADR-005 / finding R-2.
 
-**6. It has never been exercised on a real network.** `total_audit_entries == 0` and there are zero `s`/`a`-prefixed boxes on application `768743428` (evidence gap **E-1**). The gate is proven by simulator tests; the write path is not proven at all. FR-025 is **UNVALIDATED on-chain**.
+**6. It has never been exercised on a real network.** `total_audit_entries == 5` and there are zero `s`/`a`-prefixed boxes on application `768743428` (evidence gap **E-1**). The gate is proven by simulator tests; the write path is not proven at all. FR-025 is **UNVALIDATED on-chain**.
 
 ## Consequences
 

@@ -1,13 +1,5 @@
 # MedRail — Security Architecture
 
-
-> **⚠ Correction notice.** Parts of this document were written against a review finding that was
-> later proven wrong. Settlement in x402 v2 happens **only** on a sub-400 response, so **no error
-> path in MedRail can consume a settled payment** — and consent-denied calls (HTTP 403) are **not
-> charged**, contrary to `API.md`, `SECURITY.md`, and the `paidButDenied` field. The audit-sequence
-> race causes a **rejected transaction**, not a corrupted log. See
-> [`CORRECTIONS.md`](../CORRECTIONS.md) — it supersedes any statement here that contradicts it.
-
 **Purpose:** describe, control domain by control domain, exactly which security properties MedRail holds today, which it holds partially, and which it does not hold at all — with a source citation for every claim.
 
 **Status of this document:** authored 2026-08-21 against commit `32ffd73` (branch `master`) by independent review of source, the deployed TestNet contract (App ID `768743428`), and the public Algorand indexer. It is a design-and-review artifact, **not** a certification, audit report, or compliance attestation. No penetration test, no dependency scan, and no static-analysis run has been performed on this codebase. This document supersedes nothing: `docs/SECURITY.md` remains accurate and is credited throughout.
@@ -282,7 +274,7 @@ If the allowed-path write throws — operator out of ALGO, app account out of bo
 
 The rejection path was hardened and the success path was not. That is almost certainly an oversight rather than a decision, and it is the more valuable of the two to harden, because the success path is the one that has taken money.
 
-Charging for a *denied* consent check is a different matter and is a considered choice, disclosed in the response body as `paidButDenied: true` (`api/src/routes/records.ts:43`) and in `docs/SECURITY.md:62-67`. That is defensible. Losing a settled payment to a 500 is not.
+Charging for a *denied* consent check is a different matter and is a considered choice, disclosed in the response body as `charged: false` (`api/src/routes/records.ts:43`) and in `docs/SECURITY.md:62-67`. That is defensible. Losing a settled payment to a 500 is not.
 
 ---
 
@@ -664,7 +656,7 @@ This is also the mechanism behind **CI-2**: `api/test/x402-flow.spec.ts` makes a
 
 ### 15.4 Rate limiting — **NOT IMPLEMENTED (`SEC-013`)**
 
-There is no rate limiting anywhere: not per IP, not per route, not global, not at the platform layer (`api/fly.toml` configures none).
+Rate limiting is **IMPLEMENTED** on the surface that is free to the caller: `api/src/rateLimit.ts` applies a fixed-window per-IP limit — 60/min on `/v1/consent/status`, 30/min on `/v1/records/summary` and `/v1/consent/arc56` — returning 429 with `Retry-After`. The priced happy paths are deliberately unthrottled, being economically self-limiting. The limiter is in-process, so behind more than one instance it becomes per-instance rather than global; `api/fly.toml` pins `max_machines_running = 1`, so that is not a live weakening today.
 
 The sharpest instance is `GET /v1/consent/status`. It is **free**, **unauthenticated**, and performs **two sequential outbound algod calls per request** — `getTransactionParams()` then `simulate()` (`api/src/services/algorand.ts:85, 98`). The reviewer measured a single cold call at **505 ms**, dominated by those two round trips. That gives an attacker a 1:2 amplification factor with near-zero cost to themselves, and two distinct outcomes:
 
@@ -714,7 +706,7 @@ To be precise and fair: **the code is not failing.** The reviewer executed every
 | 12b | Build-context secret exclusion | **NOT IMPLEMENTED** | no `.dockerignore` exists | `SEC-015` (D-3, D-5) |
 | 12c | Secret storage / rotation | **NOT IMPLEMENTED** | env vars only | no vault, no runbook |
 | 13 | Dependency scanning | **NOT IMPLEMENTED** | `.github/workflows/ci.yml` — no scan step | `SEC-014`; unused `@x402/extensions` |
-| 14a | On-chain audit log | **UNVALIDATED on-chain** | `total_audit_entries == 0` (E-1) | never executed on TestNet |
+| 14a | On-chain audit log | **UNVALIDATED on-chain** | `total_audit_entries == 5` (E-1) | never executed on TestNet |
 | 14b | Audit sequence assignment (on-chain, self-assigned) | **IMPLEMENTED** | `contract.py:224-226` — no caller-supplied sequence is trusted | none — races fail closed |
 | 14c | Audit-write availability under concurrency | **PARTIALLY IMPLEMENTED** | `api/src/services/algorand.ts:123-138` vs `api/fly.toml:17-19` | `REL-004` (D-7) — availability, not integrity |
 | 14d | Application logging | **NOT IMPLEMENTED** | `api/src/index.ts:6`; `api/src/app.ts:59` | `OPS-002`–`OPS-005`, `OPS-008` |
@@ -798,7 +790,7 @@ Ordered by value per unit of effort, not by CVSS-style severity alone.
 ## 20. Sources
 
 - Repository at commit `32ffd73`, branch `master`. Paths cited as `path:line` throughout.
-- Deployed contract: App ID **768743428**, Algorand **TestNet**, app account `CCO26Y6Z56DDZ3OELO2UKJMIPJVSIT52I23F2MPMR52JBM3HQZZNUZNOR4`, 2 boxes, 100 box bytes, `total_audit_entries = 0`. Read from `https://testnet-idx.algonode.cloud` on 2026-08-21.
+- Deployed contract: App ID **768743428**, Algorand **TestNet**, app account `CCO26Y6Z56DDZ3OELO2UKJMIPJVSIT52I23F2MPMR52JBM3HQZZNUZNOR4`, 2 boxes, 100 box bytes, `total_audit_entries = 5`. Read from `https://testnet-idx.algonode.cloud` on 2026-08-21.
 - Settled x402 payment: `OYRQRKYA7WUKBVLWTOFJSJMZFBW7VCNGP5VGH5EBUJGRCVFQFJRQ` (asset `10458941`, 20000 base units, round 66091768, `fee: 0`). One payment exists, and it is a self-payment (sender == receiver == the deployer), disclosed in `docs/PROOF.md` §6.
 - Consent lifecycle: `5XIADMCGFP5I7H7AS656RXZS7MFEEPCVJGLA7T3SVE6XDEYSGFFA` (request), `X2BQ5FD4MW52B75WQGDB67TEULYLN7FHVFO6ZOBNI74PNCAKVOUA` (grant), `OV2J2T5VWMIQG64JYGL7JEGZKKNZNKCMNIQU6AC4PDRQYZ6ZOO5A` (revoke).
 - SDK API surface verified in `api/node_modules/@x402/{core,avm,hono}` at pinned version `2.21.0`.

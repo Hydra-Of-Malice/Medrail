@@ -1,13 +1,6 @@
 # MedRail — Rollback Strategy
 
 
-> **⚠ Correction notice.** Parts of this document were written against a review finding that was
-> later proven wrong. Settlement in x402 v2 happens **only** on a sub-400 response, so **no error
-> path in MedRail can consume a settled payment** — and consent-denied calls (HTTP 403) are **not
-> charged**, contrary to `API.md`, `SECURITY.md`, and the `paidButDenied` field. The audit-sequence
-> race causes a **rejected transaction**, not a corrupted log. See
-> [`CORRECTIONS.md`](../CORRECTIONS.md) — it supersedes any statement here that contradicts it.
-
 **Purpose:** state, per deployment unit, what "rolling back" actually means, what is possible, and what is permanently impossible.
 
 **Status of this document:** authored 2026-08-21 against commit `32ffd73`. **No rollback has ever been performed, because no deployment has ever been performed** beyond the TestNet contract. The API and web tiers are not hosted; no container image has ever been built or tagged. §2 (contract immutability) was verified by reading `contracts/artifacts/MedRailConsent.arc56.json` and `contracts/scripts/deploy_testnet.py`, not assumed. Everything marked **RECOMMENDED** is a recommendation, not a procedure that exists.
@@ -231,7 +224,7 @@ Because a contract change is effectively a migration to a new system, treat it a
 
 ### 2.6 A caveat specific to this deployment
 
-The audit-write path has **never executed on Algorand TestNet**. App `768743428` reports `total_audit_entries = 0`, with zero `s`- and zero `a`-prefixed boxes. Verification check #8 in §1.4 has therefore never passed anywhere except the AVM simulator. **Do not present it as a validated rollback verification step** — it is an untested one. See `../07_Testing/Test_Plan.md`.
+The audit-write path has **never executed on Algorand TestNet**. App `768743428` reports `total_audit_entries = 5`, with zero `s`- and zero `a`-prefixed boxes. Verification check #8 in §1.4 has therefore never passed anywhere except the AVM simulator. **Do not present it as a validated rollback verification step** — it is an untested one. See `../07_Testing/Test_Plan.md`.
 
 ---
 

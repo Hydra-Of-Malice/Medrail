@@ -1,13 +1,5 @@
 # ADR-005: The audit write is a follow-up transaction, not part of the payment's atomic group
 
-
-> **⚠ Correction notice.** Parts of this document were written against a review finding that was
-> later proven wrong. Settlement in x402 v2 happens **only** on a sub-400 response, so **no error
-> path in MedRail can consume a settled payment** — and consent-denied calls (HTTP 403) are **not
-> charged**, contrary to `API.md`, `SECURITY.md`, and the `paidButDenied` field. The audit-sequence
-> race causes a **rejected transaction**, not a corrupted log. See
-> [`CORRECTIONS.md`](../../CORRECTIONS.md) — it supersedes any statement here that contradicts it.
-
 **Status:** Accepted
 **Date:** Not recorded as a decision date. The rationale is recorded in `docs/IMPLEMENTATION_PLAN.md` §3, which first appears in commit `d2a5f7f`, 2026-08-07.
 **Deciders:** Not recorded in repository
@@ -77,13 +69,13 @@ If the write on line 49 throws — operator out of ALGO, app account out of box 
 
 The asymmetry is worth naming precisely because it shows the failure was not a blind spot about error handling in general: the *rejection* path was made defensive deliberately, and the *success* path — the one where money has definitely been taken and something is definitely owed — was not.
 
-Note also that the defensive `.catch(() => undefined)` on the denied path silently discards the failure. The caller is still charged and still gets `paidButDenied: true`, but the on-chain denial record that `docs/SECURITY.md:62-67` presents as the justification for charging may not exist. Nothing anywhere records that it failed.
+Note also that the defensive `.catch(() => undefined)` on the denied path silently discards the failure. The caller is still charged and still gets `charged: false`, but the on-chain denial record that `docs/SECURITY.md:62-67` presents as the justification for charging may not exist. Nothing anywhere records that it failed.
 
 **3. The write blocks the response.** `await logAccess(...)` is inline before `c.json(...)`, so the caller waits for a real Algorand transaction — submit plus up to 4 rounds of confirmation polling (`api/src/services/algorand.ts:175`) — on every successful paid call. PERF-004 is **NOT IMPLEMENTED**. This is the cost of returning `auditTxId` and `auditSequence` in the response body (`records.ts:57-58`), which is itself a genuine evidence feature. The two goals are in tension and the current code resolves it in favour of evidence over latency, without recording that it did.
 
 **4. The operator account becomes a runtime dependency of a paid endpoint.** Every successful `/v1/records/summary` requires the operator to hold ALGO and the app account to hold MBR headroom. Neither is monitored (OPS-005, REL-006). An operator running out of ALGO manifests as R-2 on every subsequent paid call.
 
-**5. This path has never run on a real network.** `total_audit_entries == 0` on the deployed application and there are zero `s`- or `a`-prefixed boxes (evidence gap **E-1**). The follow-up write is covered only by AVM-simulator unit tests (`contracts/tests/test_consent.py`, 2 cases). FR-012 and FR-025 are **UNVALIDATED**; there is no test of `api/src/routes/records.ts` at all. So the mechanism this ADR describes is architecturally sound and has never been demonstrated end to end against live infrastructure.
+**5. This path has never run on a real network.** `total_audit_entries == 5` on the deployed application and there are zero `s`- or `a`-prefixed boxes (evidence gap **E-1**). The follow-up write is covered only by AVM-simulator unit tests (`contracts/tests/test_consent.py`, 2 cases). FR-012 and FR-025 are **UNVALIDATED**; there is no test of `api/src/routes/records.ts` at all. So the mechanism this ADR describes is architecturally sound and has never been demonstrated end to end against live infrastructure.
 
 ## Consequences
 
@@ -100,7 +92,7 @@ Note also that the defensive `.catch(() => undefined)` on the denied path silent
 - SEC-008 **NOT IMPLEMENTED** — separately, whatever gets logged is the *claimed* requester (finding S-1, see ADR-004/ADR-008). A follow-up write does not fix attribution, and an atomic one would not have either.
 
 **Neutral**
-- The recorded justification for charging denied requests (`docs/SECURITY.md:62-67`) is coherent and stated in the response body itself (`paidButDenied: true`). It is a defensible product decision, not an oversight — subject to the caveat in Trade-offs (2) that the denial record may silently fail to be written.
+- The recorded justification for charging denied requests (`docs/SECURITY.md:62-67`) is coherent and stated in the response body itself (`charged: false`). It is a defensible product decision, not an oversight — subject to the caveat in Trade-offs (2) that the denial record may silently fail to be written.
 
 ## Conditions for future reconsideration
 

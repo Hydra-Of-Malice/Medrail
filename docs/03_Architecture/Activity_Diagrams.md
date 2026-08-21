@@ -1,16 +1,8 @@
 # MedRail — Activity Diagrams
 
-
-> **⚠ Correction notice.** Parts of this document were written against a review finding that was
-> later proven wrong. Settlement in x402 v2 happens **only** on a sub-400 response, so **no error
-> path in MedRail can consume a settled payment** — and consent-denied calls (HTTP 403) are **not
-> charged**, contrary to `API.md`, `SECURITY.md`, and the `paidButDenied` field. The audit-sequence
-> race causes a **rejected transaction**, not a corrupted log. See
-> [`CORRECTIONS.md`](../CORRECTIONS.md) — it supersedes any statement here that contradicts it.
-
 **Purpose:** show the control flow of the system's five recurring processes — request handling, the consent state machine, the audit-append decision, the operational deploy-and-prove sequence, and CI.
 
-**Status of this document:** Descriptive of commit `32ffd73` on branch `master`. Status labels per the project fact ledger. Two of the five flows contain a defect that is drawn explicitly rather than smoothed over: the audit-append flow (R-2) and the CI flow (CI-1).
+**Status of this document:** Descriptive of the working tree on branch `main`. Status labels per the project fact ledger. Every flow is drawn with its failure branches intact rather than smoothed over — the interesting part of a control-flow diagram is what happens when a step does not succeed.
 
 Related: [`./Sequence_Diagrams.md`](./Sequence_Diagrams.md) · [`./LLD.md`](./LLD.md) · [`./HLD.md`](./HLD.md) · [`../02_Requirements/SRS.md`](../02_Requirements/SRS.md) · [`../06_Security/Threat_Model.md`](../06_Security/Threat_Model.md)
 
@@ -18,49 +10,58 @@ Related: [`./Sequence_Diagrams.md`](./Sequence_Diagrams.md) · [`./LLD.md`](./LL
 
 ## 1. Request lifecycle through the middleware stack
 
-Both middlewares are mounted on `"*"` and therefore run for every request; the payment middleware enforces only on the three configured route keys and passes everything else through untouched.
+CORS and the payment middleware are mounted on `"*"` and run for every request; the payment middleware enforces only on the three configured route keys and passes everything else through untouched. The three rate limiters are mounted on specific paths.
 
 ```mermaid
 flowchart TD
-    START(["HTTP request"]) --> CORS["cors middleware<br/>origin *, methods GET POST OPTIONS<br/>allowHeaders deliberately unset<br/>app.ts:20-33"]
+    START(["HTTP request"]) --> CORS["cors middleware<br/>origin *, methods GET POST OPTIONS<br/>allowHeaders deliberately unset<br/>app.ts:22-35"]
     CORS --> PRE{"OPTIONS preflight?"}
     PRE -->|"yes"| REFLECT["Reflect Access-Control-Request-Headers<br/>expose PAYMENT-REQUIRED, PAYMENT-RESPONSE"] --> DONE1(["204"])
-    PRE -->|"no"| PAYMW["paymentMiddleware<br/>app.ts:37-50"]
+    PRE -->|"no"| RLIM{"path rate-limited?<br/>consent/status 60/min · arc56 30/min<br/>records/summary 30/min · app.ts:44-46"}
+    RLIM -->|"window exhausted"| C429(["HTTP 429 · Retry-After<br/>RATE_LIMITED · retryable true<br/>no facilitator call is made"])
+    RLIM --> PAYMW["paymentMiddleware inside the outage wrapper<br/>app.ts:50-60, wrapped at :73-105"]
 
     PAYMW --> ISPRICED{"method + path in the priced map?<br/>POST /v1/triage · POST /v1/interaction-check<br/>POST /v1/records/summary"}
-    ISPRICED -->|"no — the 4 free routes and /"| HANDLER
+    ISPRICED -->|"no — the 5 free routes"| HANDLER
 
     ISPRICED -->|"yes"| INIT{"resourceServer already initialised?"}
     INIT -->|"no"| SUPPORTED["GET /supported from the facilitator<br/>resolves asset 10458941 and extra.feePayer"]
     SUPPORTED --> SUPOK{"fetch succeeded?"}
-    SUPOK -->|"no"| ERR500A(["HTTP 500 · no PAYMENT-REQUIRED<br/>no 503, no Retry-After<br/>FINDING R-1 · REL-001 NOT IMPLEMENTED"])
+    SUPOK -->|"no"| C503(["HTTP 503 · Retry-After 30<br/>PAYMENT_FACILITATOR_UNAVAILABLE · retryable true<br/>structured facilitator_unavailable log"])
     SUPOK -->|"yes"| CACHE["cache payment kinds for the process lifetime<br/>PERF-001 IMPLEMENTED"]
     CACHE --> HASSIG
     INIT -->|"yes"| HASSIG
 
     HASSIG{"PAYMENT-SIGNATURE header present?"}
     HASSIG -->|"no"| C402(["HTTP 402 · empty body · PAYMENT-REQUIRED base64<br/>cache-control no-store<br/>HANDLER AND ZOD NEVER RUN"])
-    HASSIG -->|"yes"| SETTLE["facilitator verify + settle"]
-    SETTLE --> SETOK{"settled?"}
-    SETOK -->|"no"| C402
-    SETOK -->|"yes"| PAID["MONEY HAS MOVED — everything below is post-settlement"]
-    PAID --> HANDLER
+    HASSIG -->|"yes"| VERIFY["facilitator VERIFY — is this payment valid?"]
+    VERIFY --> VEROK{"verified?"}
+    VEROK -->|"no"| C402
+    VEROK -->|"yes"| NOTYET["VERIFIED, NOT SETTLED — no money has moved"]
+    NOTYET --> HANDLER
 
-    HANDLER["route handler"] --> PARSE["parse the JSON body, falling back to an empty object<br/>then zod safeParse"]
+    HANDLER["route handler"] --> PARSE["parse the JSON body, falling back to an empty object<br/>then zod safeParse with algorandAddress"]
     PARSE --> VALID{"schema valid?"}
-    VALID -->|"no"| C400(["HTTP 400 invalid request + zod flatten<br/>on a priced route the caller has ALREADY PAID"])
+    VALID -->|"no"| C400(["HTTP 400 invalid request + zod flatten"])
     VALID -->|"yes"| LOGIC["business logic"]
     LOGIC --> THREW{"threw?"}
-    THREW -->|"yes"| ONERR["app.onError<br/>console.error(err)<br/>app.ts:58-61"]
-    ONERR --> ERR500B(["HTTP 500 with err.message returned in the body<br/>internal text disclosed — SEC-011 NOT IMPLEMENTED"])
-    THREW -->|"no"| OK(["HTTP 200 + JSON<br/>+ PAYMENT-RESPONSE on a priced route"])
+    THREW -->|"yes"| ONERR["app.onError · generate requestId<br/>log method, path, message, stack<br/>app.ts:113-140"]
+    ONERR --> C500(["HTTP 500 INTERNAL_ERROR + requestId<br/>no exception text in the body"])
+    THREW -->|"no"| OK["2xx response body composed"]
+
+    OK --> GATE{"status below 400?"}
+    C400 --> GATE
+    C500 --> GATE
+    GATE -->|"yes"| SETTLE(["processSettlement · 200 + PAYMENT-RESPONSE"])
+    GATE -->|"no"| CANCEL(["cancellationDispatcher.cancel<br/>THE CALLER IS NOT CHARGED"])
 ```
 
-**Three consequences of this ordering, all deliberate or documented.**
+**Four consequences of this ordering, all deliberate.**
 
-1. **402 precedes 400.** The gate closes before any handler runs, so an unpaid malformed request returns 402. `api/test/x402-flow.spec.ts:48-59` records this in a comment and asserts `expect([400, 402]).toContain(res.status)` — documenting the ordering without freezing an incidental outcome.
-2. **A paid malformed request still returns 400, after payment.** No refund path exists. Not currently a listed finding; recorded here because it is the same class of problem as R-2.
-3. **The 500 branches are the system's two reliability findings.** `ERR500A` is R-1 (facilitator); `ERR500B` covers R-3 (address checksum), R-4 (algod timeout) and R-2 (post-settlement audit failure).
+1. **Settlement is last, and conditional.** `@x402/hono` verifies before the handler and settles only when the handler's status is below 400; a throw or any 4xx/5xx routes to `cancellationDispatcher.cancel(...)` instead. Every error terminal on this diagram — 429, 402, 400, 500, 503 — costs the caller nothing. REL-002 **VALIDATED — satisfied by the SDK**, an inherited property of x402 v2 rather than MedRail's own engineering.
+2. **402 precedes 400.** The gate closes before any handler runs, so an unpaid malformed request returns 402. `api/test/x402-flow.spec.ts:48-59` records this in a comment and asserts `expect([400, 402]).toContain(res.status)` — documenting the ordering without freezing an incidental outcome. A *paid* malformed request returns 400 and the settlement is cancelled, so no refund path is needed.
+3. **Rate limits run before the payment middleware**, so a caller who has exhausted a window cannot make MedRail talk to the facilitator either. They are scoped to the three paths that are free *to the caller*, since the priced happy paths are economically self-limiting.
+4. **The two remaining error terminals are honest, not opaque.** The 503 carries a stable code, `Retry-After` and `retryable: true`, so a calling agent backs off rather than concluding the service is broken. The 500 carries a `requestId` the caller can quote and nothing else — internal exception text no longer crosses the boundary (SEC-010, SEC-011 **IMPLEMENTED**).
 
 ---
 
@@ -100,33 +101,36 @@ stateDiagram-v2
     end note
 ```
 
-**Live state on application `768743428`:** `total_requests = 2`, `total_grants_active = 0`, `total_revocations = 2`, `total_audit_entries = 0`, with **2 grant boxes present, both in the Revoked state**. The counters indicate `contracts/scripts/exercise_contract.py` was run twice; the second run's transaction ids are not recorded in the repository.
+**Live state on application `768743428`:** `total_grants_active = 4` and `total_audit_entries = 5`. The grant boxes come from `contracts/scripts/exercise_contract.py` plus the repeatable proof scripts `api/scripts/e2e-consent-proof.ts` and `api/scripts/verify-g01-fix.ts`, each of which issues a real grant before making its paid call.
 
-**Counter semantics worth stating.** Nothing decrements `total_grants_active` on expiry, so it means "grant boxes not yet revoked", not "grants currently valid". Anyone reading the counters as a dashboard should know that.
+**Counter semantics worth stating.** Nothing decrements `total_grants_active` on expiry, so it means "grant boxes not yet revoked", not "grants currently valid". Finding **G-32** is open on exactly that: the name promises more than the counter delivers, and anyone reading it as a dashboard would be wrong.
 
-**Why the box is reused rather than recreated.** `grant_access` keys the counter off the prior *status*, not prior *existence* (`contract.py:156-167`), with the reasoning stated in-code. A naive `if not box.exists()` would double-count reactivations. FR-022 **VALIDATED** by `test_consent.py::test_regrant_after_revoke_reactivates`.
+**Why the box is reused rather than recreated.** `grant_access` keys the counter off the prior *status*, not prior *existence* (`contract.py:163-174`), with the reasoning stated in-code. A naive `if not box.exists()` would double-count reactivations. FR-022 **VALIDATED** by `test_consent.py::test_regrant_after_revoke_reactivates`.
 
 ---
 
 ## 3. Audit-append decision flow
 
-This is the flow that E-1 says has never run on live infrastructure.
+The flagship mechanism, and the one with the most failure branches. It has executed on live TestNet — `total_audit_entries = 5`, first write `4YLKLQKK…` at sequence 1.
 
 ```mermaid
 flowchart TD
-    A(["POST /v1/records/summary · payment ALREADY SETTLED"]) --> B["zod safeParse — length 58 only, no checksum"]
+    A(["POST /v1/records/summary · payment VERIFIED, not yet settled"]) --> B["zod safeParse with algorandAddress<br/>length 58 AND checksum"]
     B --> C{"valid shape?"}
-    C -->|"no"| C400(["400 · caller already paid"])
-    C -->|"yes"| D["checkAccess via simulate<br/>NOTE: requesterAddress is caller-asserted — S-1"]
+    C -->|"no"| C400(["400 · settlement cancelled · caller not charged"])
+    C -->|"yes"| PB["payerFromRequest — decode PAYMENT-SIGNATURE,<br/>recover the signer of paymentGroup at paymentIndex"]
+    PB --> PBQ{"payer equals requesterAddress?"}
+    PBQ -->|"no, or no payer at all"| C403(["403 requesterAddress must match the payer<br/>settlement cancelled · no chain call is made"])
+    PBQ -->|"yes"| D["checkAccess via simulate<br/>the requester is now proven, not asserted"]
     D --> E{"granted?"}
 
-    E -->|"NO"| F["logAccess with action consent_denied<br/>records.ts:37 WRAPPED IN A CATCH THAT SWALLOWS THE ERROR"]
-    F --> G(["403 + paidButDenied true<br/>returned whether or not the audit write succeeded"])
+    E -->|"NO"| F["logAccess with action consent_denied<br/>records.ts:58 · .catch swallows any failure"]
+    F --> G(["403 + charged false + hint<br/>settlement cancelled · returned whether<br/>or not the audit write succeeded"])
 
-    E -->|"YES"| H["logAccess action=consent_checked<br/>records.ts:49 NOT WRAPPED"]
+    E -->|"YES"| H["logAccess action=consent_checked<br/>records.ts:83-99 · INSIDE try/catch"]
     H --> I["withPatientLock — chain onto this patient's queue<br/>IN-PROCESS ONLY, algorand.ts:123-138"]
     I --> J["getTransactionParams — outbound 1"]
-    J --> K["getAuditCount — outbound 2 and 3<br/>its own getTransactionParams plus simulate"]
+    J --> K["getAuditCount — outbound 2 and 3<br/>its own getTransactionParams plus simulate · G-33"]
     K --> L["predictedSeq = currentCount + 1<br/>boxes = ['s'+patient, 'a'+patient+itob(predictedSeq)]"]
     L --> M["atc.execute(algod, 4) — outbound 4, admin-signed"]
 
@@ -134,25 +138,27 @@ flowchart TD
     N -->|"not admin"| FAIL1["transaction rejected — SEC-001"]
     N -->|"admin"| O["next_seq recomputed ON-CHAIN from audit_seq<br/>NOT from the client prediction"]
     O --> P{"is the box the contract needs<br/>in the declared reference array?"}
-    P -->|"no — stale prediction, lost cross-process race D-7"| FAIL2["transaction rejected<br/>audit trail INTACT, ledger not corrupted"]
+    P -->|"no — stale prediction, lost race · G-11"| FAIL2["transaction rejected<br/>audit trail INTACT, ledger not corrupted"]
     P -->|"yes"| Q{"app account has MBR headroom?<br/>18900 for a new audit_seq box<br/>plus 59300 for the log box"}
     Q -->|"no"| FAIL3["transaction rejected — REL-006"]
     Q -->|"yes"| R["write audit_seq and audit_log<br/>total_audit_entries plus 1"]
-    R --> S(["200 + record + auditTxId + auditSequence"])
+    R --> S(["200 · record · auditStatus recorded<br/>auditTxId + auditSequence · THEN settle"])
 
     FAIL1 --> T
     FAIL2 --> T
     FAIL3 --> T
     M -->|"operator out of ALGO · algod 5xx · 4-round timeout"| T
-    T["throws — NO .catch() on this path"] --> U["app.onError"]
-    U --> V(["HTTP 500 AFTER A SETTLED PAYMENT<br/>FINDING R-2 · REL-002 NOT IMPLEMENTED<br/>no refund, no retry token, no idempotency key"])
+    T["throws — caught by the try/catch"] --> U["auditStatus = pending<br/>structured audit_write_failed log line"]
+    U --> V(["200 · record · auditStatus pending<br/>auditTxId and auditSequence null<br/>THEN settle — the sale is kept"])
 ```
 
-**The asymmetry is the finding.** Both branches call the same function against the same infrastructure with the same failure modes. The denied branch swallows failure and still returns a coherent 403; the allowed branch does not. The perverse result is that refusing service is the better-engineered outcome.
+**Both branches are guarded, and they degrade differently on purpose.** The denied branch swallows the failure because it has nothing to report to the caller; the allowed branch catches it and *reports* it, in a field the caller can read. Before that guard existed, an unguarded `await` on the success path turned a transient chain error into a 500 — and because settlement is cancelled on a 5xx, what that 500 destroyed was **the sale**, not the caller's money. MedRail did the work, held a valid grant, and earned nothing. Trading an unrecoverable 500 for a delivered resource with a flagged audit entry is the better bargain on both sides.
 
-**What the contract protects.** `log_access` recomputes `next_seq` from on-chain state (`contract.py:224-226`), so a stale client-side prediction **cannot** corrupt or overwrite the audit trail. The prediction exists only because the AVM requires every touched box to be declared in advance. A lost race therefore yields a *rejected transaction*, not a bad record — which on the allowed path is exactly R-2.
+**What `"pending"` promises, and what it does not.** It is an accurate label on a degraded response, not eventual consistency. There is no outbox, no retry scheduler and no replay, so a pending entry stays pending; the only trace is the `audit_write_failed` line on stdout, which nothing collects (finding **G-15**). The value of the field is that the degradation is **visible instead of silent** — a consumer needing a provable audit entry checks one field rather than inferring it from a null.
 
-**Why this flow has never executed on TestNet — the causal explanation for E-1.** `log_access` has exactly one caller in the entire repository: `api/src/routes/records.ts` (verified by grep across `contracts/scripts`, `api`, `web`). Reaching it requires **both** a settled $0.05 payment **and** a live grant for the `records:summary` scope. Neither operational script does that: `contracts/scripts/exercise_contract.py` exercises `request_access` → `grant_access` → `check_access` → `revoke_access` and stops, and `api/scripts/e2e-proof.ts` pays only `/v1/triage`. **No script exercises the audit path.** That is why `total_audit_entries = 0` and why the flagship mechanism is **UNVALIDATED on-chain**. The gap is one script away from closing: grant consent from a funded account, then run the paid `/v1/records/summary` call against it.
+**What the contract protects.** `log_access` recomputes `next_seq` from on-chain state (`contract.py:231-233`), so a stale client-side prediction **cannot** corrupt or overwrite the audit trail. The prediction exists only because the AVM requires every touched box to be declared in advance. A lost race therefore yields a *rejected transaction*, not a bad record — and the `try/catch` converts that rejection into `auditStatus: "pending"`.
+
+**How the flow finally got exercised on TestNet.** `log_access` has exactly one caller in the repository: `api/src/routes/records.ts`. Reaching it requires **both** a settled $0.05 payment **and** a live grant for the `records:summary` scope, and for a long time no script did both — `contracts/scripts/exercise_contract.py` stops at `revoke_access`, and `api/scripts/e2e-proof.ts` pays only `/v1/triage`. `api/scripts/e2e-consent-proof.ts` closes that gap: it grants consent from a funded account, makes the paid call, and writes `contracts/artifacts/e2e-consent-proof.json` with the grant, payment and audit transaction ids. It is repeatable, and FR-012 and FR-025 are now **VALIDATED on-chain**.
 
 ---
 
@@ -276,7 +282,7 @@ flowchart TD
     END --> MISSING["ABSENT FROM THE PIPELINE — CI-3<br/>no npm audit / pip-audit / Dependabot / CodeQL — SEC-014<br/>no coverage measurement or gate<br/>no container image build — api/Dockerfile has NEVER been built<br/>no artifact publishing<br/>no deployment stage"]
 ```
 
-**The precise statement of CI-1, which matters because it is easy to overstate.** The workflow is correct in content and every job it defines passes locally: API typecheck **PASS**, API build **PASS**, API tests **18 passed**, contract tests **14 passed**, web typecheck **PASS**, web build **PASS**. The problem is the trigger, not the code. `on.push.branches` is `[main]` while the repository's only branch is `master`, so the workflow has never fired on a push, and the repository has no pull requests for the `pull_request` trigger to catch. **The green badge is not green — it has never run.** The fix is one line, either way round: rename the branch, or change the trigger.
+**The precise statement of CI-1, which matters because it is easy to overstate.** The workflow is correct in content and every job it defines passes locally: API typecheck **PASS**, API build **PASS**, API tests **45 passed**, contract tests **28 passed**, web typecheck **PASS**, web build **PASS**. The problem is the trigger, not the code. `on.push.branches` is `[main]` while the repository's only branch is `master`, so the workflow has never fired on a push, and the repository has no pull requests for the `pull_request` trigger to catch. **The green badge is not green — it has never run.** The fix is one line, either way round: rename the branch, or change the trigger.
 
 **CI-2 is a design consequence, not an accident.** `api/test/x402-flow.spec.ts` imports `api/src/app.ts`, whose payment middleware fetches `/supported` from the live facilitator — the same coupling that produces R-1 at runtime. Hermetic tests would need a stubbed facilitator client, which the SDK's `HTTPFacilitatorClient` seam makes straightforward. **RECOMMENDED**, not present.
 

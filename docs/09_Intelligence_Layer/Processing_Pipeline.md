@@ -2,7 +2,7 @@
 
 **Purpose:** trace exactly what happens to a caller's input, stage by stage, from HTTP body to JSON response, for both intelligence engines — with worked arithmetic against the real, on-chain-settled proof run so a reviewer can check every step by hand.
 
-**Status of this document:** Descriptive of commit `32ffd73` on branch `master`. The triage worked example in §4 reproduces output recorded in `contracts/artifacts/e2e-proof.json` from a genuine facilitator-settled x402 payment (tx `OYRQRKYA7WUKBVLWTOFJSJMZFBW7VCNGP5VGH5EBUJGRCVFQFJRQ`, TestNet round 66091768) — it is verified evidence, not an invented illustration. The interaction example in §5 was produced by executing the shipped code at this commit.
+**Status of this document:** Descriptive of commit `3b387df` on branch `main`. The triage worked example in §4 reproduces output recorded in `contracts/artifacts/e2e-proof.json` from a genuine facilitator-settled x402 payment (tx `OYRQRKYA7WUKBVLWTOFJSJMZFBW7VCNGP5VGH5EBUJGRCVFQFJRQ`, TestNet round 66091768) — it is verified evidence, not an invented illustration. The interaction example in §5 was produced by executing the shipped code at this commit.
 
 **Cross-references:** [`Algorithm_Inventory.md`](./Algorithm_Inventory.md) (complete rule tables) · [`Intelligence_Architecture.md`](./Intelligence_Architecture.md) · [`Evaluation.md`](./Evaluation.md) · [`../05_API/`](../05_API/) · [`../07_Testing/Test_Cases.md`](../07_Testing/Test_Cases.md)
 
@@ -25,8 +25,8 @@ There is **no pre-processing beyond case folding and whitespace trimming, and no
 | Database | None exists in this system. |
 | File | Neither engine writes to disk. `interactionChecker.ts:18` is a read, at module load, of a repository file. |
 | In-memory cache | None. Both engines are stateless between calls; no memoisation, no request history. |
-| Application log | The only logging in the API is `console.log` at startup and `console.error(err)` in the Hono error handler (`api/src/app.ts:59`). No request body is logged. OPS-002 **NOT IMPLEMENTED** — the absence of structured logging is an operability gap, but it means clinical text is not written to a log either. |
-| Algorand ledger | The intelligence routes never call the chain. `api/src/routes/triage.ts` and `api/src/routes/interaction.ts` import only `zod`, `hono` and their service module — no `algorand.js` import exists in either file. The one route that does write on-chain (`records.ts`) logs constant strings only: `SCOPE = "records:summary"` and `ENDPOINT = "/v1/records/summary"` (`records.ts:10-11`, used at `:37` and `:49`) — and does not invoke either engine. |
+| Application log | Logging in the API is `console.log` at startup plus three structured JSON error records — `facilitator_unavailable`, `audit_write_failed`, and the `app.onError` record carrying a generated `requestId`, method, path, message and stack (`api/src/app.ts:113-138`). **No request body is logged by any of them, and neither intelligence route logs anything at all.** OPS-002 **PARTIALLY IMPLEMENTED**: the failure paths are structured, nothing else is, and there is still no metrics, tracing or alerting (finding G-15, open). The operability gap is real; the privacy consequence is favourable — clinical text is not written to a log either. |
+| Algorand ledger | The intelligence routes never call the chain. `api/src/routes/triage.ts` and `api/src/routes/interaction.ts` import only `zod`, `hono` and their service module — no `algorand.js` import exists in either file. The one route that does write on-chain (`records.ts`) logs constant strings only: `SCOPE = "records:summary"` and `ENDPOINT = "/v1/records/summary"` (`records.ts:12-13`, used at `:58` and `:84`) — and does not invoke either engine. |
 | Third party | None. No model provider, no analytics, no telemetry. The only outbound call the API makes on a priced route is to the GoPlausible facilitator for payment verification and settlement, which carries the payment transaction — not the request body. |
 
 AI-007 **IMPLEMENTED**. Note the honest scope of this claim: it is a property of the code, not of a deployment. A future operator who adds request logging, an APM agent, or a reverse-proxy access log that captures bodies would break it without touching either engine.
@@ -39,7 +39,7 @@ AI-007 **IMPLEMENTED**. Note the honest scope of this claim: it is a property of
 
 | # | Stage | Code | Behaviour |
 |---|---|---|---|
-| 0 | **Payment gate** | `api/src/app.ts:37-50` | Unpaid requests never reach the handler: the x402 middleware returns `402` with a `PAYMENT-REQUIRED` header and an empty JSON body. FR-001 **VALIDATED**. The middleware never inspects the request body, so the intelligence layer is entirely downstream of settlement. |
+| 0 | **Payment gate** | `api/src/app.ts:50-61` | Unpaid requests never reach the handler: the x402 middleware returns `402` with a `PAYMENT-REQUIRED` header and an empty JSON body. FR-001 **VALIDATED**. The middleware never inspects the request body, so the intelligence layer is entirely downstream of settlement. |
 | 1 | **Body parse (fail-soft)** | `routes/triage.ts:12` | `await c.req.json().catch(() => ({}))`. Malformed JSON does **not** throw — it becomes `{}` and falls through to validation, which rejects it. This is why a bad body yields 400 rather than 500. |
 | 2 | **Schema validation (fail-fast)** | `routes/triage.ts:5-7,13-15` | `z.object({symptoms: z.string().min(1).max(2000)}).safeParse(...)`. On failure: HTTP 400 `{error: "invalid request", details: <zod flatten>}`. **The engine is never invoked with invalid input.** |
 | 3 | **Normalisation** | `triageScorer.ts:54` | `symptomText.toLowerCase()`. That is the entire normalisation step. No trim, no punctuation stripping, no whitespace collapsing, no Unicode normalisation. |
@@ -54,7 +54,7 @@ AI-007 **IMPLEMENTED**. Note the honest scope of this claim: it is a property of
 | # | Stage | Code | Behaviour |
 |---|---|---|---|
 | −1 | **Table load (once, at process start)** | `interactionChecker.ts:18` | `JSON.parse(readFileSync(path.join(__dirname, "..", "data", "interactions.json"), "utf-8"))`. Synchronous, at module import, exactly once per process. A missing or malformed file is a boot failure, not a request failure. |
-| 0 | **Payment gate** | `api/src/app.ts:42` | As above. |
+| 0 | **Payment gate** | `api/src/app.ts:50-61` | As above. |
 | 1 | **Body parse (fail-soft)** | `routes/interaction.ts:12` | Identical pattern to triage. |
 | 2 | **Schema validation (fail-fast)** | `routes/interaction.ts:5-7,13-15` | `z.object({medications: z.array(z.string().min(1)).min(2).max(20)})`. On failure: HTTP 400 `{error: "invalid request — provide at least 2 medications", details: ...}`. Note the absence of a per-item length cap (AI-059). |
 | 3 | **Normalisation** | `interactionChecker.ts:32-34,37` | `medications.map(normalize)` where `normalize(name) = name.trim().toLowerCase()`. Trim *and* lowercase — one more transformation than triage applies. Nothing else: no dose stripping, no unit stripping, no brand→generic mapping, no deduplication. |
@@ -225,7 +225,7 @@ Run the identical stages on `{"medications": ["a", "b"]}` — the exact input us
 - Stage 2: passes. Two items, each ≥ 1 character.
 - Stage 3: `["a", "b"]`, unchanged.
 - Stage 4, pair 1: `hasA` asks whether any of `["a","b"]` satisfies `m.includes("warfarin") || "warfarin".includes(m)`. For `m = "a"`, the second clause `"warfarin".includes("a")` is **true**. `hasA = true`. `hasB` likewise: `"aspirin".includes("a")` is **true**. **Pair 1 matches.**
-- Repeating across the table yields **5 matches** — pairs 1, 2, 3, 5 and 7 — verified by executing the shipped code at commit `32ffd73` on 2026-08-21.
+- Repeating across the table yields **5 matches** — pairs 1, 2, 3, 5 and 7 — verified by executing the shipped code at commit `3b387df` on 2026-08-21.
 - Stage 6: `flagged: true`, with five populated `description` strings including a **major** bleeding-risk warning, returned for an input containing no medication at all.
 
 The existing test calls precisely this input and asserts only `source.length > 0` and a substring of `disclaimer` (`interactionChecker.spec.ts:35-36`). It therefore executes the defect on every CI run without observing it. AI-006 **NOT IMPLEMENTED**; the missing assertion is filed as AI-058 **RECOMMENDED**.
@@ -238,13 +238,13 @@ Neither engine has an error path, because neither can fail on schema-valid input
 
 | Failure | HTTP | Where |
 |---|---|---|
-| No payment presented | `402` + `PAYMENT-REQUIRED` header, empty JSON body | `api/src/app.ts:37-50` (x402 middleware) — FR-001 **VALIDATED** |
-| Facilitator unreachable at first priced request | `500`, **no** `PAYMENT-REQUIRED` header, no `Retry-After` | finding R-1. The `accepts[].asset` and `extra.feePayer` values come from the facilitator's `/supported`, so the 402 cannot be constructed offline. REL-001 **NOT IMPLEMENTED**. This is a payment-layer defect, not an intelligence-layer one, but it is the most likely way a caller sees a failure on these endpoints. |
+| No payment presented | `402` + `PAYMENT-REQUIRED` header, empty JSON body | `api/src/app.ts:50-61` (x402 middleware) — FR-001 **VALIDATED** |
+| Facilitator unreachable at first priced request | `503` + `Retry-After: 30`, body `{"error":{"code":"PAYMENT_FACILITATOR_UNAVAILABLE","retryable":true,"facilitator":"…"}}` | The `accepts[].asset` and `extra.feePayer` values come from the facilitator's `/supported`, so the 402 genuinely cannot be constructed offline — but a caller is now told *"try again shortly"* rather than *"this is broken"*. `api/src/app.ts:69-105` catches exactly that initialisation failure and converts it; every other error is re-thrown untouched. Formerly finding R-1 / G-04, now **CLOSED**; REL-001 **IMPLEMENTED**. This is still the most likely way a caller sees a failure on these endpoints. |
 | Malformed JSON body | `400` (via the fail-soft `{}` + schema rejection) | `routes/triage.ts:12-15`, `routes/interaction.ts:12-15` |
 | Schema violation (empty string, >2000 chars, <2 or >20 medications, empty medication name) | `400` with a zod `flatten()` detail object | same |
 | Engine throws | Does not occur. No branch in either engine can raise for schema-valid input. | `triageScorer.ts:53-73`, `interactionChecker.ts:36-55` |
 
-Note that the zod `details` object is echoed to the caller. For these two routes that is harmless field-level feedback, but the sibling issue on the *error handler* — `api/src/app.ts:60` returning `err.message` verbatim to unauthenticated callers (SEC-011 **NOT IMPLEMENTED**, finding R-3) — is documented in [`../06_Security/Threat_Model.md`](../06_Security/Threat_Model.md).
+Note that the zod `details` object is echoed to the caller. For these two routes that is deliberate, harmless field-level feedback. The sibling issue on the *error handler* — which previously returned `err.message` verbatim to unauthenticated callers (SEC-011, finding R-3) — is fixed: `app.onError` (`api/src/app.ts:113-138`) now logs the message and stack server-side against a generated `requestId` and returns a fixed body, `{"error":{"code":"INTERNAL_ERROR","message":"An internal error occurred. Quote the requestId when reporting this.","retryable":true,"requestId":"…"}}`. Address fields are also checksum-validated up front (`api/src/validation.ts`), so a 58-character non-address is a 400 rather than a 500 raised deep in the call path. SEC-010 and SEC-011 **IMPLEMENTED**; see [`../06_Security/Threat_Model.md`](../06_Security/Threat_Model.md).
 
 ---
 

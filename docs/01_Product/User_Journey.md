@@ -1,16 +1,8 @@
 # MedRail — User Journeys
 
-
-> **⚠ Correction notice.** Parts of this document were written against a review finding that was
-> later proven wrong. Settlement in x402 v2 happens **only** on a sub-400 response, so **no error
-> path in MedRail can consume a settled payment** — and consent-denied calls (HTTP 403) are **not
-> charged**, contrary to `API.md`, `SECURITY.md`, and the `paidButDenied` field. The audit-sequence
-> race causes a **rejected transaction**, not a corrupted log. See
-> [`CORRECTIONS.md`](../CORRECTIONS.md) — it supersedes any statement here that contradicts it.
-
 **Purpose:** Trace the two end-to-end journeys the system supports — an agent paying for a triage call, and a patient granting consent so a requester can read a record summary — from discovery through repeat, against the endpoints that actually exist.
 
-**Status of this document:** Authored 2026-08-21 against the verified fact ledger and source at commit `32ffd73`. Every step is marked with its verification status. **Journey B's success path has never been executed on Algorand TestNet** — `total_audit_entries == 0` on App `768743428` and there are zero `s`- or `a`-prefixed boxes (ledger §3, finding E-1). Read §3.9 before treating Journey B as demonstrated. No latency, throughput, or duration figure appears here except the four measurements that exist in the ledger, each labelled as a single observation.
+**Status of this document:** Authored 2026-08-21 against the verified fact ledger and source at commit `3b387df`. Every step is marked with its verification status. **Journey B's success path has now been executed on Algorand TestNet** — `total_audit_entries = 5` on App `768743428`, with both `s`- and `a`-prefixed boxes present (`docs/PROOF.md` §9). No latency, throughput, or duration figure appears here except the measurements that exist in the ledger, each labelled as a single observation.
 
 ---
 
@@ -40,7 +32,7 @@ Fixed and non-negotiable for every diagram below:
 | Step | Surface | Status |
 |---|---|---|
 | Agent learns the base URL | Out of band today. Bazaar listing and the `x402-global-challenge` tag are pending operator action; `@x402/extensions` is declared in `api/package.json` but imported nowhere in `api/src` | **NOT IMPLEMENTED** (DOC-9) |
-| Agent reads the endpoint catalogue | `GET /` → `{service, description, endpoints[5], docs}` (`api/src/app.ts:71-84`) | FR-017 **IMPLEMENTED** |
+| Agent reads the endpoint catalogue | `GET /` → `{service, description, endpoints[8], contract, x402, docs}` (`api/src/app.ts:149-177`). Each entry carries `method`, `path`, `price` and `gate`; `contract` supplies `appId`, `network`, `networkCaip2` and `arc56SpecUrl`, and `x402` supplies `version: 2`, `scheme: "exact"` and the facilitator. An earlier revision advertised only five routes and omitted both blocks; `api/test/app.spec.ts` now asserts the advertised list equals the mounted set, so it cannot drift again (G-34 closed) | FR-017 **VALIDATED** |
 | Agent confirms liveness and network | `GET /v1/health` → `{ok, service:"medrail-api", network, consentAppId, time}` | FR-016 **VALIDATED** |
 | Agent learns the price | **From the 402 itself.** No pre-registration, no price list to fetch. | FR-002 **VALIDATED** |
 
@@ -98,7 +90,7 @@ sequenceDiagram
 | 402 shape and headers | Live capture in ledger §4; asserted by `api/test/x402-flow.spec.ts` (`amount == "20000"`, `network` matches `/^algorand:/`) | FR-001, FR-002 **VALIDATED** |
 | Facilitator registration | `api/src/x402.ts:6-14` — only the configured CAIP-2 network is registered, so a payment signed for the other network is not accepted (NFR-002) | **IMPLEMENTED** |
 | Settlement | tx `OYRQRKYA7WUKBVLWTOFJSJMZFBW7VCNGP5VGH5EBUJGRCVFQFJRQ` — `axfer`, asset `10458941`, amount 20000, round 66091768, `fee: 0`, group `XQzhbjBAqt0AjC5AByQsCxGbMdEuca3ZZFMyFBTb7K4=`, note `x402-payment-v2-1786140083822` | FR-003 **VALIDATED** |
-| Validation | `api/src/routes/triage.ts:5-7` | FR-038 **PARTIALLY IMPLEMENTED** |
+| Validation | `api/src/routes/triage.ts:5-7`. A rejection here is a 400, and a 400 cancels settlement — so a malformed body costs the caller nothing | FR-038 **IMPLEMENTED** |
 | Scoring | `api/src/services/triageScorer.ts:53-73`; bands at `:46-51` | FR-004, FR-005, FR-006 **VALIDATED** |
 | Disclaimer | `triageScorer.ts:18-21`, asserted by test | FR-009, AI-002 **VALIDATED** |
 
@@ -119,7 +111,7 @@ sequenceDiagram
 | Settled transaction ID | `PAYMENT-RESPONSE` header on the 200 | **VALIDATED** |
 | Independent confirmation | `curl https://testnet-idx.algonode.cloud/v2/transactions/<txid>`; explorer at `https://lora.algokit.io/testnet/transaction/<txid>` | **VALIDATED** |
 | In the browser demo | `web/components/LiveDemoPanel.tsx:154-163` renders "view settled transaction on-chain →" | FR-034 **IMPLEMENTED** |
-| Rich failure detail | **Missing.** `app.onError` returns `err.message` verbatim with status 500 (`api/src/app.ts:58-61`) — no error code, no correlation ID, no `Retry-After` | SEC-011, OPS-002 **NOT IMPLEMENTED** |
+| Failure detail | `app.onError` (`api/src/app.ts:113-139`) logs the exception server-side against a generated `requestId` and returns a stable envelope — `{"error":{"code":"INTERNAL_ERROR","message":"An internal error occurred. Quote the requestId when reporting this.","retryable":true,"requestId":"…"}}`. Machine-actionable, and no internal exception text reaches the caller. Facilitator outages get their own code and a `Retry-After` (§1.8) | SEC-011 **IMPLEMENTED**; OPS-002 **PARTIALLY IMPLEMENTED** — structured error logs exist, but there are still no metrics, tracing, or alerting (G-15) |
 
 ### 1.8 Repeat
 
@@ -127,12 +119,12 @@ The server holds **no session, account, or persistent request state** (NFR-001 *
 
 **What breaks on repeat**
 
-| Condition | Actual behaviour | Should be | ID |
-|---|---|---|---|
-| Facilitator unreachable | **HTTP 500**, no `PAYMENT-REQUIRED`, no `Retry-After`. Reproduced by the reviewer: `initialize()` throws `"no supported payment kinds loaded from any facilitator."` Root cause: `accepts[].asset` and `extra.feePayer` come from `/supported`, so the 402 cannot be constructed offline. | 503 + `Retry-After`, or a cached `/supported` | REL-001 **NOT IMPLEMENTED** (R-1) |
-| Free routes during that outage | `/v1/health`, `/`, `/v1/consent/app-info` verified still 200 | — | REL-005 **VALIDATED** |
-| High call rate | No throttle of any kind | A documented quota | SEC-013 **NOT IMPLEMENTED** |
-| Malformed body | 400 with `zod` flatten output (`triage.ts:13-15`) | — | Correct |
+| Condition | Actual behaviour | ID |
+|---|---|---|
+| Facilitator unreachable | **HTTP 503** with `Retry-After: 30` and `{"error":{"code":"PAYMENT_FACILITATOR_UNAVAILABLE","retryable":true,"facilitator":"…"}}`. A wrapper around the payment middleware (`api/src/app.ts:73-105`) matches exactly the `"no supported payment kinds" / "Failed to initialize"` condition and re-throws everything else. The underlying coupling is unavoidable — `accepts[].asset` and `extra.feePayer` come from `/supported`, so the 402 genuinely cannot be constructed offline — but a retryable outage now *reads* as a retryable outage to an agent | REL-001 **IMPLEMENTED** (G-04 closed) |
+| Free routes during that outage | `/v1/health`, `/`, `/v1/consent/app-info` verified still 200 | REL-005 **VALIDATED** |
+| High call rate on the free surface | **429** with `Retry-After` and `{"error":{"code":"RATE_LIMITED",…}}`. Fixed-window, in-memory: `/v1/consent/status` 60/min, `/v1/consent/arc56` and `/v1/records/summary` 30/min (`api/src/app.ts:44-46`, `api/src/rateLimit.ts`). Priced happy paths are deliberately unthrottled — a caller must settle USDC for each one, so they are economically self-limiting | SEC-013 **IMPLEMENTED** (G-09 closed) |
+| Malformed body | 400 with `zod` flatten output (`triage.ts:13-15`), settlement cancelled | Correct |
 
 ### 1.9 Journey A in the browser
 
@@ -143,7 +135,7 @@ The server holds **no session, account, or persistent request state** (NFR-001 *
 ## 2. Journey B — a patient grants consent, then a requester reads a record summary
 
 **Actors:** P-2 (patient) and P-3 (requesting clinician / care app).
-**Overall status:** **PARTIALLY VALIDATED.** The consent half is proven on-chain. The paid-read half is **UNVALIDATED**: it has never completed successfully against the deployed contract.
+**Overall status:** **VALIDATED.** Both halves are proven on-chain. The consent lifecycle was demonstrated first; the paid-read half has since completed successfully against the deployed contract, producing a settled payment and an audit append in the same call (`docs/PROOF.md` §9).
 
 ### 2.1 Discovery
 
@@ -192,14 +184,14 @@ sequenceDiagram
     end
 
     rect rgb(255,247,235)
-    Note over Req,App: Phase 2 — paid, consent-gated read.<br/>UNVALIDATED: this success path has never run on TestNet.
+    Note over Req,App: Phase 2 — paid, consent-gated read.<br/>VALIDATED on TestNet — see 2.11.
     Req->>API: POST /v1/records/summary  {patientId, requesterAddress}
     API-->>Req: 402 + PAYMENT-REQUIRED (amount "50000")
     Req->>API: retry + PAYMENT-SIGNATURE
-    API->>Fac: verify + settle  ($0.05)
-    Fac-->>API: settled
-    Note over API: Payment settles BEFORE the consent check.<br/>paymentMiddleware is registered at app.ts:37 — ahead of every route.
-    API->>API: zod: patientId / requesterAddress are length-58 only<br/>requesterAddress is caller-asserted — see 2.8
+    API->>Fac: verify  ($0.05)
+    Fac-->>API: payment verified — NOT yet settled
+    API->>API: zod: patientId / requesterAddress validated by checksum<br/>(algosdk.isValidAddress · api/src/validation.ts)
+    API->>API: payerFromRequest() recovers the signer of the payment tx<br/>403 unless payer === requesterAddress — see 2.8
     API->>Algod: check_access(...) via ATC simulate() — zero fee, submits nothing
     Algod-->>API: true
     API->>Algod: get_audit_count(patient) — simulate
@@ -208,9 +200,14 @@ sequenceDiagram
     Algod->>App: app call
     App-->>Algod: audit_log[patient||itob(n+1)] written · total_audit_entries += 1
     Algod-->>API: txId, sequence
-    API-->>Req: 200 {patientId, requesterAddress, scope, summary,<br/>consentVerifiedOnChain:true, auditTxId, auditSequence, disclaimer}
+    Note over API,Fac: Settlement happens ONLY now, because the handler<br/>is returning a status below 400. Any 4xx/5xx above<br/>cancels the payment instead.
+    API->>Fac: settle
+    Fac-->>API: settled
+    API-->>Req: 200 {patientId, requesterAddress, scope, summary,<br/>consentVerifiedOnChain:true, auditStatus, auditTxId,<br/>auditSequence, disclaimer}
     end
 ```
+
+**Read the ordering carefully — it is the opposite of what it looks like.** `paymentMiddleware` is registered on `*` ahead of every route, so it is natural to assume the money moves before the handler runs. It does not. `@x402/hono` *verifies* on the way in and *settles* on the way out, and it reaches `processSettlement` only when the handler returns a status below 400 — anything else dispatches `cancellationDispatcher.cancel(...)` and returns first. Every rejection in this diagram therefore costs the caller nothing, and no error path in MedRail can consume a settled payment. That is an inherited property of x402 v2, not MedRail engineering, and it is worth naming as such: **REL-002 is VALIDATED, satisfied structurally by the SDK.**
 
 **Evidence, leg by leg**
 
@@ -218,11 +215,12 @@ sequenceDiagram
 |---|---|---|
 | Patient-signed grant | `web/lib/consent.ts:44-68`; `contract.py:148-176`; tx `X2BQ5FD4MW52B75WQGDB67TEULYLN7FHVFO6ZOBNI74PNCAKVOUA` round 66088672 | FR-018, FR-035, SEC-003 **VALIDATED** |
 | Backend never holds the key | No key-ingress path in `api/src`; verified | NFR-008 **IMPLEMENTED** |
-| Box-key derivation | `contract.py:95-98` · `api/src/services/algorand.ts:63-79` · `web/lib/consent.ts:26-34` — **three independent implementations, no cross-check test** | NFR-011 **UNVALIDATED** |
-| 402 at $0.05 | `api/src/app.ts:43-46`; `x402-flow.spec.ts` asserts `amount == "50000"` | FR-001 **VALIDATED** |
-| Consent evaluation | `api/src/routes/records.ts:32` → `algorand.ts:82-100`, `atc.simulate()` | FR-010 **UNVALIDATED**; SEC-009 **IMPLEMENTED** |
-| Audit append | `api/src/routes/records.ts:49` → `algorand.ts:146-179`; `contract.py:217-236` | FR-012, FR-025 **UNVALIDATED on-chain** |
-| Response payload | `records.ts:51-60`; `summary` is the fixed `SYNTHETIC_RECORD` (`:15-21`) regardless of `patientId` | DATA-004 **IMPLEMENTED** |
+| Box-key derivation | `contract.py:95-98` · `api/src/services/algorand.ts:63-79` · `web/lib/consent.ts:26-34` — three independent implementations, now pinned to **one shared golden-vector fixture**, `api/test/fixtures/box-key-vectors.json`, asserted by `api/test/boxKeyParity.spec.ts` (Node `createHash` *and* browser `crypto.subtle` paths) and by `contracts/tests/test_box_keys.py` (Python path) | NFR-011 **VALIDATED** (G-08 closed) |
+| Payer binding | `api/src/x402Payer.ts` → `records.ts:41-51`; `api/test/x402Payer.spec.ts` (6 cases); verified live by `api/scripts/verify-g01-fix.ts` | FR-039, SEC-007, SEC-008 **VALIDATED** (G-01 closed) |
+| 402 at $0.05 | `api/src/app.ts:54-57`; `x402-flow.spec.ts` asserts `amount == "50000"` | FR-001 **VALIDATED** |
+| Consent evaluation | `api/src/routes/records.ts:53` → `algorand.ts:82-100`, `atc.simulate()` | FR-010 **VALIDATED**; SEC-009 **IMPLEMENTED** |
+| Audit append | `api/src/routes/records.ts:83-99` → `algorand.ts:146-179`; `contract.py:217-236`; audit tx `4YLKLQKKWXXFW3UT5APJVYKXI7T7A6OACTAWCC5YBAN3XGOGHRVQ` at sequence 1 | FR-012, FR-025 **VALIDATED on-chain** |
+| Response payload | `records.ts:101-111`; `summary` is the fixed `SYNTHETIC_RECORD` (`:17-23`) regardless of `patientId` | DATA-004 **IMPLEMENTED** |
 
 ### 2.7 The denied branch
 
@@ -235,19 +233,21 @@ sequenceDiagram
     participant App as MedRailConsent (768743428)
 
     Req->>API: POST /v1/records/summary + PAYMENT-SIGNATURE
-    API->>Fac: verify + settle ($0.05)
-    Fac-->>API: settled — money has moved
+    API->>Fac: verify ($0.05)
+    Fac-->>API: verified — no money has moved yet
+    API->>API: payerFromRequest() — payer === requesterAddress, so continue
     API->>App: check_access(...) [simulate]
     App-->>API: false
     API->>App: log_access(..., "consent_denied")  [.catch(() => undefined)]
-    API-->>Req: 403 {error, patientId, requesterAddress, paidButDenied: true}
+    API-->>Req: 403 {error, patientId, requesterAddress,<br/>charged: false, hint: "GET /v1/consent/status is free"}
+    Note over API,Fac: 403 ⇒ cancellationDispatcher.cancel(...)<br/>settlement never runs · the caller is NOT charged
 ```
 
-**Corrected — see [`../CORRECTIONS.md`](../CORRECTIONS.md) §C-2.** The project documents this as "the caller is charged whether or not consent is valid" (`../SECURITY.md` §"consent-denied calls are still charged"; `../API.md`), and the response carries `paidButDenied: true`. **That is not what happens.** The denial returns HTTP 403, and `@x402/hono` cancels settlement on any status ≥ 400 — so the caller pays **nothing**. Meanwhile `records.ts:38` submits a real `logAccess` transaction whose fee MedRail's operator account pays. A denial therefore costs the caller nothing and costs MedRail a chain fee. FR-011 **UNVALIDATED** — no test covers this route, which is exactly why the mismatch survived.
+**Who actually pays for a denial.** Earlier project documentation — `../API.md`, `../SECURITY.md` §"consent-denied calls are not charged" — described the caller as billed either way, and the response carried `charged: false`. **That was never what the code did.** A 403 cancels settlement, so the caller pays nothing; the field is gone, replaced by `charged: false` and a pointer to the free pre-flight check. The real cost runs the other way: `records.ts:58` submits a genuine `logAccess` transaction whose Algorand fee MedRail's operator account pays. A denial is free to the caller and costs MedRail one chain fee — which is why this route carries a **30 requests/minute** limit (`api/src/app.ts:46`). FR-011 **VALIDATED**.
 
-**Note the asymmetry.** On the denied path `logAccess` is wrapped in `.catch(() => undefined)` (`records.ts:37`). On the allowed path it is not (`records.ts:49`). If the on-chain write throws there — operator out of ALGO, app account out of box MBR, algod 5xx, validity-window expiry, or a rejected box reference — the request falls through to `app.onError` and returns **HTTP 500**. **Corrected:** settlement is cancelled on any status ≥ 400, so the caller is **not** charged — REL-002 is satisfied structurally by the SDK. What is lost is the *sale*: a legitimate, authorised, payable request becomes an error. The defensive branch is still on the path that matters less.
+**Note the asymmetry, which has narrowed but not closed.** On the denied path `logAccess` is wrapped in `.catch(() => undefined)` (`records.ts:58`) — silent, with no log, metric, or alert, so a lost denial record is invisible (G-15). On the allowed path it is now wrapped in `try/catch` (`records.ts:83-99`), which returns **200** with `auditStatus: "pending"` and emits a structured `audit_write_failed` event. Neither path can cost the caller money — settlement is cancelled on any status ≥ 400 — but only one of them tells anybody when the trail failed to record.
 
-### 2.8 The impersonation branch — this journey's real failure mode
+### 2.8 The impersonation branch — the attack this journey is designed to reject
 
 ```mermaid
 sequenceDiagram
@@ -259,27 +259,29 @@ sequenceDiagram
 
     Att->>Idx: read App 768743428 transaction history
     Idx-->>Att: grant_access calls — sender = patient, ABI arg 0 = requester<br/>(both public, by design)
-    Att->>API: POST /v1/records/summary + a valid $0.05 payment<br/>{patientId: victim, requesterAddress: authorised third party}
-    API->>App: check_access(victim, authorised third party, "records:summary")
-    App-->>API: true — the grant genuinely exists
-    API->>App: log_access(..., requester = the claimed address)
-    Note over App: FALSE ATTRIBUTION written to the<br/>immutable per-patient audit trail
-    API-->>Att: 200 + record summary
+    Att->>API: POST /v1/records/summary + a valid $0.05 payment<br/>signed by the ATTACKER's key<br/>{patientId: victim, requesterAddress: authorised third party}
+    API->>API: payerFromRequest() decodes PAYMENT-SIGNATURE<br/>and recovers the signer of paymentGroup[paymentIndex]
+    Note over API: payer = attacker<br/>requesterAddress = authorised third party<br/>MISMATCH
+    API-->>Att: 403 {error: "requesterAddress must match the address<br/>that signed the payment", requesterAddress, payer}
+    Note over API,App: check_access is never called · no audit entry is written<br/>403 also cancels settlement — the attempt is not even charged
 ```
 
-`requesterAddress` is read from the request body (`api/src/routes/records.ts:5-8`) and is never bound to the identity that paid. The x402 middleware proves *a* payment settled; it does not tell the handler *who* paid, and the handler never asks.
+The x402 middleware proves *a* payment is valid; it does not tell the handler *who* paid. `payerFromRequest` (`api/src/x402Payer.ts`) asks. It decodes the verified `PAYMENT-SIGNATURE` header, reads the AVM `exact` payload `{paymentGroup, paymentIndex}`, and recovers the sender of the one leg the caller actually signed — the other legs of the atomic group are the facilitator's fee-payer transactions and identify nobody relevant. `records.ts:41-51` then returns 403 unless that address equals the asserted `requesterAddress`, and treats a `null` recovery as a mismatch, so an unreadable header denies rather than defaults.
 
-**Why it is invisible today:** the response is a fixed synthetic constant, so nothing sensitive leaks in this build; and `web/components/LiveDemoPanel.tsx:38` sends `requesterAddress: wallet.address`, so in the demo payer and requester coincide.
+**Why this is a satisfying fix rather than a patch.** MedRail has no accounts, no API keys, and no sessions, so there is apparently no identity to check `requesterAddress` against. But an x402 payment *is* a signed Algorand transaction, and a signature is an identity assertion — the credential was already in the request, unread. Recovering it costs one header decode and converts a paywall into an authorisation check with no account system and no server-side state. The same stranger-callable property that created the attack surface is what makes the defence free.
 
-**Status:** SEC-006 **PARTIALLY IMPLEMENTED — DEFEATED BY S-1**; SEC-007, SEC-008, FR-039 **NOT IMPLEMENTED**. See [`./Use_Cases.md`](./Use_Cases.md) UC-011.
+**Verified live, with a control.** `api/scripts/verify-g01-fix.ts` grants a real third-party requester consent on App `768743428` (grant tx `PCPVK3FLKP55L3FHCFIIF7QBYUPV5BHKSKYJTUIL6J4Q23HKNFDQ`), pays from a different key while asserting that third party, and confirms the **403**; it then repeats with payer and requester matched and confirms a **200** carrying settled tx `QZIQWHN553Q3QYJ4NJ5GP3QIROP6BE2DD45P3IUSHUOGEB7VLVSQ` and audit tx `OYNWBHJTS4LCIW2KQKOM2CEZGIFPRCZLVBVCDDG3GGNWKWDKNBGA`. Raw output in `contracts/artifacts/g01-verification.json`.
+
+**Status:** SEC-006, SEC-007, SEC-008 and FR-039 **VALIDATED**. See [`./Use_Cases.md`](./Use_Cases.md) UC-011.
 
 ### 2.9 Output and feedback — and what is not there
 
 | Signal | Intended | Actual |
 |---|---|---|
-| `consentVerifiedOnChain: true` | Confirms a live contract read | Present in the response shape (`records.ts:56`); never produced by a real run |
-| `auditTxId`, `auditSequence` | A verifiable receipt of the access | Documented in [`../API.md`](../API.md); **have never been produced by a real run** (E-1) |
-| Patient sees the access | `get_audit_count` / `get_audit_entry` exist on-chain (FR-028 **VALIDATED**) and `getAuditCount` exists in the backend (`algorand.ts:103-121`) | **No endpoint and no UI exposes either**, and there are zero entries to show |
+| `consentVerifiedOnChain: true` | Confirms a live contract read | Present in the response shape (`records.ts:106`) and produced by real runs |
+| `auditTxId`, `auditSequence` | A verifiable receipt of the access | Documented in [`../API.md`](../API.md) and **produced by real runs** — first at `4YLKLQKK…` / sequence `1` |
+| `auditStatus` | Tells the caller whether the receipt is real yet | `"recorded"` when the append confirmed, `"pending"` when it failed — in which case the record is still returned with HTTP 200 and null `auditTxId`/`auditSequence` (`records.ts:83-99`). A caller can distinguish "you have a receipt" from "you have the data, the receipt is outstanding" without parsing an error |
+| Patient sees the access | `get_audit_count` / `get_audit_entry` exist on-chain (FR-028 **VALIDATED**) and `getAuditCount` exists in the backend (`algorand.ts:103-121`) | **No endpoint and no UI exposes either.** There are now 5 entries to show and no surface that shows them |
 | Grant status read-back | `GET /v1/consent/status`; `ConsentChecker.tsx:44-48` re-checks after every grant/revoke | **IMPLEMENTED**. One cold observation of 505 ms (two sequential algod round-trips) — a single sample, **not** a p50/p95/p99 and not a benchmark |
 
 ### 2.10 Repeat and revocation
@@ -296,7 +298,7 @@ sequenceDiagram
     Algod->>App: assert grant box exists → status = 2 (REVOKED)
     App-->>Algod: emit AccessRevoked · total_grants_active -= 1 · total_revocations += 1
     Req->>App: next paid call → check_access → false
-    Note over Req: 403 paidButDenied — but settlement is CANCELLED<br/>the requester is NOT charged (see CORRECTIONS.md C-2)
+    Note over Req: 403 {charged: false} — settlement is CANCELLED<br/>the requester pays nothing for the refusal
 ```
 
 - Revocation: `contract.py:178-195`; tx `OV2J2T5VWMIQG64JYGL7JEGZKKNZNKCMNIQU6AC4PDRQYZ6ZOO5A` round 66088674. FR-020 **VALIDATED**.
@@ -308,13 +310,15 @@ sequenceDiagram
 
 ```
 total_requests       = 2
-total_grants_active  = 0
+total_grants_active  = 4
 total_revocations    = 2
-total_audit_entries  = 0     ← the audit path has never run
-boxes                = 2     (both "g"-prefixed grants, both revoked; 100 total box bytes)
+total_audit_entries  = 5     ← the audit path has run, repeatedly
+boxes                  "g"-prefixed grants, plus "s" audit-sequence and "a" audit-entry boxes
 ```
 
-Journey B has been walked to the end of Phase 1, twice, and **never past it**. Any presentation of Journey B must say so.
+Journey B has been walked end to end and is repeatable: `api/scripts/e2e-consent-proof.ts` performs grant → free status check → paid call → audit append against the live contract in one run. The box shapes match what the design predicts — `a` entries at `1 + 32 (patient) + 8 (itob seq)` = 41 bytes, `s` sequences at `1 + 32` = 33 bytes, `g` grants at `1 + 32 (sha256)` = 33 bytes — and the app account's minimum balance reconciles exactly against `2500 × boxes + 400 × box-bytes` (`docs/PROOF.md` §9).
+
+**What still must be said in any presentation of Journey B:** every payment in it is a self-payment from the project's own account, nothing is publicly hosted, there is no MainNet deployment and no Bazaar listing. The mechanism is proven. The adoption is not.
 
 ---
 
@@ -327,11 +331,11 @@ Journey B has been walked to the end of Phase 1, twice, and **never past it**. A
 | Chain reads per call | 0 | 2 simulated (`check_access`, `get_audit_count`) |
 | Chain writes per call | 0 (beyond the payment itself) | 1 (`log_access`, admin-signed) |
 | Server state | None | None — everything is on-chain |
-| Proven end-to-end on TestNet | **Yes** | **No** |
-| Test coverage | 5 structural x402 tests + 13 pure-function tests | **Zero** |
+| Proven end-to-end on TestNet | **Yes** | **Yes** |
+| Test coverage | 5 structural x402 tests + 13 pure-function tests | 6 payer-binding tests, 14 box-key parity tests, 7 app-surface tests, plus the live `e2e-consent-proof.ts` and `verify-g01-fix.ts` runs |
 | Volume potential | Any agent, any time | Bounded by real patient–requester relationships |
-| Failure with facilitator down | 500 (R-1) | 500 (R-1) |
-| Worst failure mode | Lost 500 with a leaked exception message (R-3) | Impersonation (S-1) and lost payment (R-2) |
+| Failure with facilitator down | 503 + `Retry-After` | 503 + `Retry-After` |
+| Worst remaining failure mode | A rejected transaction on a thinly-covered chain client (G-05) | Audit append silently deferred to `auditStatus: "pending"` with no alerting (G-15) |
 
 The asymmetry is the product argument, made in [`../JUDGES.md`](../JUDGES.md) and analysed in [`./USP_Novelty.md`](./USP_Novelty.md): Journey B is the story, Journey A is the volume, and the same contract underwrites both.
 
@@ -339,19 +343,22 @@ The asymmetry is the product argument, made in [`../JUDGES.md`](../JUDGES.md) an
 
 ## 4. Cross-journey friction log
 
-| # | Friction | Journey | ID |
+Resolved entries are kept rather than deleted, because a friction log that quietly drops its own closed items stops being checkable.
+
+| # | Friction | Journey | Status |
 |---|---|---|---|
-| F-1 | No discovery mechanism; the URL must be known already | A, B | DOC-9 |
-| F-2 | No public endpoint deployed; `fly deploy` today yields a broken service | A, B | D-1, D-2 |
-| F-3 | Facilitator outage ⇒ 500, not 402/503 | A, B | REL-001 |
-| F-4 | Invalid-but-58-char address ⇒ 500 with an internal message leaked | B | SEC-010, SEC-011 (R-3) |
-| F-5 | Settled payment can be lost on the success path | B | REL-002 (R-2) |
-| F-6 | Requester identity unauthenticated | B | SEC-007 (S-1) |
-| F-7 | No real wallet; the demo keypair is the only path | B | DOC-4 |
-| F-8 | The audit trail has no read surface and no entries | B | E-1 |
-| F-9 | No rate limiting on the free consent lookup | B | SEC-013 |
-| F-10 | UI supports only self-granting, duration hard-coded to 0 | B | — |
-| F-11 | Three independent box-key derivations with no cross-check test | B | NFR-011 |
+| F-1 | No discovery mechanism; the URL must be known already | A, B | **Open** (DOC-9). Nothing is publicly hosted, and there is no Bazaar listing |
+| F-2 | No public endpoint deployed | A, B | **Partly closed.** `api/fly.toml` now sets `NETWORK = "testnet"`, `CONSENT_APP_ID = "768743428"`, a `/v1/health` check and `max_machines_running = 1`; both Dockerfiles use `npm ci` and `.dockerignore` files exist. The configuration is correct — nothing is deployed to it yet |
+| F-3 | Facilitator outage ⇒ 500, not 503 | A, B | **Closed** (G-04). 503 + `Retry-After: 30` + `PAYMENT_FACILITATOR_UNAVAILABLE` |
+| F-4 | Invalid-but-58-char address ⇒ 500 with an internal message leaked | B | **Closed** (G-10). Checksum validation in `api/src/validation.ts` ⇒ 400; `app.onError` returns a generic body with a `requestId` |
+| F-5 | Settled payment can be lost on the success path | B | **Withdrawn — the finding was wrong.** Settlement is unreachable on a status ≥ 400. REL-002 **VALIDATED** by the SDK. The residual risk was the lost *sale*, and that is now handled by `auditStatus: "pending"` |
+| F-6 | Requester identity unauthenticated | B | **Closed** (G-01). `api/src/x402Payer.ts`, verified live by `api/scripts/verify-g01-fix.ts` |
+| F-7 | No real wallet; the demo keypair is the only path | B | **Open** (DOC-4). `web/lib/demoWallet.ts:12` still references a `lib/walletConnect.ts` that does not exist |
+| F-8 | The audit trail has no read surface | B | **Half closed.** There are 5 entries on-chain now, and still no endpoint or UI that reads them |
+| F-9 | No rate limiting on the free consent lookup | B | **Closed** (G-09). 60/min on `/v1/consent/status`, 30/min on `/v1/consent/arc56` and `/v1/records/summary` |
+| F-10 | UI supports only self-granting, duration hard-coded to 0 | B | **Open.** The two-party flow and the expiry behaviour are both **VALIDATED** in the contract and unreachable from the browser |
+| F-11 | Three independent box-key derivations with no cross-check test | B | **Closed** (G-08). One shared golden-vector fixture asserted from all three runtimes |
+| F-12 | No metrics, tracing, or alerting anywhere | A, B | **Open** (G-15). Structured JSON error logs exist; nothing consumes them |
 
 ---
 

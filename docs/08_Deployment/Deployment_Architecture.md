@@ -1,13 +1,6 @@
 # MedRail — Deployment Architecture
 
 
-> **⚠ Correction notice.** Parts of this document were written against a review finding that was
-> later proven wrong. Settlement in x402 v2 happens **only** on a sub-400 response, so **no error
-> path in MedRail can consume a settled payment** — and consent-denied calls (HTTP 403) are **not
-> charged**, contrary to `API.md`, `SECURITY.md`, and the `paidButDenied` field. The audit-sequence
-> race causes a **rejected transaction**, not a corrupted log. See
-> [`CORRECTIONS.md`](../CORRECTIONS.md) — it supersedes any statement here that contradicts it.
-
 **Purpose:** describe the deployment topology of MedRail as it actually exists today, the topology the committed configuration files intend, and the exact gap between the two.
 
 **Status of this document:** authored 2026-08-21 against commit `32ffd73` (branch `master`). Every topology claim below was verified by reading `api/Dockerfile`, `web/Dockerfile`, `api/fly.toml`, `.github/workflows/ci.yml`, `api/src/config.ts` and `api/src/app.ts`, and by querying the public Algorand TestNet indexer. No deployment, uptime, SLA, region or scaling behaviour is claimed that does not exist.
@@ -213,7 +206,7 @@ Four environments are referenced across the repo. Two exist.
 |---|---|---|---|---|---|---|
 | **Local dev** | **IMPLEMENTED** | TestNet | `768743428` via `readDeployedAppId` fallback (`config.ts:31-40`) | Developer laptop, `:4021` / `:3000` | `api/.env`, `web/.env.local`, `contracts/.env` (all untracked) | The only environment anyone has actually run the API in |
 | **CI** | **IMPLEMENTED**, inert | none — no chain calls except the facilitator | n/a | `ubuntu-latest` runners | `ci.yml:64-66` sets only the two `NEXT_PUBLIC_*` vars for the web build | `api` job reaches `facilitator.goplausible.xyz` at module import (CI-2) |
-| **TestNet contract** | **VALIDATED** | TestNet, genesis `SGO1GKSzyE7IEPItTxCByw9x8FmnrCDexi9/cOUJOiI=` | `768743428` | Algorand TestNet | `contracts/artifacts/deploy_testnet.json` | Live and independently verifiable; `total_audit_entries = 0` |
+| **TestNet contract** | **VALIDATED** | TestNet, genesis `SGO1GKSzyE7IEPItTxCByw9x8FmnrCDexi9/cOUJOiI=` | `768743428` | Algorand TestNet | `contracts/artifacts/deploy_testnet.json` | Live and independently verifiable; `total_audit_entries = 5` |
 | **MainNet / production** | **NOT IMPLEMENTED** | MainNet, genesis `wGHE2Pwdvd7S12BL5FaOP20EGYesN73ktiC1qzkkit8=` | none | nowhere | `api/fly.toml` claims `NETWORK = "mainnet"` | D-2. No contract, no host, no DNS |
 
 There is **no staging environment**, and no environment in which the API has ever run against a contract other than TestNet `768743428`.

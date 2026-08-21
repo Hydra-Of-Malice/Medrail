@@ -1,13 +1,6 @@
 # MedRail — Logging
 
 
-> **⚠ Correction notice.** Parts of this document were written against a review finding that was
-> later proven wrong. Settlement in x402 v2 happens **only** on a sub-400 response, so **no error
-> path in MedRail can consume a settled payment** — and consent-denied calls (HTTP 403) are **not
-> charged**, contrary to `API.md`, `SECURITY.md`, and the `paidButDenied` field. The audit-sequence
-> race causes a **rejected transaction**, not a corrupted log. See
-> [`CORRECTIONS.md`](../CORRECTIONS.md) — it supersedes any statement here that contradicts it.
-
 **Purpose:** document the logging that exists, the disclosure defect in the one error path, and a logging design that would make this system operable.
 
 **Status of this document:** authored 2026-08-21 against commit `32ffd73`. **The API contains exactly two logging statements.** Verified by exhaustive grep of `api/src/`. There is no logging framework, no log levels, no request ids, no structured output, no retention policy, no shipping, and no correlation between an HTTP request and the on-chain transactions it produces. OPS-002 is **NOT IMPLEMENTED**. Everything from §4 onward is **RECOMMENDED** and none of it is in the repo.
@@ -103,7 +96,7 @@ Nothing at all is logged for any of these. Not at any level. Not anywhere.
 | A payment settling | **No** | **The settled transaction id never touches a log.** It is returned in the `PAYMENT-RESPONSE` header and then forgotten |
 | A consent check and its result | **No** | The `allowed`/denied decision at `records.ts:32` leaves no trace off-chain |
 | `log_access` being submitted or its tx id | **No** | `logResult.txId` is returned to the caller (`records.ts:57`) and never logged. **If the response is lost, the tx id is lost with it** |
-| A 403 `paidButDenied` response | **No** | A paid-and-denied caller is unrecorded off-chain |
+| A 403 `charged` response | **No** | A paid-and-denied caller is unrecorded off-chain |
 | A swallowed audit-write failure | **No** | `records.ts:37` — `logAccess(...).catch(() => undefined)` discards the error **silently**. An audit write can fail on the denied path and **nothing anywhere records it** |
 | Startup configuration | **Partially** — port and network only | D-1 and D-2 would both be visible at boot with a fuller line |
 | Process shutdown | **No** | No graceful-shutdown handler exists at all |
@@ -216,7 +209,7 @@ Note the validation on the inbound header. Reflecting an arbitrary caller string
 |---|---|---|
 | `fatal` | The process cannot serve correctly and should exit | `CONSENT_APP_ID` unset at boot (D-1); `OPERATOR_MNEMONIC` unset; `PAY_TO_ADDRESS` empty. See the fail-fast guard in `../08_Deployment/Docker.md` §5.1 |
 | `error` | A request failed for a reason the operator must act on | Audit write failed after settlement (**always** — this is R-2); facilitator unreachable; algod error; `only admin` rejection; **the currently-silent `.catch()` at `records.ts:37`** |
-| `warn` | Degraded but handled | Consent denied on a paid request (`paidButDenied`); malformed address rejected as 400; audit write failed on the *denied* path; retry attempted |
+| `warn` | Degraded but handled | Consent denied on a paid request (`charged`); malformed address rejected as 400; audit write failed on the *denied* path; retry attempted |
 | `info` | Normal lifecycle | Boot config summary; request completed; 402 issued; payment settled; `log_access` submitted with its tx id |
 | `debug` | Off by default, opt-in via `LOG_LEVEL` | Box names derived; algod request/response shapes; simulate results |
 

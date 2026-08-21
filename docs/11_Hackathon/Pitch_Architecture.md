@@ -1,16 +1,8 @@
 # MedRail — Pitching the Architecture
 
-
-> **⚠ Correction notice.** Parts of this document were written against a review finding that was
-> later proven wrong. Settlement in x402 v2 happens **only** on a sub-400 response, so **no error
-> path in MedRail can consume a settled payment** — and consent-denied calls (HTTP 403) are **not
-> charged**, contrary to `API.md`, `SECURITY.md`, and the `paidButDenied` field. The audit-sequence
-> race causes a **rejected transaction**, not a corrupted log. See
-> [`CORRECTIONS.md`](../CORRECTIONS.md) — it supersedes any statement here that contradicts it.
-
 **Purpose:** how to present MedRail's technical architecture to a mixed audience of engineers and non-engineers in under three minutes — one thesis, one diagram, three evidenced claims, and the depth to hold in reserve for Q&A.
 
-**Status of this document:** Pitch guidance, 2026-08-21. Every technical fact and transaction id below was verified against source or the public Algorand TestNet indexer during authoring. No MainNet deployment, public hosting, Bazaar listing, leaderboard presence, or payment volume is claimed — all are pending. Exactly one settled payment exists; it was a self-payment. Judging criteria referenced are per `docs/COMPLIANCE.md:31-33`; the official rules were not independently re-fetched during this review.
+**Status of this document:** Pitch guidance, 2026-08-21. Every technical fact and transaction id below was verified against source or the public Algorand TestNet indexer. No MainNet deployment, public hosting, Bazaar listing, leaderboard presence, or third-party payment volume is claimed — all are pending. **Every settled payment to date is a self-payment from the project's own account.** Judging criteria referenced are per `docs/COMPLIANCE.md:31-33`; the official rules were not independently re-fetched during this review.
 
 Companion documents: [`Demo_Script.md`](Demo_Script.md), [`Winning_Strategy.md`](Winning_Strategy.md), [`Judge_Evaluation.md`](Judge_Evaluation.md), [`../02_Requirements/Requirements_Gap_Analysis.md`](../02_Requirements/Requirements_Gap_Analysis.md), [`../06_Security/Threat_Model.md`](../06_Security/Threat_Model.md).
 
@@ -88,7 +80,7 @@ Make exactly these three. Each takes about twenty seconds including its evidence
 
 ### Claim 1 — "The contract is real, and you can verify it without me."
 
-**Evidence:** App **768743428**, created at round **66088624**, `deleted: false`, admin set, 5 ALGO funded, two grant boxes live.
+**Evidence:** App **768743428**, created at round **66088624**, `deleted: false`, admin set, 5 ALGO funded, **12 boxes live** — 6 grant boxes, 5 audit-entry boxes, and 1 per-patient sequence box — with `total_audit_entries = 5` and `total_grants_active = 4` in global state.
 
 ```bash
 curl -s https://testnet-idx.algonode.cloud/v2/applications/768743428
@@ -96,9 +88,11 @@ curl -s https://testnet-idx.algonode.cloud/v2/applications/768743428
 
 **Show:** the live terminal output, or https://lora.algokit.io/testnet/application/768743428.
 
-**Say:** *"That's the public indexer. Not our server, not our API, no key, no account. You can run that on your phone right now."*
+**Say:** *"That's the public indexer. Not our server, not our API, no key, no account. You can run that on your phone right now. And look at `total_audit_entries` — five. Every one of those is a paid, consented record access written to a patient's own log by the contract itself."*
 
 **Why it works:** it removes you from the trust chain entirely. Most submissions ask a judge to believe a screenshot.
+
+**If they push harder — and this is the strongest version of the claim:** the deployed approval program is byte-identical to the compilation of the TEAL committed in the repository. The algod compile hash is `W4TMZHJOL7FIN5GIGJCWNB2HVI4C4WGVRDVY6BMUUOMWRFHMBJVSPZZ33U`, 1404 base64 characters, matched exactly against what the indexer serves. *"You can verify that the code you're reading is the code that's running."* **Attach the caveat in the same breath:** that pins the deployed bytecode to the *committed artifacts*, which predate two source-level contract fixes we deliberately have not redeployed — see §5, Q17.
 
 ---
 
@@ -146,7 +140,9 @@ def grant_key(patient: Account, requester: Account, scope: String) -> Bytes:
 
 **Why sha256 rather than concatenation:** box keys are length-limited and the scope is a free-form string. Hashing gives a fixed 32-byte key for an unbounded input, so scope length never constrains the design.
 
-**The honest cost, if pressed:** the derivation is implemented three times — Python (`contract.py:96-98`), Node (`api/src/services/algorand.ts:64-70`), and WebCrypto in the browser (`web/lib/consent.ts:25-33`) — and there is **no test proving they agree** (`NFR-011`, **UNVALIDATED**). If any one drifts, a grant written by the browser becomes silently unreadable by the backend: no error, just `false`. Volunteering this is worth more than hiding it; it is one of the sharpest things you can say about your own code.
+**The cost of that design, and how it is now controlled:** the derivation is implemented three times — Python (`contract.py:96-98`), Node (`api/src/services/algorand.ts:64-70`), and WebCrypto in the browser (`web/lib/consent.ts:25-33`). If any one drifts, a grant written by the browser becomes silently unreadable by the backend: no error, just `false`. That class of failure is the reason `api/test/fixtures/box-key-vectors.json` exists — a shared golden-vector fixture asserted by `api/test/boxKeyParity.spec.ts` (covering both the Node `createHash` and browser `crypto.subtle` paths) **and** by `contracts/tests/test_box_keys.py`. Three languages, one set of expected bytes, checked on every run. `NFR-011` **VALIDATED**.
+
+**Why to raise this unprompted:** it shows you identified a silent-failure mode in your own design and closed it with the only mechanism that actually works across a language boundary. "We wrote it three times and tested that they agree" is a much better sentence than "we wrote it three times."
 
 **One more detail worth having:** `scope` is a free-form string, not an enum (`DATA-003`). Adding a fourth endpoint with a new scope requires zero contract changes and zero redeployment.
 
@@ -170,9 +166,13 @@ The Algorand `exact` scheme permits up to **16 transactions** in a client's sign
 
 **So:** the facilitator settles through the normal flow, and the backend's operator account — already registered as `admin` — submits `log_access` immediately afterwards. Two real transactions, moments apart, not atomic at the ledger level. The stated mitigation is that `log_access` is admin-gated and only ever called server-side after a facilitator-confirmed settlement.
 
-**The residual risk, which you should name before they do:** if that second transaction fails, the payment has already settled. Today `api/src/routes/records.ts:49` does not guard it, so the caller gets an HTTP 500 with their $0.05 spent (finding R-2, `REL-002` **NOT IMPLEMENTED**). Note the asymmetry: the *denied* path at line 37 wraps `logAccess` in `.catch(() => undefined)`; the *success* path does not. The fix is about ten lines — return the resource with `auditTxId: null` and an explicit `auditWriteFailed` flag — and it is in `Winning_Strategy.md` M3.
+**The residual risk, and the part most people get wrong about it:** if that second transaction fails, the payment has already settled — so the obvious worry is *"the caller paid and got nothing."* **That cannot happen, and the reason is structural rather than something we wrote.** `@x402/hono` calls `processSettlement` **only** when the handler returns a status below 400; any throw or any 4xx/5xx cancels settlement and returns first. So an error response never consumes money. `REL-002` is **VALIDATED, satisfied by the SDK** — credit it to x402 v2 rather than to us.
 
-**Why this answer lands:** you identify a tempting design, reject it for a stated reason, own the cost, and know the exact line number where the cost bites. That is the shape of an answer that ends a line of questioning.
+What was genuinely at risk was the *sale*: an unguarded audit-write failure turned a legitimate, paid, authorised request into a 500. `api/src/routes/records.ts:76-100` now wraps `logAccess` in `try/catch` and returns **200 with the record**, plus `auditStatus: "pending"`, a null `auditTxId`, and a structured `audit_write_failed` event logged server-side.
+
+**Say it like this:** *"You can't be charged for a failure — settlement only happens on a sub-400 response, so an error cancels the payment before the money moves. What we had to fix was the other side: a chain hiccup shouldn't cost you a record you were entitled to. So you get the record, plus an explicit flag telling you the ledger write is outstanding."*
+
+**Why this answer lands:** you identify a tempting design, reject it for a stated reason, own the cost, and then demonstrate that you went and read the SDK's settlement path rather than assuming the worst about your own system. Knowing precisely *which* risk is real and which is imaginary is the shape of an answer that ends a line of questioning.
 
 ### 4.4 MBR economics
 
@@ -180,11 +180,11 @@ Algorand box minimum balance is `2500 + 400 × (len(key) + len(value))` µALGO, 
 
 A grant box: 33-byte effective key (`"g"` prefix + 32-byte digest) + 17-byte `GrantRecord` (1 + 8 + 8, ARC-4 encoded) = **22,500 µALGO**, about 2.25 cents of ALGO per consent grant, refundable when the box is deleted.
 
-**Verified against the live ledger:** app account `CCO26Y6Z56DDZ3OELO2UKJMIPJVSIT52I23F2MPMR52JBM3HQZZNUZNOR4` reports `min-balance = 145,000` with `total-boxes = 2`. 145,000 − 100,000 (base account MBR) = 45,000 = 2 × 22,500. Exactly.
+**Verified against the live ledger:** app account `CCO26Y6Z56DDZ3OELO2UKJMIPJVSIT52I23F2MPMR52JBM3HQZZNUZNOR4` reports `min-balance = 550,400` across `total-boxes = 12` (6 grant, 5 audit, 1 sequence). The grant-box arithmetic was confirmed when there were exactly two of them: 145,000 − 100,000 (base account MBR) = 45,000 = 2 × 22,500. Exactly.
 
-**And here is the defect you should volunteer.** `contract.py:52` computes `GRANT_BOX_MBR = 2_500 + 400 * (32 + 17)` = **22,100** — it omits the 1-byte `"g"` key prefix. The `get_grant_box_mbr()` ABI method, advertised in its own docstring as *"a compile-time constant the backend can quote when sizing `fund_mbr` calls"*, therefore returns a figure **400 µALGO per box too low**. A backend sizing top-ups from it under-funds by 1.8%. Finding C-2; one-line fix, `400 * (33 + 17)`.
+**And here is the defect you should volunteer.** The deployed contract computes `GRANT_BOX_MBR = 2_500 + 400 * (32 + 17)` = **22,100** — omitting the 1-byte `"g"` key prefix. The `get_grant_box_mbr()` ABI method, advertised in its own docstring as *"a compile-time constant the backend can quote when sizing `fund_mbr` calls"*, therefore returns a figure **400 µALGO per box too low**, under-funding top-ups by 1.8%. Finding C-2. **It is fixed in source** — `contract.py` now reads `2_500 + 400 * (33 + 17)` = 22,500, with a regression test that was verified to fail against the old value — **and deliberately not redeployed.**
 
-**Say it like this:** *"We found that by checking our own advertised constant against the deployed app's actual minimum balance. We haven't shipped the fix, because redeploying gives us a new App ID and destroys every transaction id in our evidence log — and a four-hundred-microalgo error is worth less than the deployment history."*
+**Say it like this:** *"We found that by checking our own advertised constant against the deployed app's actual minimum balance — the ledger disagreed with our own docstring by four hundred microalgos a box. It's fixed in source with a regression test we ran against the old code first, and we haven't redeployed, because our deploy path mints a new App ID and would destroy every transaction id in our evidence log. A four-hundred-microalgo error is worth less than the deployment history."*
 
 That answer demonstrates three things at once: you audit your own arithmetic against the ledger, you understand what redeployment costs, and you make trade-offs deliberately rather than by omission.
 
@@ -198,11 +198,13 @@ That answer demonstrates three things at once: you audit your own arithmetic aga
 
 **One non-obvious wrinkle, if someone reads the code:** the *free, unauthenticated* `/v1/consent/status` endpoint has a hard dependency on `OPERATOR_MNEMONIC` being loaded, because `simulate()` still needs a sender and a signer even though nothing is submitted (`algorand.ts:8-14`). It is not a security flaw — no signature is broadcast — but it is a coupling that surprises people, and knowing it is a good look.
 
+**And the abuse question it raises, answered:** free plus unauthenticated plus two algod round-trips per request is an amplification vector at someone else's public infrastructure. `api/src/rateLimit.ts` caps it at 60 requests per minute per client, with `/v1/consent/arc56` and `/v1/records/summary` at 30, returning 429 with a `Retry-After`. The priced happy paths are deliberately *not* throttled — a caller must settle USDC for each one, so they are economically self-limiting. Be precise about what that control is: fixed-window, in-process, keyed on `X-Forwarded-For`. It is a courtesy guard against accidental hammering, **not a security boundary**, and the code says exactly that in its own header comment.
+
 ---
 
 ## 5. Q&A bank
 
-Sixteen questions with honest, strong answers. Every answer here is true as of 2026-08-21. Where a fix changes the answer, both versions are given.
+Seventeen questions with honest, strong answers. Every answer here is true as of 2026-08-21. Three of them (Q3, Q5, Q10) used to be confessions and are now demonstrations — those are the ones to rehearse, because the delivery for a good answer is different from the delivery for a bad one. Q17 is new and it is the sharpest question a well-prepared judge can ask.
 
 ---
 
@@ -218,17 +220,22 @@ Because the patient has to be able to revoke access *without asking the party ho
 
 ---
 
-**Q3. "How do you know the caller is who they say they are?"**
+**Q3. "How do you know the caller is who they say they are?"** ★ *the one that flipped*
 
-*(Before `Winning_Strategy.md` M1 — the honest answer, finding S-1.)*
+**The payment is the authentication.** The `PAYMENT-SIGNATURE` header carries a signed Algorand transaction, which already contains a cryptographically proven sender. So `api/src/x402Payer.ts` decodes the verified header, reads the AVM `exact` payload — `{paymentGroup, paymentIndex}` — and recovers the address that actually signed the payment. `api/src/routes/records.ts:41-51` then returns **403** unless that address equals the asserted `requesterAddress`, *before* the consent check and before anything touches the ledger:
 
-We don't, and it's the top item on our fix list. `requesterAddress` comes from the request body and nothing binds it to whoever paid. The x402 middleware proves *a* payment settled; it doesn't tell the handler who paid, and the handler doesn't ask. Since grants are public on the ledger — `grant_access` has the patient as sender and the requester as argument zero — valid pairs are enumerable from our own transaction history, so anyone who pays five cents could read as any authorised requester. It's contained in this build only because the response is a fixed synthetic constant, and that's containment, not a control.
+```json
+{"error":"requesterAddress must match the address that signed the payment",
+ "requesterAddress":"NHUPYHPA…","payer":"2WDV2J2F…"}
+```
 
-The fix is available and small: `@x402/core/http` exports `decodePaymentSignatureHeader`, `@x402/avm` exports `getSenderFromTransaction`. Recover the payer from the signed transaction, 403 unless it matches. About fifteen lines plus a regression test.
+No API keys, no bearer tokens, no session store, nothing to rotate. The identity was already in the envelope; we just started using it as one.
 
-And the part that bothers me more than the read: our audit log records the *claimed* requester, so a successful impersonation would write a false attribution into an immutable trail that's trusted precisely because it's on-chain.
+**Then offer to prove it**, because this is the best fifteen seconds available to you: *"Let me show you."* `api/scripts/verify-g01-fix.ts` runs the exact attack against the live TestNet deployment — the patient grants a **third party** consent on-chain, the attacker pays with their own key while claiming the third party's address, and the call is refused; then a control call with a matching identity returns the record and its audit transaction id. Six unit tests in `api/test/x402Payer.spec.ts`; the run is recorded in `contracts/artifacts/g01-verification.json` with `"blocked": true`.
 
-*(After M1.)* We decode the `PAYMENT-SIGNATURE` header, recover the address that actually signed the settled payment, and reject with 403 unless it matches the claimed requester — here, let me pay from one wallet and claim to be another.
+**Why this matters, said in one sentence:** grants are public on the ledger — `grant_access` has the patient as sender and the requester as argument zero — so valid pairs are enumerable from our own transaction history. Without this binding, anyone who paid five cents could read as any authorised requester, **and that fabricated identity would be written into the patient's immutable audit trail**, which is trusted precisely because it is on-chain. Paying is not being.
+
+**The caveat to volunteer if pressed:** this binds the requester to the payer, which is the right control for this endpoint. It does not, and cannot, prove that the human behind that key is the clinician the patient had in mind. On-chain identity is pseudonymous — the patient chose an address, and MedRail enforces that the address is the one that showed up.
 
 ---
 
@@ -244,17 +251,23 @@ And I'll give you the cost before you find it: type *"I have no chest pain"* and
 
 **Q5. "What happens when the facilitator goes down?"**
 
-Every priced route returns a 500 — we reproduced it. Not a 402, not a 503, no `Retry-After`. The reason is structural: the asset id and the fee-payer address come from the facilitator's `/supported` endpoint, not our config, so we literally cannot construct a valid 402 offline. Free routes stay up, so the blast radius is the three priced endpoints, and we verified that.
+Every priced route returns **503 with `Retry-After: 30`** and a stable code, `PAYMENT_FACILITATOR_UNAVAILABLE`, with `retryable: true` in the body. Free routes stay up, so the blast radius is the three priced endpoints — we reproduced that.
 
-The fix is to cache `/supported` after first success and return a 503 with `Retry-After` when it can't be refreshed. It's finding R-1 in our own gap analysis. Same root cause makes our CI depend on a third party being reachable, which is its own problem.
+The underlying dependency is structural and we cannot remove it: the asset id and the fee-payer address come from the facilitator's `/supported` endpoint, not our config, so a valid 402 genuinely cannot be constructed offline. What we control is the answer we give. `api/src/app.ts:69-105` catches exactly that initialisation failure and converts it, re-throwing every other error untouched.
+
+**The reason that distinction is worth thirty seconds:** our callers are agents, not humans with a refresh button. An agent that reads `retryable: true` and a `Retry-After` comes back in thirty seconds. An agent that reads an opaque 500 marks the endpoint dead and may never call again. Formerly finding R-1 in our own gap analysis; closed. One honest note: it still means our CI depends on a third party being reachable, because `api/test/x402-flow.spec.ts` calls the live facilitator at module import.
 
 ---
 
 **Q6. "How does this scale?"**
 
-Honestly: not yet, and I can tell you exactly where it breaks. Audit writes serialise through an in-process per-patient promise chain, so a second backend instance sharing the same operator account reintroduces the read-then-write race that lock exists to prevent — and our `fly.toml` permits more than one machine, which contradicts the mitigation documented next to it. There's no rate limiting anywhere, and `/v1/consent/status` is free, unauthenticated, and makes two algod calls per request, so it's usable both to exhaust us and to amplify traffic at AlgoNode.
+Honestly: it doesn't yet, and I can tell you exactly where it stops. Audit writes serialise through an in-process per-patient promise chain, so a second backend instance sharing the same operator account would reintroduce the read-then-write race that lock exists to prevent. So we pinned the deployment to one machine on purpose — `max_machines_running = 1` in `fly.toml`, with the reason written into the file. That's a correctness-preserving cap, not a scaling story, and I won't dress it up as one.
 
-The real fix is a durable sequence source rather than an in-process one. What *does* scale today is the read path: consent checks are simulated, zero-fee, stateless, and hold no server-side session at all.
+Rate limiting exists on the free and refundable surface — 60 a minute on `/v1/consent/status`, 30 on the others — because that endpoint is free, unauthenticated, and makes two algod calls per request, so it amplifies traffic at AlgoNode as well as exhausting us. It's in-process and keyed on a spoofable header: a courtesy guard, not a security boundary.
+
+And the thing I'd want you to hold against us: **we have no performance data at all.** No latency percentile, no throughput number, no load test. Anything I could quote would be a laptop, and you'd be right to discount it.
+
+The real fix is a durable sequence source rather than an in-process lock. What *does* scale today is the read path: consent checks are simulated, zero-fee, stateless, and hold no server-side session at all.
 
 ---
 
@@ -268,9 +281,11 @@ What the chain guarantees today is narrower: entries are append-only and can't b
 
 **Q8. "Has anyone other than you ever paid for this?"**
 
-No. One payment, on TestNet, and I paid myself — it's in section six of our proof log, disclosed before anyone asked. What it proves is that the pipeline settles: real facilitator, real asset transfer, twenty thousand base units, fee-sponsored, independently confirmed on the indexer. What it doesn't prove is demand, and I'm not going to claim it does.
+No. Every settled payment we have is one of ours — TestNet, sender equals receiver — and it's disclosed in our proof log before anyone asks. What those transactions prove is that the pipeline settles: real facilitator, real asset transfer, twenty thousand base units, fee-sponsored, independently confirmed on the indexer, and now the whole consent-gated composition end to end with an audit entry on-chain. What they don't prove is demand, and I'm not going to claim they do.
 
-The reason there's no volume is that there's no public URL — the endpoint runs on my laptop. That's a deployment gap, not a design gap, and it's the next thing we do.
+The reason there's no external volume is that there's no public URL — the endpoint runs on my laptop. That's a deployment gap, not a design gap, and it's the next thing we do.
+
+**This is the weakest answer in the bank, and it is the one to be shortest about.** Do not pad it. Do not argue that the architecture is designed for volume; that makes zero volume sound worse, not better. State it, name the cause, move on.
 
 ---
 
@@ -284,9 +299,11 @@ The asset is the consent registry: a neutral, patient-signed, publicly-queryable
 
 **Q10. "Show me an audit entry on-chain."**
 
-*(Before `Winning_Strategy.md` M2.)* I can't. It's implemented, it has two passing simulator tests, and it has never executed on TestNet — `total_audit_entries` on our deployed app reads zero and there are no audit boxes. Everything else in this submission has a transaction id; that one doesn't yet. It needs one successful paid call against a self-granted consent, and we haven't run it.
+Transaction `4YLKLQKKWXXFW3UT5APJVYKXI7T7A6OACTAWCC5YBAN3XGOGHRVQ`, sequence 1 — and `total_audit_entries` on App 768743428 reads **five**, with five `a`-prefixed audit boxes to match. Check it on any indexer; you don't need us.
 
-*(After M2.)* Transaction `<id>` — and `total_audit_entries` reads 1 on App 768743428. Check it on any indexer.
+**Then show the whole thing rather than the artefact.** `api/scripts/e2e-consent-proof.ts` runs grant → free consent check → paid call → on-chain audit append in one pass and prints four clickable Lora links: the grant, the settled payment, the audit write, and the application. It is repeatable, not a recording — the counter goes up while you watch.
+
+**What the entry actually contains, if asked:** the patient, the requester, the scope, the endpoint, an action string, and a per-patient monotonic sequence number. **No clinical content ever goes on-chain** — nothing written to the ledger can be retracted, so nothing that could identify a condition is written to it.
 
 ---
 

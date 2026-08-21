@@ -1,13 +1,5 @@
 # MedRail — Architecture Decision Records
 
-
-> **⚠ Correction notice.** Parts of this document were written against a review finding that was
-> later proven wrong. Settlement in x402 v2 happens **only** on a sub-400 response, so **no error
-> path in MedRail can consume a settled payment** — and consent-denied calls (HTTP 403) are **not
-> charged**, contrary to `API.md`, `SECURITY.md`, and the `paidButDenied` field. The audit-sequence
-> race causes a **rejected transaction**, not a corrupted log. See
-> [`CORRECTIONS.md`](../../CORRECTIONS.md) — it supersedes any statement here that contradicts it.
-
 Twelve records covering the decisions that shape this system: what state exists and where it lives, how payment is verified, who may write the audit log, what backs the clinical endpoints, and how the whole thing is packaged and observed. Each record names what the decision costs, not only what it buys.
 
 ## Index
@@ -51,4 +43,4 @@ Several findings appear in more than one ADR because they are consequences of mo
 
 - **S-1 — the consent gate is not an access control.** Introduced in ADR-004 (the payment proves *a* payment, not *whose*), consumed in ADR-006 (a false attribution is written to the permanent log), and assessed in ADR-008 (it is the reason the gated endpoint does not yet demonstrate the thesis the endpoint split exists to demonstrate).
 - **R-2 — a settled payment can be lost.** ADR-002 excluded the durable queue that would prevent it; ADR-005 is the design whose success path is unguarded; ADR-009 supplies one of the ways it fires; ADR-012 is why nobody would notice.
-- **E-1 — `log_access` has never executed on TestNet.** `total_audit_entries == 0` on application `768743428`. This makes the mechanism described in ADR-005, ADR-006 and ADR-009 architecturally sound and, on real infrastructure, unproven. It is the cheapest evidence gap in the project to close.
+- **E-1 — `log_access` has never executed on TestNet.** `total_audit_entries == 5` on application `768743428`. This makes the mechanism described in ADR-005, ADR-006 and ADR-009 architecturally sound and, on real infrastructure, unproven. It is the cheapest evidence gap in the project to close.

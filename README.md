@@ -242,32 +242,209 @@ The complete register, with severities and fixes:
 
 ## Roadmap
 
-Phase 1 is roughly six hours of work and closes every finding a reviewer can discover unaided.
+Phase 1 is complete: every finding a reviewer can discover unaided has been fixed and verified.
 Phases 2–4 cover resilience, production hardening, and genuine product direction —
 [`docs/WINNING_ROADMAP.md`](docs/WINNING_ROADMAP.md).
 
 ## Documentation
 
-Start with the [**executive summary**](docs/00_EXECUTIVE_SUMMARY.md) — the whole project in two
-minutes. The full set is indexed in [`docs/README.md`](docs/README.md):
+**Start here:** [Executive Summary](docs/00_EXECUTIVE_SUMMARY.md) — the whole project in two minutes.
+Full index: [`docs/README.md`](docs/README.md).
 
-| | |
+Every document is linked below. Click any row to open it.
+
+<details open>
+<summary><b>Overview</b></summary>
+
+| Document | What it covers |
 |---|---|
-| [`01_Product/`](docs/01_Product/) | Problem, vision, personas, journeys, use cases, competitive analysis, novelty |
-| [`02_Requirements/`](docs/02_Requirements/) | SRS, traceability matrix, requirements gap analysis |
-| [`03_Architecture/`](docs/03_Architecture/) | HLD, LLD, diagrams, and 12 architecture decision records |
-| [`04_Data/`](docs/04_Data/) | Box-storage data model, ER diagram, data dictionary, indexing strategy |
-| [`05_API/`](docs/05_API/) | Endpoint reference (8 routes), OpenAPI 3.1 spec, error catalogue |
-| [`06_Security/`](docs/06_Security/) | Security architecture, STRIDE threat model, privacy, risk register |
-| [`07_Testing/`](docs/07_Testing/) | Strategy, plan, case catalogue, results, performance validation plan |
-| [`08_Deployment/`](docs/08_Deployment/) | Deployment architecture, setup runbook, Docker, CI/CD, rollback |
-| [`09_Intelligence_Layer/`](docs/09_Intelligence_Layer/) | The rule engines, honestly documented — including why this is not called AI/ML |
-| [`10_Operations/`](docs/10_Operations/) | Monitoring, logging, incident response, disaster recovery |
-| [`11_Hackathon/`](docs/11_Hackathon/) | Judge evaluation, strategy, demo script, runbook, pitch |
+| [Executive Summary](docs/00_EXECUTIVE_SUMMARY.md) | The project in two minutes: problem, solution, evidence, maturity, roadmap |
+| [For Judges](docs/JUDGES.md) | The pitch, the evidence table, and a 2-minute demo script |
+| [Evidence Log](docs/PROOF.md) | Every claim with a transaction ID and a command to reproduce it |
+| [Engineering Gap Report](docs/ENGINEERING_GAP_REPORT.md) | 34 findings — 22 closed, 12 open — with evidence, severities and fixes |
+| [Winning Roadmap](docs/WINNING_ROADMAP.md) | Four-phase remediation plan; Phase 1 complete |
+| [Compliance](docs/COMPLIANCE.md) | Rule-by-rule mapping to the Global x402 Challenge requirements |
+| [Go-Live Checklist](docs/GO_LIVE_CHECKLIST.md) | Competition entry checklist |
+| [Implementation Plan](docs/IMPLEMENTATION_PLAN.md) | The plan the build followed, with its verified-fact table |
+| [Architecture (narrative)](docs/ARCHITECTURE.md) · [API Reference](docs/API.md) · [Security Notes](docs/SECURITY.md) · [Deployment Runbook](docs/DEPLOYMENT.md) | Original build-time documents, kept for continuity |
 
-Judges may prefer to start at [`docs/JUDGES.md`](docs/JUDGES.md) (the pitch and a 2-minute demo),
-then [`docs/PROOF.md`](docs/PROOF.md) (every claim with a transaction ID and a reproduction
-command).
+</details>
+
+<details>
+<summary><b>01 — Product</b> · problem, vision, personas, journeys, use cases, novelty</summary>
+
+| Document | What it covers |
+|---|---|
+| [Problem Statement](docs/01_Product/Problem_Statement.md) | The consent gap and the agent-payment gap; why existing approaches fall short |
+| [Project Vision](docs/01_Product/Project_Vision.md) | Vision, objectives, success criteria, maturity ladder |
+| [User Personas](docs/01_Product/User_Personas.md) | The five parties the system actually serves |
+| [User Journey](docs/01_Product/User_Journey.md) | End-to-end journeys for the paying agent and the consenting patient |
+| [Use Cases](docs/01_Product/Use_Cases.md) | Formal use cases mapped to requirement IDs, including the abuse case |
+| [Scope](docs/01_Product/Scope.md) | In scope, out of scope, assumptions, constraints, dependencies |
+| [Competitive Analysis](docs/01_Product/Competitive_Analysis.md) | Against SMART-on-FHIR, FHIR Consent, and commercial clinical APIs |
+| [USP & Novelty](docs/01_Product/USP_Novelty.md) | What is genuinely novel — and what is not |
+
+</details>
+
+<details>
+<summary><b>02 — Requirements</b> · SRS, traceability, gap analysis</summary>
+
+| Document | What it covers |
+|---|---|
+| [Software Requirements Specification](docs/02_Requirements/SRS.md) | Full SRS, 17 sections, every requirement with acceptance criteria and evidence |
+| [Requirements Traceability Matrix](docs/02_Requirements/Requirements_Traceability_Matrix.md) | Requirement → design → code → test → evidence, forward and reverse |
+| [Requirements Gap Analysis](docs/02_Requirements/Requirements_Gap_Analysis.md) | Prioritised gaps by severity with recommended fixes |
+| [Requirements Registry](docs/02_Requirements/Requirements_Registry.md) | The frozen canonical ID registry every other document cites |
+
+</details>
+
+<details>
+<summary><b>03 — Architecture</b> · HLD, LLD, diagrams, 12 decision records</summary>
+
+| Document | What it covers |
+|---|---|
+| [System Architecture](docs/03_Architecture/System_Architecture.md) | Architectural style, context and container diagrams, why there is no database |
+| [High-Level Design](docs/03_Architecture/HLD.md) | Components, boundaries, protocols, synchronous flows |
+| [Low-Level Design](docs/03_Architecture/LLD.md) | Module-level design: the contract, chain integration, x402 wiring, the routes |
+| [Component Diagram](docs/03_Architecture/Component_Diagram.md) | Component graphs plus dependency and failure-impact tables |
+| [Sequence Diagrams](docs/03_Architecture/Sequence_Diagrams.md) | Nine flows including the rejected attack path and both failure paths |
+| [Activity Diagrams](docs/03_Architecture/Activity_Diagrams.md) | Request lifecycle, consent state machine, CI pipeline |
+| [Data Flow Diagrams](docs/03_Architecture/Data_Flow_Diagrams.md) | DFD levels 0–2 with trust boundaries and data classification |
+| [**ADR Index**](docs/03_Architecture/ADRs/README.md) | All twelve decision records, indexed |
+
+**Decision records** — each separates *recorded* from *reconstructed* rationale, and states what the decision cost.
+
+| ADR | Decision |
+|---|---|
+| [ADR-001](docs/03_Architecture/ADRs/ADR-001-backend-framework.md) | Backend framework — Hono + TypeScript on Node 20 |
+| [ADR-002](docs/03_Architecture/ADRs/ADR-002-no-database-ledger-as-system-of-record.md) | No database — the ledger is the system of record |
+| [ADR-003](docs/03_Architecture/ADRs/ADR-003-box-storage-over-local-state.md) | Box storage over local state |
+| [ADR-004](docs/03_Architecture/ADRs/ADR-004-x402-v2-exact-scheme-with-external-facilitator.md) | x402 v2 `exact` scheme with an external facilitator |
+| [ADR-005](docs/03_Architecture/ADRs/ADR-005-audit-write-as-follow-up-transaction.md) | Audit write as a follow-up transaction, not an atomic group |
+| [ADR-006](docs/03_Architecture/ADRs/ADR-006-admin-only-audit-log.md) | Admin-only audit log |
+| [ADR-007](docs/03_Architecture/ADRs/ADR-007-deterministic-rule-engines-instead-of-an-ml-model.md) | Deterministic rule engines instead of an ML model |
+| [ADR-008](docs/03_Architecture/ADRs/ADR-008-open-plus-gated-endpoint-split.md) | The open plus consent-gated endpoint split |
+| [ADR-009](docs/03_Architecture/ADRs/ADR-009-in-process-per-patient-lock-for-audit-sequencing.md) | In-process per-patient lock for audit sequencing |
+| [ADR-010](docs/03_Architecture/ADRs/ADR-010-client-side-key-custody-and-the-demo-wallet.md) | Client-side key custody and the demo wallet |
+| [ADR-011](docs/03_Architecture/ADRs/ADR-011-deployment-target-docker-and-fly-io.md) | Deployment target — Docker and Fly.io |
+| [ADR-012](docs/03_Architecture/ADRs/ADR-012-observability-strategy.md) | Observability strategy (proposed) |
+
+</details>
+
+<details>
+<summary><b>04 — Data</b> · box-storage model, ER diagram, dictionary, indexing</summary>
+
+| Document | What it covers |
+|---|---|
+| [Database Design](docs/04_Data/Database_Design.md) | Algorand box storage as the system of record; MBR economics |
+| [ER Diagram](docs/04_Data/ER_Diagram.md) | Entity model and physical box-key byte layout |
+| [Data Dictionary](docs/04_Data/Data_Dictionary.md) | Every field, on-chain and over HTTP |
+| [Data Flow](docs/04_Data/Data_Flow.md) | Lineage, retention, visibility, and what is publicly readable |
+| [Indexing & Query Strategy](docs/04_Data/Indexing_And_Query_Strategy.md) | Query patterns the design serves — and the ones it cannot |
+
+</details>
+
+<details>
+<summary><b>05 — API</b> · endpoint reference, OpenAPI 3.1, error catalogue</summary>
+
+| Document | What it covers |
+|---|---|
+| [API Documentation](docs/05_API/API_Documentation.md) | All eight routes plus the 13-method on-chain ABI |
+| [OpenAPI Specification](docs/05_API/OpenAPI.yaml) | OpenAPI 3.1, authored from the implementation |
+| [API Error Catalogue](docs/05_API/API_Error_Catalog.md) | Every error the API can produce, with cause and retryability |
+
+</details>
+
+<details>
+<summary><b>06 — Security</b> · architecture, STRIDE threat model, privacy, risk register</summary>
+
+| Document | What it covers |
+|---|---|
+| [Security Architecture](docs/06_Security/Security_Architecture.md) | Controls by domain, each with an honest status |
+| [Threat Model](docs/06_Security/Threat_Model.md) | STRIDE register across 35 threats |
+| [Privacy](docs/06_Security/Privacy.md) | What reaches the permanent public ledger, and the tensions that creates |
+| [Risk Register](docs/06_Security/Risk_Register.md) | Technical, security, operational and demo risks |
+
+</details>
+
+<details>
+<summary><b>07 — Testing</b> · strategy, plan, cases, results, performance</summary>
+
+| Document | What it covers |
+|---|---|
+| [Test Strategy](docs/07_Testing/Test_Strategy.md) | The testing philosophy and the pyramid as it actually is |
+| [Test Plan](docs/07_Testing/Test_Plan.md) | Per-level plan, CI execution, environment matrix |
+| [Test Cases](docs/07_Testing/Test_Cases.md) | The full case catalogue, existing and missing |
+| [Test Results](docs/07_Testing/Test_Results.md) | Real results only, plus an explicit evidence-gaps section |
+| [Performance Validation](docs/07_Testing/Performance_Validation.md) | A measurement plan — no invented benchmarks |
+
+</details>
+
+<details>
+<summary><b>08 — Deployment</b> · go-live runbook, Docker, CI/CD, rollback</summary>
+
+| Document | What it covers |
+|---|---|
+| [**Go-Live Runbook**](docs/08_Deployment/GO_LIVE_RUNBOOK.md) | **Exact commands to deploy publicly** — Fly.io, Vercel, secrets, verification, MainNet |
+| [Deployment Architecture](docs/08_Deployment/Deployment_Architecture.md) | Actual vs intended topology; environment-variable reference |
+| [Environment Setup](docs/08_Deployment/Environment_Setup.md) | Local setup with real troubleshooting |
+| [Docker](docs/08_Deployment/Docker.md) | Both Dockerfiles analysed line by line |
+| [CI/CD](docs/08_Deployment/CI_CD.md) | The pipeline, its history, and the recommended production version |
+| [Rollback Strategy](docs/08_Deployment/Rollback_Strategy.md) | Including why a deployed contract cannot be rolled back |
+
+</details>
+
+<details>
+<summary><b>09 — Intelligence Layer</b> · the rule engines, honestly documented</summary>
+
+Deliberately **not** named `09_AI_ML`, because there is no AI or ML in this system —
+[see why](docs/09_Intelligence_Layer/README.md).
+
+| Document | What it covers |
+|---|---|
+| [Overview](docs/09_Intelligence_Layer/README.md) | What this layer is, and the naming decision |
+| [Intelligence Architecture](docs/09_Intelligence_Layer/Intelligence_Architecture.md) | Where it sits; rule engine vs model, compared fairly |
+| [Algorithm Inventory](docs/09_Intelligence_Layer/Algorithm_Inventory.md) | Both engines in full, plus an explicit "models used: none" |
+| [Processing Pipeline](docs/09_Intelligence_Layer/Processing_Pipeline.md) | Input to output, with worked arithmetic |
+| [Evaluation](docs/09_Intelligence_Layer/Evaluation.md) | What is verified, what is not, and what real evaluation would require |
+| [Prompt Architecture](docs/09_Intelligence_Layer/Prompt_Architecture.md) | There are no prompts — and why that is a security property |
+| [Limitations](docs/09_Intelligence_Layer/Limitations.md) | Enumerated failure modes and appropriate-use boundaries |
+
+</details>
+
+<details>
+<summary><b>10 — Operations</b> · monitoring, logging, incidents, disaster recovery</summary>
+
+| Document | What it covers |
+|---|---|
+| [Monitoring](docs/10_Operations/Monitoring.md) | What an operator can see today, and the blind spots |
+| [Logging](docs/10_Operations/Logging.md) | Current state plus a design with an explicit never-log list |
+| [Incident Response](docs/10_Operations/Incident_Response.md) | Runbooks for the failure modes that actually exist |
+| [Disaster Recovery](docs/10_Operations/Disaster_Recovery.md) | Key custody is the real risk; RPO/RTO are not established |
+
+</details>
+
+<details>
+<summary><b>11 — Hackathon</b> · judge evaluation, strategy, demo, pitch</summary>
+
+| Document | What it covers |
+|---|---|
+| [Judge Evaluation](docs/11_Hackathon/Judge_Evaluation.md) | Adversarial scoring; why this could win and why it could lose |
+| [Winning Strategy](docs/11_Hackathon/Winning_Strategy.md) | Ranked actions by judge-perception impact |
+| [Demo Script](docs/11_Hackathon/Demo_Script.md) | 2-minute and 5-minute runs of show |
+| [Demo Runbook](docs/11_Hackathon/Demo_Runbook.md) | Pre-flight checklist and failure fallbacks |
+| [Pitch Architecture](docs/11_Hackathon/Pitch_Architecture.md) | How to present the design, plus a hard-question Q&A bank |
+
+</details>
+
+<details>
+<summary><b>Future work</b></summary>
+
+| Document | What it covers |
+|---|---|
+| [Sentinel Exchange Proposal](docs/future/SENTINEL_EXCHANGE_PROPOSAL.md) | **Unbuilt proposal** for a different product. Nothing in it exists in this repository. Retained for design continuity only. |
+
+</details>
 
 ## Entry classification
 
@@ -278,8 +455,8 @@ Not Orchestrator: MedRail does not pay other x402 endpoints, and does not claim 
 ## Repository layout
 
 ```
-contracts/   Algorand Python contract (algopy/puya), 14 unit tests, deploy + proof scripts
-api/         Hono/TypeScript x402 resource server, 18 tests
+contracts/   Algorand Python contract (algopy/puya), 28 unit tests, deploy + proof scripts
+api/         Hono/TypeScript x402 resource server, 45 tests
 web/         Next.js demo — live payment flow and on-chain consent UI
 docs/        Product, requirements, architecture, data, API, security,
              testing, deployment, intelligence layer, operations, hackathon

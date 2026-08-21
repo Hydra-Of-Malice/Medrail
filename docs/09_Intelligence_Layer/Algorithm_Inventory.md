@@ -2,7 +2,7 @@
 
 **Purpose:** the complete, exhaustive inventory of every decision-making component in MedRail's intelligence layer — identifier, type, version, inputs, outputs, full decision table, complexity, dependencies, cost and status. This is the `Model_Inventory` a reviewer would look for, honestly renamed, because there are no models to inventory.
 
-**Status of this document:** Descriptive of commit `32ffd73` on branch `master`. Every table below is transcribed directly from source and is complete — no rule, keyword, weight or drug pair has been omitted or summarised. Sections marked **RECOMMENDED** describe nothing that exists.
+**Status of this document:** Descriptive of commit `3b387df` on branch `main`. Every table below is transcribed directly from source and is complete — no rule, keyword, weight or drug pair has been omitted or summarised. Sections marked **RECOMMENDED** describe nothing that exists.
 
 **Cross-references:** [`Intelligence_Architecture.md`](./Intelligence_Architecture.md) · [`Processing_Pipeline.md`](./Processing_Pipeline.md) · [`Evaluation.md`](./Evaluation.md) · [`Limitations.md`](./Limitations.md) · [`../04_Data/ER_Diagram.md`](../04_Data/ER_Diagram.md) · [`../07_Testing/Test_Cases.md`](../07_Testing/Test_Cases.md)
 
@@ -45,8 +45,8 @@ What follows is the inventory of what *does* exist: two deterministic rule engin
 | **Type** | **Deterministic rule engine.** Weighted keyword-group substring matcher with a summed integer score and fixed threshold banding. Not a model; not statistical; no learned parameters. |
 | **Implementation** | `api/src/services/triageScorer.ts:53-73` (entry point `scoreTriage`) |
 | **Decision table location** | `api/src/services/triageScorer.ts:32-44` — 11 `RedFlag` records, in source |
-| **Version** | No version field exists on the module or on the rule table. The only version identifier is the git commit (`32ffd73`) and the package version `medrail-api@0.1.0` (`api/package.json:3`). **This is a real gap** — a clinical rule table with no version identifier cannot be referenced by a response or pinned by a caller. See §5. |
-| **Exposed at** | `POST /v1/triage`, priced **$0.02** (20000 µUSDC), x402-gated only, no consent check (`api/src/app.ts:41`, `api/src/routes/triage.ts:11`) |
+| **Version** | No version field exists on the module or on the rule table. The only version identifier is the git commit (`3b387df`) and the package version `medrail-api@0.1.0` (`api/package.json:3`). **This is a real gap** — a clinical rule table with no version identifier cannot be referenced by a response or pinned by a caller. See §5. |
+| **Exposed at** | `POST /v1/triage`, priced **$0.02** (20000 µUSDC), x402-gated only, no consent check (`api/src/app.ts:52`, `api/src/routes/triage.ts:11`) |
 | **Purpose** | Score free-text symptom description against a small set of widely-taught emergency warning signs and return an ordinal urgency band. **Not** a diagnosis, **not** a clinical severity measure (AI-003 **IMPLEMENTED**). |
 | **Status** | **VALIDATED** as a behavioural specification — FR-004, FR-005, FR-006, FR-009, NFR-009, AI-001, AI-002 all **VALIDATED** by `api/test/triageScorer.spec.ts` (7 tests). **NOT VALIDATED** clinically — AI-005 **NOT IMPLEMENTED**; no accuracy figure exists. |
 
@@ -126,7 +126,7 @@ Thresholds are evaluated top-down, so the first satisfied condition wins. FR-006
 | **Space complexity** | `O(n)` for the lowercased copy at `triageScorer.ts:54`, plus a `matched` array of at most 11 strings. No allocation grows with call volume. |
 | **External calls** | None. No network, no filesystem, no process, no clock. |
 | **State** | None. No caching, no memoisation, no counters, no accumulators between calls. |
-| **Cost per invocation** | **Zero marginal.** No metered dependency of any kind. Revenue per call is $0.02 (`api/src/app.ts:41`), of which none is variable cost. |
+| **Cost per invocation** | **Zero marginal.** No metered dependency of any kind. Revenue per call is $0.02 (`api/src/app.ts:52`), of which none is variable cost. |
 | **Latency** | **No measurement exists in this repository and none is claimed.** No load test, no benchmark, no profiling harness. What can honestly be said is structural: the work is bounded local computation with no I/O, so this function cannot be the source of a network-dependent tail. The full 18-test API suite — dominated by a live facilitator call in `x402-flow.spec.ts`, not by these functions — completes in 4.08 s (measured 2026-08-21). PERF-003 **NOT IMPLEMENTED**. |
 | **Dependencies** | None beyond the JavaScript standard library (`String.prototype.toLowerCase`, `String.prototype.includes`, `Math.min`, `Array.prototype.some/push`). Zero npm packages are imported by `triageScorer.ts`. |
 | **Failure modes** | The function cannot throw for any input satisfying the zod schema. There is no branch that can produce an exception, no parse step, and no external call. Any HTTP 5xx on `/v1/triage` originates outside this module. |
@@ -218,7 +218,7 @@ const hasB = normalized.some((m) => m.includes(b) || b.includes(m));
 
 The match is **bidirectional** and **unanchored**. `m.includes(a)` is what makes `"Aspirin 81mg"` match `aspirin` — a deliberate, tested tolerance for dose-annotated names (`interactionChecker.spec.ts:23-26`, FR-008 **VALIDATED**). But the second clause, `a.includes(m)`, means a *table entry containing the caller's string* also counts as a match, with no minimum length.
 
-**AI-006 — Matching shall not produce false positives on short or malformed medication names — NOT IMPLEMENTED.** Verified by executing the shipped code at commit `32ffd73` on 2026-08-21:
+**AI-006 — Matching shall not produce false positives on short or malformed medication names — NOT IMPLEMENTED.** Verified by executing the shipped code at commit `3b387df` on 2026-08-21:
 
 | Input | Result | Why |
 |---|---|---|
@@ -255,7 +255,7 @@ To pre-empt the obvious question about the third priced endpoint:
 
 | Component | Why it is not an algorithm |
 |---|---|
-| `POST /v1/records/summary` (`api/src/routes/records.ts`) | Contains no scoring, matching, or inference. It performs an on-chain consent check and returns a **fixed synthetic constant** (`records.ts:15-21`) that is identical for every `patientId`. DATA-004 **IMPLEMENTED**. It is a consent-gated lookup, not intelligence. Its severe security finding (S-1 — the requester identity is caller-asserted and never bound to the payer) belongs to [`../06_Security/Threat_Model.md`](../06_Security/Threat_Model.md), not here. |
+| `POST /v1/records/summary` (`api/src/routes/records.ts`) | Contains no scoring, matching, or inference. It performs an on-chain consent check and returns a **fixed synthetic constant** (`records.ts:17-23`) that is identical for every `patientId`. DATA-004 **IMPLEMENTED**. It is a consent-gated lookup, not intelligence. Its access control — the payer-binding check that rejects a `requesterAddress` the payment signature does not support (`api/src/x402Payer.ts`, formerly finding S-1 / G-01, now **CLOSED**) — belongs to [`../06_Security/Threat_Model.md`](../06_Security/Threat_Model.md), not here. |
 | `GET /v1/consent/status`, `GET /v1/consent/app-info`, `GET /v1/consent/arc56`, `GET /v1/health`, `GET /` | Free endpoints; no decision logic. |
 | `MedRailConsent` smart contract | A deterministic state machine over box storage. Documented in [`../03_Architecture/`](../03_Architecture/). |
 

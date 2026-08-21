@@ -87,7 +87,7 @@ The same mechanism is why the API test suite is not hermetic: `api/test/x402-flo
 - Callers need USDC but not ALGO, which materially lowers the barrier for other teams' agents.
 
 **Negative**
-- REL-001 **NOT IMPLEMENTED** — finding R-1: opaque 500, no 503, no `Retry-After`, no cached fallback.
+- REL-001 **IMPLEMENTED** — the payment middleware is wrapped so a facilitator-initialisation failure returns **503 + `Retry-After: 30`** with a stable `PAYMENT_FACILITATOR_UNAVAILABLE` code (`api/src/app.ts`). Free routes are unaffected. A cached-`/supported` fallback that would let the 402 itself be served offline remains future work.
 - SEC-007, FR-039 **NOT IMPLEMENTED**; SEC-006 **DEFEATED** — finding S-1.
 - OPS-006 is further damaged by CI-2: even once the branch trigger is fixed (CI-1), the pipeline can go red for reasons unrelated to the change.
 - DOC-9 — an unused dependency underwrites a documentation claim it does not support.

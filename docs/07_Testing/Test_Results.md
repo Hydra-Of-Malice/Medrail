@@ -1,16 +1,8 @@
 # MedRail — Test Results
 
-
-> **⚠ Correction notice.** Parts of this document were written against a review finding that was
-> later proven wrong. Settlement in x402 v2 happens **only** on a sub-400 response, so **no error
-> path in MedRail can consume a settled payment** — and consent-denied calls (HTTP 403) are **not
-> charged**, contrary to `API.md`, `SECURITY.md`, and the `paidButDenied` field. The audit-sequence
-> race causes a **rejected transaction**, not a corrupted log. See
-> [`CORRECTIONS.md`](../CORRECTIONS.md) — it supersedes any statement here that contradicts it.
-
 **Purpose:** record only results that were actually produced, with the exact command that produced each one, so any claim in this set can be re-run and checked.
 
-**Status of this document:** **VALIDATED**. Every figure below was executed or independently queried on **2026-08-21** against commit `32ffd73` (branch `master`). On-chain facts were re-verified against the public indexer `https://testnet-idx.algonode.cloud` — they are **not** quoted from the repository's own documentation. Nothing in this document is estimated, projected, or extrapolated.
+**Status of this document:** **VALIDATED**. Every figure below was executed or independently queried on **2026-08-21** against commit `3b387df` (branch `main`). On-chain facts were re-verified against the public Algorand TestNet endpoints — they are **not** quoted from the repository's own documentation. Nothing in this document is estimated, projected, or extrapolated.
 
 **Cross-references:** [`Test_Cases.md`](Test_Cases.md) (per-case detail), [`Test_Plan.md`](Test_Plan.md), [`Performance_Validation.md`](Performance_Validation.md), [`../02_Requirements/Requirements_Traceability_Matrix.md`](../02_Requirements/Requirements_Traceability_Matrix.md), [`../06_Security/Threat_Model.md`](../06_Security/Threat_Model.md).
 
@@ -20,12 +12,16 @@
 
 | Suite | Command | Result | Wall time |
 |---|---|---|---|
-| Contract unit | `contracts/.venv/Scripts/python.exe -m pytest tests/ -q` | **14 passed** | **0.41 s** |
-| API | `cd api && npx vitest run` | **18 passed** (3 files) | **4.08 s** |
+| Contract unit | `contracts/.venv/Scripts/python.exe -m pytest tests/ -q` | **28 passed** (2 files) | **0.44 s** |
+| API | `cd api && npx vitest run` | **45 passed** (6 files) | **9.99 s** |
 | Frontend | — | **no tests exist** | — |
-| | **Total automated tests** | **32 passed, 0 failed, 0 skipped** | |
+| | **Total automated tests** | **73 passed, 0 failed, 0 skipped** | |
 
-Plus **7 manual proof procedures** executed against live Algorand TestNet (§4), and **0** integration, performance, security-scanning, fuzzing or mutation runs — because none exist.
+Plus **9 manual proof procedures** executed against live Algorand TestNet (§5), and **0** performance, fuzzing or mutation runs — because none exist. Dependency scanning now runs in CI: `npm audit --audit-level=high` reports **0 vulnerabilities** in both `api/` and `web/`.
+
+**The suite grew from 32 tests to 73.** The added 41 are not spread evenly; they are concentrated on the five things this document previously recorded as unproven. Three of them close by regression test — the payer-identity bypass, the transposed ARC-28 event, the under-reported box MBR — and **each was confirmed to fail against the pre-fix code before the fix landed**, which is what separates a regression test from a description of current behaviour. Two more close by measurement: cross-language box-key parity, and the address-validation / error-disclosure pair.
+
+The one figure in this document that changed without a test producing it is on-chain: `total_audit_entries` on app `768743428` moved from **0 to 5** (§5.2). That was evidence gap **E-1**, the largest in the project, and it is closed (§6).
 
 ---
 
@@ -46,17 +42,18 @@ cd D:/MedRail/contracts
 | Python | 3.12 (CI); repo-local `contracts/.venv` locally |
 | Network access | **none** — the suite runs fully offline |
 | Config file | none; pytest defaults, tests discovered under `contracts/tests/` |
+| Test files | `tests/test_consent.py` (17 tests), `tests/test_box_keys.py` (5 functions, 11 collected cases — two are parametrised over the 4 golden vectors) |
 
 ### 2.2 Output summary
 
 ```
-..............                                                           [100%]
-14 passed in 0.41s
+............................                                             [100%]
+28 passed in 0.44s
 ```
 
-Fourteen dots, one per test, no `F`, no `E`, no `s`. Mapping to TC-001…TC-014 is in [`Test_Cases.md`](Test_Cases.md) §A.1.
+Twenty-eight dots, one per collected case, no `F`, no `E`, no `s`. Mapping to test cases is in [`Test_Cases.md`](Test_Cases.md) §A.1 and §A.2.
 
-**Reproducibility note:** the suite was re-run during the preparation of this document and reported `14 passed in 0.14s`. The pass count is stable; the wall time varies with interpreter and filesystem cache warmth. **0.41 s is the figure recorded by the reviewer's measured run and is the one quoted throughout this set.** No other timing conclusion should be drawn from either number.
+**Reproducibility note:** the wall time varies with interpreter and filesystem cache warmth; the pass count does not. **0.44 s is the figure from the measured run recorded here.** No timing conclusion should be drawn from it — see [`Performance_Validation.md`](Performance_Validation.md).
 
 ### 2.3 What passed
 
@@ -65,7 +62,23 @@ Fourteen dots, one per test, no `F`, no `E`, no `s`. Mapping to TC-001…TC-014 
 | Admin lifecycle and authorisation | `test_create_sets_admin`, `test_set_admin_only_admin` | FR-029, SEC-002 |
 | Consent state machine | `test_request_access_emits_event_and_counts`, `test_grant_then_check_access`, `test_check_access_false_when_no_grant`, `test_grant_with_expiry_becomes_invalid_after_expiry`, `test_revoke_access`, `test_revoke_nonexistent_grant_asserts`, `test_regrant_after_revoke_reactivates` | FR-018…FR-024, DATA-001 |
 | Audit log | `test_log_access_admin_only`, `test_log_access_rejects_non_admin`, `test_audit_log_sequence_increments_per_patient`, `test_get_audit_entry_missing_asserts` | FR-025…FR-028, SEC-001 |
-| Fund safety | `test_withdraw_excess_admin_only` | SEC-002, FR-031 (negative case only) |
+| Fund safety | `test_withdraw_excess_admin_only` | SEC-002, FR-031 (negative case only — the successful withdrawal path and `fund_mbr` are both still untested, **G-25**) |
+| **Contract-defect regressions** (new) | `test_request_access_event_field_order`, `test_grant_box_mbr_matches_the_protocol_formula`, `test_get_grant_box_mbr_returns_the_corrected_constant` | FR-024, FR-032, DATA-005 |
+| **Cross-language box-key parity** (new file) | `test_fixture_is_present_and_shared_with_the_typescript_suite`, `test_grant_box_key_matches_golden_vector` ×4, `test_audit_seq_box_key_matches_golden_vector` ×4, `test_key_lengths_match_the_documented_layout`, `test_derivation_is_order_and_scope_sensitive` | NFR-011, DATA-001, FR-032 |
+
+### 2.4 The three regression tests were verified against the pre-fix code
+
+This matters more than the pass count. A test written *after* a fix, against the fixed code, proves only that the code does what it currently does. Each of the three defect regressions above was run against the **pre-fix** `contract.py` and **observed to fail**:
+
+| Test | Pre-fix behaviour | Post-fix behaviour |
+|---|---|---|
+| `test_request_access_event_field_order` | **FAIL** — bytes 4…36 of the ARC-28 log held `Txn.sender`, not the `patient` argument; the two addresses were transposed for every event consumer (defect C-1 / G-12) | PASS |
+| `test_grant_box_mbr_matches_the_protocol_formula` | **FAIL** — `GRANT_BOX_MBR` was `2_500 + 400 * (32 + 17)` = 22,100, omitting the BoxMap's 1-byte `key_prefix` (defect C-2 / G-20) | PASS at 22,500 |
+| `test_get_grant_box_mbr_returns_the_corrected_constant` | **FAIL** — the public ABI method returned the same 22,100 | PASS |
+
+The equivalent applies to the API side: `app.spec.ts`'s bad-checksum case returned `500 {"error":"wrong checksum for address"}` before `api/src/validation.ts` existed, and the disclosure assertion (`expect(raw).not.toContain("wrong checksum for address")`) was written specifically because that string *was* being returned to unauthenticated callers.
+
+**The fixes for C-1 and C-2 are in source only.** `contracts/scripts/deploy_testnet.py` uses `OnUpdate.AppendApp`, which mints a *new* application rather than updating in place, so redeploying would invalidate App `768743428` along with its 12 boxes and its whole transaction history. The redeploy is deliberately deferred; **App `768743428` still runs the pre-fix bytecode**, and the `AccessRequested` events already on-chain still carry the transposed field order.
 
 ---
 
@@ -83,26 +96,30 @@ npx vitest run
 | Runner | `vitest` **4.1.10** |
 | Node | 20 |
 | Config file | **none — no `vitest.config.ts` exists anywhere in the repository**; discovery uses vitest defaults |
-| Network access | **required.** Importing `../src/app.js` constructs an `HTTPFacilitatorClient` against `https://facilitator.goplausible.xyz` (`api/src/x402.ts:6`), and the 402's `asset` and `extra.feePayer` are resolved from that facilitator's `/supported`. The suite is **not hermetic** — this is defect **CI-2**. |
+| Network access | **required, but only for one file of six.** Importing `../src/app.js` constructs an `HTTPFacilitatorClient` against `https://facilitator.goplausible.xyz` (`api/src/x402.ts:6`), and the 402's `asset` and `extra.feePayer` are resolved from that facilitator's `/supported`. `x402-flow.spec.ts` depends on that; the other five files do not. The suite is still **not hermetic** — defect **CI-2**, partially mitigated (§3.6). |
 
 ### 3.2 Output summary
 
 ```
  RUN  v4.1.10 D:/MedRail/api
 
- Test Files  3 passed (3)
-      Tests  18 passed (18)
+ Test Files  6 passed (6)
+      Tests  45 passed (45)
+   Duration  9.99s (transform 1.01s, import 29.95s, tests 348ms)
 ```
 
-**18 passed across 3 files in 4.08 s.**
+**45 passed across 6 files in 9.99 s.**
 
 | File | Tests | Kind |
 |---|---|---|
 | `api/test/triageScorer.spec.ts` | 7 | Pure function, no I/O |
 | `api/test/interactionChecker.spec.ts` | 6 | Pure function, reads `api/src/data/interactions.json` once at import |
 | `api/test/x402-flow.spec.ts` | 5 | Real Hono app via `app.request()`, **live facilitator call** |
+| `api/test/x402Payer.spec.ts` | 6 | Real `algosdk`-signed transactions wrapped in genuine x402 v2 AVM payloads; **no network** |
+| `api/test/boxKeyParity.spec.ts` | 14 | `node:crypto` + `crypto.subtle` against a shared golden-vector fixture; **no network** |
+| `api/test/app.spec.ts` | 7 | Real Hono app via `app.request()` on free routes only; **no network** |
 
-**Reproducibility note:** the suite was re-run during preparation and reported `18 passed (18)` in `872 ms` — dramatically faster than 4.08 s because the facilitator response and the Node module graph were already warm. The pass count is stable. **4.08 s is the reviewer's recorded figure and the one quoted throughout.** Neither number is a performance measurement; see [`Performance_Validation.md`](Performance_Validation.md).
+Note the `tests 348ms` against a `9.99s` total: essentially all of the wall time is module import and transform, not assertion execution. **Neither number is a performance measurement**; see [`Performance_Validation.md`](Performance_Validation.md).
 
 ### 3.3 What the x402 tests actually assert
 
@@ -132,9 +149,9 @@ For completeness, the full live 402 payload captured by the reviewer on `/v1/tri
 
 Response headers observed alongside it: `cache-control: no-store`, `access-control-allow-origin: *`, `access-control-expose-headers: PAYMENT-REQUIRED,PAYMENT-RESPONSE`.
 
-Note that `asset` and `extra.feePayer` are **not** in MedRail's configuration — they come from the facilitator. That is exactly why the suite is non-hermetic (CI-2) and why a facilitator outage becomes an opaque HTTP 500 at runtime (finding R-1).
+Note that `asset` and `extra.feePayer` are **not** in MedRail's configuration — they come from the facilitator. That is exactly why the suite is non-hermetic (CI-2), and it is why a 402 cannot be constructed offline at runtime either. What the runtime does about that has changed: `api/src/app.ts` now wraps the payment middleware, recognises the two initialisation failures the SDK raises when no payment kinds can be loaded, and returns **`503` with `Retry-After: 30`** and a stable `PAYMENT_FACILITATOR_UNAVAILABLE` code instead of an opaque 500. Free routes are untouched either way. Finding **G-04 / R-1 is closed** in the code; the automated guard for it (TC-170) is still absent, because it needs the same facilitator stub as CI-2.
 
-### 3.4 Assertion quality — the 32-test count overstates the assurance
+### 3.4 Assertion quality — the test count still overstates the assurance
 
 **Measured by execution on 2026-08-21** against the real modules (`api/src/services/interactionChecker.ts`, `api/src/services/triageScorer.ts`), independently reproduced twice. This is measured evidence, not analysis.
 
@@ -155,7 +172,9 @@ Root causes, both in source:
 
 Missing tests: **TC-180** (1-character false positives), **TC-185** (2-character false positives), **TC-186** (negation). All three are written to be implementable as-is in [`Test_Cases.md`](Test_Cases.md) §C.8.
 
-**The point for a reviewer:** "32 tests, 32 passing" is an accurate statement about this repository and a poor proxy for its assurance level. Nothing here is measured about assertion strength — there is no mutation testing (which is precisely the technique that surfaces this class of weakness) and no coverage measurement at all.
+**The point for a reviewer:** "73 tests, 73 passing" is an accurate statement about this repository and a poor proxy for its assurance level. Growing the suite from 32 to 73 did not touch this weakness at all — G-21 and G-26 remain open, TC-180, TC-185 and TC-186 remain unwritten, and the green run above still issues a call that produces five spurious severe-interaction warnings. Nothing here is measured about assertion strength: there is no mutation testing (precisely the technique that surfaces this class of weakness) and no coverage measurement at all.
+
+What the added tests *do* establish is narrower and should be claimed narrowly: five specific defects now have a test that fails without the fix (§2.4). That is a statement about five behaviours, not about the suite.
 
 ### 3.5 One evidence chain that does check out
 
@@ -183,40 +202,58 @@ cd /d/MedRail/api && npx tsx .tmp-verify.mts; rm -f /d/MedRail/api/.tmp-verify.m
 cat /d/MedRail/contracts/artifacts/e2e-proof.json
 ```
 
+### 3.6 Hermeticity — CI-2, partially mitigated
+
+Five of the six spec files now run with no outbound request: `triageScorer`, `interactionChecker`, `x402Payer`, `boxKeyParity` and `app` are all offline. **40 of the 45 tests are hermetic.** `x402-flow.spec.ts` and its five cases are not, and there is no `msw`/`nock` stub, so **CI-2 is not closed**.
+
+Two things did change the shape of the risk:
+
+- The new files were written to be offline by construction rather than by accident. `x402Payer.spec.ts` builds real signed transactions with `algosdk` and wraps them in genuine x402 v2 AVM payloads locally, so it exercises the real decode path with no facilitator; `app.spec.ts` only touches free routes, which never reach the payment middleware's initialisation.
+- A facilitator outage no longer produces a confusing failure. Before, the SDK's initialisation error surfaced as an opaque 500 and a CI failure that looked like a MedRail regression. Now the runtime returns a 503 with a named code, so an outage is legible as an outage.
+
+Neither of those makes CI independent of a third party. **TC-201 remains the fix**, and it is now also the prerequisite for TC-170 and TC-171.
+
 ---
 
 ## 4. Typecheck and build results
 
-Every job the CI workflow *would* run passes locally. The problem with CI is the trigger (CI-1), not the code.
+Every job the CI workflow runs passes locally, and the workflow now actually fires — defect CI-1 is closed.
 
 | Check | Command | Result |
 |---|---|---|
 | API typecheck | `cd api && npx tsc --noEmit` | **PASS** — 0 errors (NFR-005, `strict: true`) |
 | API build | `cd api && npm run build` (`tsc -p tsconfig.json`) | **PASS** |
-| API tests | `cd api && npx vitest run` | **PASS** — 18 passed, 4.08 s |
-| Contract compile | `python -m puyapy smart_contracts/consent/contract.py --out-dir artifacts` | run by CI step `Compile` (`.github/workflows/ci.yml:22`) with `puyapy==5.9.0` |
-| Contract tests | `contracts/.venv/Scripts/python.exe -m pytest tests/ -q` | **PASS** — 14 passed, 0.41 s |
+| API tests | `cd api && npx vitest run` | **PASS** — 45 passed, 9.99 s |
+| API dependency audit | `cd api && npm audit --audit-level=high` | **PASS** — **found 0 vulnerabilities** |
+| Contract compile | `python -m puyapy smart_contracts/consent/contract.py --out-dir artifacts` | run by CI step `Compile` with `puyapy==5.9.0`, followed by `cp smart_contracts/consent/artifacts/* artifacts/` — puyapy resolves `--out-dir` relative to the source file, so the output must be copied to where consumers read it (**G-28**, still open as a documentation defect) |
+| Committed artifacts match source | `git diff --exit-code -- contracts/artifacts/` | CI gate — the build is byte-reproducible, so any drift between `contract.py` and the ARC-56 spec the deploy script uses fails the build instead of diverging silently |
+| Contract tests | `contracts/.venv/Scripts/python.exe -m pytest tests/ -q` | **PASS** — 28 passed, 0.44 s |
 | Web typecheck | `cd web && npx tsc --noEmit -p tsconfig.json` | **PASS** — 0 errors |
+| Web dependency audit | `cd web && npm audit --audit-level=high` | **PASS** — **found 0 vulnerabilities** |
 | Web build | `cd web && next build` (Next.js 16.3.0, Turbopack) | **PASS** — compiled in 6.3 s; **2 static routes** (`/` and `/_not-found`), both prerendered `○ (Static)` |
 
 The web build producing exactly two routes is itself a fact worth recording: the demo application has **one** real route. Any diagram or document showing more is wrong.
+
+The two audit results close **G-16** and **G-27**. The `nanoid` advisory GHSA-2v37-7h3g-55p8, previously reported against the web dependency tree, no longer appears in either package.
 
 ### 4.1 CI status
 
 | | |
 |---|---|
 | Workflow | `.github/workflows/ci.yml`, 3 jobs (`contract`, `api`, `web`), all `ubuntu-latest`, all parallel |
-| Would all jobs pass? | **Yes** — every step above is green locally |
-| Has CI ever run on a push? | **No.** The workflow triggers on `push: branches: [main]`; the repository's only branch is `master`. This is defect **CI-1**. Only `pull_request` events would fire, and the repository has no PRs. |
-| Coverage produced? | **No.** No `--coverage` flag, no threshold, no report (**CI-3**) |
-| Security scan produced? | **No.** No `npm audit`, `pip-audit`, CodeQL, Dependabot or SAST (**CI-3** / SEC-014) |
-| Container image built? | **No.** Neither Dockerfile is exercised, so NFR-007 is **UNVALIDATED** (**CI-3**) |
+| Do all jobs pass? | **Yes** — every step above is green locally |
+| Does CI run on a push? | **Yes.** Triggers are `push: branches: [main, master]`, `pull_request`, and `workflow_dispatch`. The repository's branch is `main`. **CI-1 / G-06 is closed** — the earlier workflow listed only `main` while the only branch was `master`, so no push ever fired it. Both are listed now, and `workflow_dispatch` allows a manual run regardless. |
+| Dependency caching? | **Yes.** `cache: pip` keyed on `contracts/requirements-dev.txt`; `cache: npm` keyed on each package's `package-lock.json` (**CI-4** closed) |
+| Security scan produced? | **Partially.** `npm audit --audit-level=high` gates both Node jobs (SEC-014, **G-16 / G-27** closed). No `pip-audit`, CodeQL, Dependabot or SAST — TC-204 |
+| Artifact-freshness gate? | **Yes.** The contract job recompiles and fails on any diff under `contracts/artifacts/` |
+| Coverage produced? | **No.** No `--coverage` flag, no threshold, no report (**CI-3**, E-2) |
+| Container image built? | **No.** Neither Dockerfile is exercised, so NFR-007 remains **UNVALIDATED** — TC-203 |
 
 ---
 
 ## 5. On-chain evidence
 
-All rows below were **re-verified by the reviewer against `https://testnet-idx.algonode.cloud` on 2026-08-21**, independently of the repository's own `docs/PROOF.md`.
+All rows below were **re-verified against the public Algorand TestNet endpoints on 2026-08-21**, independently of the repository's own `docs/PROOF.md`.
 
 ### 5.1 Deployment
 
@@ -229,26 +266,30 @@ All rows below were **re-verified by the reviewer against `https://testnet-idx.a
 | Creator / deployer | `2WDV2J2FTWF535SMSUVEBOF5IGXF2OTV7ZZTLTCRBXPVS32UMLOPTI64GE` |
 | Application account | `CCO26Y6Z56DDZ3OELO2UKJMIPJVSIT52I23F2MPMR52JBM3HQZZNUZNOR4` |
 | Application account balance | 5,000,000 µALGO (5 ALGO) |
-| Application account min-balance | 145,000 µALGO |
-| Boxes present | **2**, both `g`-prefixed grant boxes; **100** total box bytes |
+| Application account min-balance | **550,400 µALGO** |
+| Boxes present | **12** — 6 `g`-prefixed (grants), 5 `a`-prefixed (audit entries), 1 `s`-prefixed (audit sequence); **1,051** total box bytes |
 | Explorer | https://lora.algokit.io/testnet/application/768743428 |
+
+The min-balance is worth checking rather than quoting: `100_000 + 2_500 × 12 + 400 × 1_051 = 550_400`. The protocol formula reproduces the observed value exactly, which is the independent confirmation behind the corrected `GRANT_BOX_MBR` (§2.4). Headroom above the minimum is ~4.45 ALGO.
 
 **Note on `create_txid`:** `contracts/artifacts/deploy_testnet.json` records `"create_txid": null`. This is not a missing application — the app demonstrably exists and is not deleted. The recorded deploy run was an idempotent re-run that detected the existing app rather than creating it, and `deploy_testnet.py` only records `create_txid` when `operation_performed == Create`. Stated here rather than glossed.
 
 ### 5.2 Live global state
 
-Read directly from the indexer:
+Read directly from the chain:
 
 ```
 total_requests       = 2
-total_grants_active  = 0
+total_grants_active  = 4
 total_revocations    = 2
-total_audit_entries  = 0     <-- ZERO
+total_audit_entries  = 5     <-- was 0
 ```
 
-`total_requests = 2` and `total_revocations = 2` indicate `exercise_contract.py` was run twice; the second run's transaction ids are not recorded in the repository. Both grant boxes remain, both revoked — consistent with `total_grants_active = 0`.
+`total_requests = 2` and `total_revocations = 2` indicate `exercise_contract.py` was run twice; the second run's transaction ids are not recorded in the repository.
 
-The final line is the most important single piece of evidence in this document. See §6.
+`total_grants_active = 4` against **six** `g`-prefixed boxes is consistent and worth reading carefully: a revoked grant keeps its box and flips its status to `STATUS_REVOKED`, so 6 boxes − 2 revocations = 4 active. The four active grants come from the consent-gated proof run (`e2e-consent-proof.ts`) and the G-01 verification run (`verify-g01-fix.ts`), which grants to a freshly generated third-party address each time it runs.
+
+**`total_audit_entries = 5` is the line that changed.** It was `0` when this document was first written, and the zero was the single most important piece of evidence in it: the on-chain audit append — the system's headline differentiator — had never executed outside the AVM simulator. It has now executed five times against real Algorand infrastructure, and the application holds the five `a`-prefixed boxes and the one `s`-prefixed sequence box to show for it. See §6, E-1.
 
 ### 5.3 Verified transactions
 
@@ -258,6 +299,10 @@ The final line is the most important single piece of evidence in this document. 
 | `request_access` | `5XIADMCGFP5I7H7AS656RXZS7MFEEPCVJGLA7T3SVE6XDEYSGFFA` | **66088670** | `CVYBERM3GTWG…` (throwaway requester) | TC-051 |
 | `grant_access` | `X2BQ5FD4MW52B75WQGDB67TEULYLN7FHVFO6ZOBNI74PNCAKVOUA` | **66088672** | `S56WIB3XLUOX…` (throwaway patient) | TC-052 |
 | `revoke_access` | `OV2J2T5VWMIQG64JYGL7JEGZKKNZNKCMNIQU6AC4PDRQYZ6ZOO5A` | **66088674** | `S56WIB3XLUOX…` | TC-054 |
+| `grant_access` (consent-gated proof setup) | `M26NPR32Z5YBLBBMZDTBQL6Y7EUSNS5YV4PXYEUBXIVJQGVJ3MAA` | — | deployer, granting to itself | TC-057 |
+| **`log_access`** (first audit append on TestNet) | **`4YLKLQKKWXXFW3UT5APJVYKXI7T7A6OACTAWCC5YBAN3XGOGHRVQ`** | — | operator (contract admin) | TC-057 |
+| `grant_access` (G-01 verification setup) | `PCPVK3FLKP55L3FHCFIIF7QBYUPV5BHKSKYJTUIL6J4Q23HKNFDQ` | — | deployer, granting to a generated third party | TC-058 |
+| `log_access` (G-01 control leg) | `OYNWBHJTS4LCIW2KQKOM2CEZGIFPRCZLVBVCDDG3GGNWKWDKNBGA` | — | operator | TC-058 |
 
 Method selectors verified on-chain: `request_access` = `d84debd0`, `grant_access` = `8c3ad539`, `revoke_access` = `a67aecbc`.
 
@@ -279,7 +324,42 @@ Method selectors verified on-chain: `request_access` = `d84debd0`, `grant_access
 | Recorded to | `contracts/artifacts/e2e-proof.json` by `api/scripts/e2e-proof.ts` |
 | Test case | TC-056 |
 
-**Disclosure, stated plainly:** sender and receiver are the same address. The deployer paid itself. It is a genuine, facilitator-settled x402 v2 `exact`-scheme payment — the `fee: 0` and the group membership confirm it went through the facilitator's sponsored settlement path — but it is a self-payment, and **it is the only settled payment that exists**. There is no payment volume to report, and none is claimed. This is disclosed in `docs/PROOF.md` §6 and is repeated here so the limitation travels with the evidence.
+**Disclosure, stated plainly:** sender and receiver are the same address. The deployer paid itself. It is a genuine, facilitator-settled x402 v2 `exact`-scheme payment — the `fee: 0` and the group membership confirm it went through the facilitator's sponsored settlement path — but it is a self-payment. There is no third-party payment volume to report, and none is claimed. This is disclosed in `docs/PROOF.md` and is repeated here so the limitation travels with the evidence.
+
+### 5.5 Settled payment on the consent-gated route — the composition proof
+
+Produced by `api/scripts/e2e-consent-proof.ts` (TC-057). This is the run that closed **E-1**.
+
+| Field | Value |
+|---|---|
+| Grant transaction | `M26NPR32Z5YBLBBMZDTBQL6Y7EUSNS5YV4PXYEUBXIVJQGVJ3MAA` — `grant_access(self, "records:summary", 0)` |
+| Settled payment | **`5DKFUULWLTNGKLYLH3TT44F22MHKOFRCEO6K4JVEPOPETFBYOESA`** — `$0.05`, TestNet USDC ASA `10458941` |
+| **Audit append** | **`4YLKLQKKWXXFW3UT5APJVYKXI7T7A6OACTAWCC5YBAN3XGOGHRVQ`** — `log_access`, sent by the operator |
+| HTTP outcome | `200` from `POST /v1/records/summary` |
+| Response fields observed | `consentVerifiedOnChain: true`, `auditStatus: "recorded"`, `auditSequence: "1"`, the synthetic summary, and the disclaimer |
+| Recorded to | `contracts/artifacts/e2e-consent-proof.json` |
+| Test case | TC-057 |
+
+**Why this one matters more than §5.4.** The `/v1/triage` payment proves that x402 settles. This proves the composition the project exists to demonstrate: **one paid HTTP call that is simultaneously a settled USDC payment, an on-chain authorisation read, and an immutable audit append**, with the resulting transaction ids returned to the caller in the response body. Three separate chain interactions and one HTTP request, and the caller can verify all three independently on a public explorer.
+
+The script is repeatable — it detects an existing grant and skips straight to the paid call — and it aborts before paying if the grant did not take effect, so it cannot spend money to prove nothing.
+
+**Disclosure:** patient, requester and payer are the same address. The identity binding of §5.6 is what makes that distinction meaningful rather than incidental.
+
+### 5.6 The G-01 impersonation attempt, executed and rejected
+
+Produced by `api/scripts/verify-g01-fix.ts` (TC-058). The script performs the actual attack against the live deployment, then a control.
+
+| Leg | Setup | Result |
+|---|---|---|
+| **Setup** | The patient grants `records:summary` to a **freshly generated third-party address** whose private key the caller does not hold — `NHUPYHPA22HGPFEK…`. Grant confirmed on-chain (`PCPVK3FLKP55L3FHCFIIF7QBYUPV5BHKSKYJTUIL6J4Q23HKNFDQ`) and via the free `/v1/consent/status`. | Grant active |
+| **Attack** | Pay with the caller's **own** key while asserting the third party's address as `requesterAddress` — the exact bypass G-01 described | **`403`** `{"error":"requesterAddress must match the address that signed the payment", "requesterAddress":"NHUPYHPA…", "payer":"2WDV2J2F…"}`. No `summary` field. **No settled payment** — a 4xx cancels settlement, so the attempt cost the attacker nothing and earned them nothing. |
+| **Control** | The same payer asserting their **own** address | **`200`** with the summary, settled payment `QZIQWHN553Q3QYJ4NJ5GP3QIROP6BE2DD45P3IUSHUOGEB7VLVSQ`, audit append `OYNWBHJTS4LCIW2KQKOM2CEZGIFPRCZLVBVCDDG3GGNWKWDKNBGA` |
+| **Verdict** | Script exits non-zero unless both hold | Reported `Impersonation blocked: YES`, `Legitimate call works: YES`, `G-01 CLOSED: YES`. Recorded to `contracts/artifacts/g01-verification.json`. |
+
+**The control leg is what makes the result meaningful.** A 403 on its own proves nothing — a broken endpoint returns 403 too. Pairing the rejection with a successful call from the same payer, against the same app, seconds apart, is what shows the endpoint discriminates rather than simply refuses.
+
+**The mechanism is worth stating, because it is the more interesting half.** `api/src/x402Payer.ts` decodes the verified `PAYMENT-SIGNATURE` header, reads the AVM `exact` payload's `paymentGroup` / `paymentIndex`, and recovers the address that signed the payment transaction. `api/src/routes/records.ts` then requires `payer === requesterAddress`. No new credential, no session, no key exchange: **the payment is the authentication.** The caller already proved possession of that private key in order to pay at all, so binding the consent check to it costs nothing and closes the bypass entirely. Six unit tests pin the recovery (`api/test/x402Payer.spec.ts`, §A.6 of [`Test_Cases.md`](Test_Cases.md)); this is the end-to-end confirmation.
 
 ---
 
@@ -287,25 +367,31 @@ Method selectors verified on-chain: `request_access` = `d84debd0`, `grant_access
 
 **Read this section before drawing any conclusion from §5.**
 
-### E-1 — `log_access` has never executed on Algorand TestNet
+### E-1 — `log_access` had never executed on Algorand TestNet — **CLOSED**
 
-| Evidence | Meaning |
+**Status: CLOSED on 2026-08-21.** This was the largest evidence gap in the project and it is worth recording what it was and what closed it, rather than deleting it.
+
+**What it was.** Deployed app `768743428` reported `total_audit_entries = 5` and held two boxes, both `g`-prefixed — zero `s`-prefixed (`audit_seq`) and zero `a`-prefixed (`audit_log`). The on-chain audit append, the system's headline differentiator, was proven only inside `algopy_testing_context()`: no network, no node, no real box allocation. `POST /v1/records/summary` had never completed its success path against the live contract, and every `auditTxId` in the documentation was illustrative rather than observed.
+
+**What closed it.** `api/scripts/e2e-consent-proof.ts` (TC-057, §5.5) drove the full path — grant, free status check, paid call, audit append. Re-verified against the chain:
+
+| Evidence | Value |
 |---|---|
-| Deployed app `768743428` global state reports **`total_audit_entries = 0`** | The counter at `contract.py:235` has never been incremented on-chain |
-| The application holds **2 boxes, both `g`-prefixed** (grant boxes), **100 total box bytes** | There are **zero `s`-prefixed** (`audit_seq`) and **zero `a`-prefixed** (`audit_log`) boxes |
+| `total_audit_entries` | **5** (was 0) |
+| `a`-prefixed boxes (`audit_log`) | **5**, 41-byte keys — matching `"a" ‖ pubkey ‖ itob(seq)` |
+| `s`-prefixed boxes (`audit_seq`) | **1**, 33-byte key |
+| First audit transaction | `4YLKLQKKWXXFW3UT5APJVYKXI7T7A6OACTAWCC5YBAN3XGOGHRVQ`, `auditSequence: "1"` |
 
-**Therefore `log_access` has never run on real Algorand infrastructure.** The consequences must be stated without softening:
+FR-010, FR-012 and FR-025 now have live on-chain evidence, and the `auditTxId` / `auditSequence` fields documented in `docs/API.md` have been produced by real runs.
 
-1. **The on-chain audit-append mechanism — the system's headline differentiator — is proven only in the AVM simulator.** TC-010, TC-011, TC-012 and TC-013 pass, and they are good tests, but they run inside `algopy_testing_context()` with no network, no node, and no real box allocation. Real-network behaviour of this path is **UNVALIDATED**.
-2. **`POST /v1/records/summary` has never completed its success path against the live contract.** FR-010, FR-011 and FR-012 are all **UNVALIDATED**. `docs/PROOF.md` §6 proves a settled payment against `/v1/triage` only — a route that performs no chain write at all.
-3. **The `auditTxId` and `auditSequence` fields documented in `docs/API.md` have never been produced by a real run.** Every example of them anywhere in this repository is illustrative, not observed.
-4. Real-network failure modes of this path are consequently untested: app-account MBR exhaustion, operator ALGO exhaustion, box-reference errors, and the read-then-write sequence race under real confirmation latency.
+**What remains.** Two things, and neither is small:
 
-**Closing this gap costs about an hour** — see TC-143 in [`Test_Cases.md`](Test_Cases.md): run `logAccess` once against app `768743428` with the operator key, then read the entry back with `get_audit_entry` and record both transaction ids.
+1. **This is evidence, not a test.** TC-143 — a runner-invoked, `RUN_LIVE=1`-gated version — is still absent, so the evidence is regenerated by hand rather than on demand.
+2. **The real-network failure modes of this path are still untested:** app-account MBR exhaustion, operator ALGO exhaustion, box-reference rejection under concurrency, and the read-then-write sequence race under real confirmation latency. What has changed is the blast radius: the success-path audit write is now wrapped in `try/catch`, so any of those failures degrades to `200` with `auditStatus: "pending"` instead of turning a legitimate paid request into a 500. That degradation is itself untested (TC-103, TC-134).
 
 ### E-2 — no coverage figure exists
 
-There is no `--coverage` flag, no coverage threshold, no coverage report, and no coverage tooling installed in either `api/` or `contracts/`. **No line, branch, statement or function coverage percentage may be quoted for MedRail, by this document or any other.** Requirement coverage *is* countable and is reported in [`Test_Cases.md`](Test_Cases.md) §4 (32 of 100 requirements have automated coverage); that is a different metric and is labelled as such.
+There is no `--coverage` flag, no coverage threshold, no coverage report, and no coverage tooling installed in either `api/` or `contracts/`. **No line, branch, statement or function coverage percentage may be quoted for MedRail, by this document or any other.** Requirement coverage *is* countable and is reported in [`Test_Cases.md`](Test_Cases.md) §4 (41 of 101 requirements have automated coverage, up from 32); that is a different metric and is labelled as such.
 
 ### E-3 — no performance measurement exists
 
@@ -318,31 +404,44 @@ Two single observations exist, both taken by the reviewer on a developer laptop 
 
 **These are single samples, not a benchmark.** They are not p50, not p95, not p99, and not an SLO. There is no load test, no throughput measurement, no concurrency test, no error-rate-under-load measurement, and no performance tooling anywhere in the repository. PERF-002 and PERF-003 are **NOT IMPLEMENTED**. See [`Performance_Validation.md`](Performance_Validation.md), which is deliberately structured as a plan rather than as results.
 
-### E-4 — no security, reliability or supply-chain testing has been run
+### E-4 — security and supply-chain testing: partially addressed
 
-| Absent | Requirement |
-|---|---|
-| Payer-identity binding test (finding **S-1**) | SEC-007, SEC-008, FR-039 |
-| Settled-payment-loss test (finding **R-2**) | REL-002 |
-| Dependency vulnerability scan | SEC-014 |
-| SAST / CodeQL | — |
-| Secret scanning of the Docker build context | SEC-015 |
-| Contract fuzzing | — |
-| Mutation testing | — |
-| Rate-limit testing | SEC-013 |
+| Check | State | Requirement |
+|---|---|---|
+| Payer-identity binding | **PRESENT** — 6 unit tests (`x402Payer.spec.ts`) plus a live end-to-end attack and control (§5.6) | SEC-007, FR-039 |
+| Audit attribution not forgeable | **PARTIAL** — proven live (§5.6); the offline ordering guard TC-113 is absent | SEC-008 |
+| Address checksum validation | **PRESENT** — `app.spec.ts` | SEC-010 |
+| Internal-message disclosure | **PRESENT** — `app.spec.ts` asserts the leaked string is gone | SEC-011 |
+| Rate-limit testing | **PRESENT** — `app.spec.ts`, including a guard that the health probe is *not* throttled | SEC-013 |
+| Dependency vulnerability scan | **PRESENT for Node** — `npm audit --audit-level=high` gates both jobs; 0 vulnerabilities. **Absent for Python** | SEC-014 |
+| Secret exclusion from the build context | **PRESENT by construction, untested** — `.dockerignore` at the repo root and in `web/` excludes `.env`, `**/.env`, `*.mnemonic`; no `gitleaks` gate verifies it | SEC-015 |
+| Settled-payment-loss test | **NOT NEEDED as originally framed.** Settlement in x402 v2 runs only on a sub-400 response — `@x402/hono` calls `processSettlement` after the handler and cancels on any throw or 4xx/5xx — so no MedRail error path can consume a settled payment. REL-002 is satisfied structurally by the SDK, and the risk the original test targeted does not exist. What a test *would* pin is the degradation added for G-03: `200` with `auditStatus: "pending"` when the audit write fails (TC-103) | REL-002, FR-012 |
+| Facilitator-outage degradation | **ABSENT** — the 503 path exists in `app.ts` but nothing exercises it (TC-170) | REL-001 |
+| SAST / CodeQL | **ABSENT** | — |
+| Contract fuzzing | **ABSENT** | — |
+| Mutation testing | **ABSENT** — and it is the technique that would surface §3.4 | — |
 
-### E-5 — CI has never executed on a push
+### E-5 — CI had never executed on a push — **CLOSED**
 
-`.github/workflows/ci.yml:4-5` triggers on `main`; the repository's only branch is `master`. All three jobs pass when run locally, so **this is not a failing build — it is a pipeline that has never fired** (**CI-1**, OPS-006 **PARTIALLY IMPLEMENTED**). No green badge from this repository has ever represented a machine-verified run.
+**Status: CLOSED.** The workflow triggered on `main` while the repository's only branch was `master`, so no push ever fired it: not a failing build, a pipeline that had never run. `.github/workflows/ci.yml` now triggers on `push` to `[main, master]`, on `pull_request`, and on `workflow_dispatch`; the repository's branch is `main` and its remote is `https://github.com/Hydra-Of-Malice/Medrail`. **CI-1 / G-06 closed**, and OPS-006 has an automated gate that actually fires.
+
+Listing both branch names is deliberate belt-and-braces: the failure mode was a silent one — a workflow that never runs looks exactly like a workflow that runs and passes — and the cheapest defence against repeating it is not to depend on which name the default branch happens to carry. The guard that would *detect* a recurrence is TC-200, still absent.
 
 ### E-6 — never built, never deployed
 
 | Artefact | State |
 |---|---|
-| `api/Dockerfile`, `web/Dockerfile` | Committed; **never built by CI**. NFR-007 **UNVALIDATED** |
-| MainNet deployment | **Does not exist.** `api/fly.toml` nevertheless hard-codes `NETWORK = "mainnet"` (**D-2**) and does not set `CONSENT_APP_ID` (**D-1**) |
+| `api/Dockerfile`, `web/Dockerfile` | Committed; both now install with `npm ci` from the lockfile, and `.dockerignore` files exist at both build roots. **Neither image has ever been built** — NFR-007 remains **UNVALIDATED** (TC-203) |
+| Fly.io deployment config | `api/fly.toml` now sets `NETWORK = "testnet"`, `CONSENT_APP_ID = "768743428"`, a `/v1/health` check, and `max_machines_running = 1`. **G-07, G-13, G-14 closed.** The config is correct and has never been applied |
+| MainNet deployment | **Does not exist.** No `MedRailConsent` app on MainNet and no `contracts/artifacts/deploy_mainnet.json` |
 | Public HTTPS endpoint | **Does not exist** — pending user hosting per `docs/COMPLIANCE.md` |
 | Bazaar discovery listing / leaderboard presence | **Do not exist** — pending user action per `docs/COMPLIANCE.md` |
+
+### E-7 — the deployed bytecode predates the contract fixes
+
+Recorded here so it is not mistaken for a documentation slip. The deployed approval program on app `768743428` is byte-identical to a compilation of the committed TEAL — verified by an algod `compile` whose hash `W4TMZHJOL7FIN5GIGJCWNB2HVI4C4WGVRDVY6BMUUOMWRFHMBJVSPZZ33U` and 1,404-character base64 program match the chain exactly. That pins the *deployed* bytecode to the *committed artifacts*, and the committed artifacts predate the C-1 and C-2 source fixes of §2.4.
+
+So both statements are true at once: the fixes are real and tested in source, and the live application does not have them. Redeploying would mint a new App ID under `OnUpdate.AppendApp`, so the deferral is a deliberate trade — see [`../08_Deployment/Rollback_Strategy.md`](../08_Deployment/Rollback_Strategy.md) §2.
 
 ---
 
@@ -353,14 +452,23 @@ Every claim in this document, with the command that produces it. All paths absol
 ### 7.1 Test suites
 
 ```bash
-# 14 passed
+# 28 passed
 cd /d/MedRail/contracts && ./.venv/Scripts/python.exe -m pytest tests/ -q
 
-# 14 passed, verbose per-test names (this is what CI runs)
+# 28 passed, verbose per-test names (this is what CI runs)
 cd /d/MedRail/contracts && ./.venv/Scripts/python.exe -m pytest tests/ -v
 
-# 18 passed across 3 files — requires network access to the facilitator
+# 45 passed across 6 files — x402-flow.spec.ts requires network access to the facilitator;
+# the other five files are hermetic.
 cd /d/MedRail/api && npx vitest run
+
+# The five hermetic files on their own — no outbound request, 40 tests.
+cd /d/MedRail/api && npx vitest run test/triageScorer.spec.ts test/interactionChecker.spec.ts \
+  test/x402Payer.spec.ts test/boxKeyParity.spec.ts test/app.spec.ts
+
+# Dependency audit — the gate CI runs. Both report "found 0 vulnerabilities".
+cd /d/MedRail/api && npm audit --audit-level=high
+cd /d/MedRail/web && npm audit --audit-level=high
 ```
 
 ### 7.2 Typecheck and build
@@ -371,28 +479,36 @@ cd /d/MedRail/web  && npx tsc --noEmit -p tsconfig.json && npm run build
 cd /d/MedRail/contracts && ./.venv/Scripts/python.exe -m puyapy smart_contracts/consent/contract.py --out-dir artifacts
 ```
 
-### 7.3 CI defect CI-1
+### 7.3 CI trigger — confirming CI-1 is closed
 
 ```bash
-cd /d/MedRail && git branch -a          # -> * master  (single branch)
-cd /d/MedRail && sed -n '1,7p' .github/workflows/ci.yml   # -> push: branches: [main]
+cd /d/MedRail && git branch -a                            # -> * main
+cd /d/MedRail && git remote -v                            # -> https://github.com/Hydra-Of-Malice/Medrail.git
+cd /d/MedRail && sed -n '1,10p' .github/workflows/ci.yml  # -> branches: [main, master] + workflow_dispatch
 ```
 
 ### 7.4 On-chain: application, global state, boxes
 
 ```bash
 # Application record: created-at-round, deleted flag, creator, global state
-curl -s "https://testnet-idx.algonode.cloud/v2/applications/768743428" | python -m json.tool
+curl -s "https://testnet-api.algonode.cloud/v2/applications/768743428" | python -m json.tool
 
 # Application account: balance, min-balance, total-boxes, total-box-bytes
-curl -s "https://testnet-idx.algonode.cloud/v2/accounts/CCO26Y6Z56DDZ3OELO2UKJMIPJVSIT52I23F2MPMR52JBM3HQZZNUZNOR4" | python -m json.tool
+# Expect: amount 5000000, min-balance 550400, total-boxes 12, total-box-bytes 1051
+curl -s "https://testnet-api.algonode.cloud/v2/accounts/CCO26Y6Z56DDZ3OELO2UKJMIPJVSIT52I23F2MPMR52JBM3HQZZNUZNOR4" | python -m json.tool
 
-# Boxes on the application — expect exactly 2, both beginning with "g".
-# Zero "s"- or "a"-prefixed boxes is the direct proof of evidence gap E-1.
-curl -s "https://testnet-idx.algonode.cloud/v2/applications/768743428/boxes" | python -m json.tool
+# Boxes on the application, counted by prefix.
+# Expect 6 "g" (grants), 5 "a" (audit entries), 1 "s" (audit sequence).
+# The five "a" boxes are the direct proof that evidence gap E-1 is closed.
+curl -s "https://testnet-api.algonode.cloud/v2/applications/768743428/boxes?max=50" | python -c "
+import json,sys,base64,collections
+c = collections.Counter()
+for b in json.load(sys.stdin)['boxes']:
+    c[chr(base64.b64decode(b['name'])[0])] += 1
+print(dict(c))"
 ```
 
-Global-state keys are base64-encoded in the indexer response; `total_audit_entries` decodes from `dG90YWxfYXVkaXRfZW50cmllcw==`.
+Global-state keys are base64-encoded in the response; `total_audit_entries` decodes from `dG90YWxfYXVkaXRfZW50cmllcw==`.
 
 ### 7.5 On-chain: individual transactions
 
@@ -402,18 +518,27 @@ for TX in \
   5XIADMCGFP5I7H7AS656RXZS7MFEEPCVJGLA7T3SVE6XDEYSGFFA \
   X2BQ5FD4MW52B75WQGDB67TEULYLN7FHVFO6ZOBNI74PNCAKVOUA \
   OV2J2T5VWMIQG64JYGL7JEGZKKNZNKCMNIQU6AC4PDRQYZ6ZOO5A \
-  OYRQRKYA7WUKBVLWTOFJSJMZFBW7VCNGP5VGH5EBUJGRCVFQFJRQ ; do
+  OYRQRKYA7WUKBVLWTOFJSJMZFBW7VCNGP5VGH5EBUJGRCVFQFJRQ \
+  M26NPR32Z5YBLBBMZDTBQL6Y7EUSNS5YV4PXYEUBXIVJQGVJ3MAA \
+  5DKFUULWLTNGKLYLH3TT44F22MHKOFRCEO6K4JVEPOPETFBYOESA \
+  4YLKLQKKWXXFW3UT5APJVYKXI7T7A6OACTAWCC5YBAN3XGOGHRVQ \
+  PCPVK3FLKP55L3FHCFIIF7QBYUPV5BHKSKYJTUIL6J4Q23HKNFDQ \
+  QZIQWHN553Q3QYJ4NJ5GP3QIROP6BE2DD45P3IUSHUOGEB7VLVSQ \
+  OYNWBHJTS4LCIW2KQKOM2CEZGIFPRCZLVBVCDDG3GGNWKWDKNBGA ; do
   echo "== $TX"
   curl -s "https://testnet-idx.algonode.cloud/v2/transactions/$TX" | python -m json.tool
 done
 ```
 
-For the settled payment, confirm in the response: `"asset-transfer-transaction"."amount": 20000`, `"asset-transfer-transaction"."asset-id": 10458941`, `"fee": 0`, `"confirmed-round": 66091768`, and that `sender` equals the asset receiver.
+For the `/v1/triage` payment, confirm: `"asset-transfer-transaction"."amount": 20000`, `"asset-transfer-transaction"."asset-id": 10458941`, `"fee": 0`, `"confirmed-round": 66091768`, and that `sender` equals the asset receiver.
+
+For the consent-gated payment `5DKFUULW…`, expect `"amount": 50000` — the $0.05 price of `/v1/records/summary` — and for `4YLKLQKK…` an `application-transaction` against app `768743428` invoking `log_access`.
 
 Human-readable equivalents:
 
 - https://lora.algokit.io/testnet/application/768743428
 - https://lora.algokit.io/testnet/transaction/OYRQRKYA7WUKBVLWTOFJSJMZFBW7VCNGP5VGH5EBUJGRCVFQFJRQ
+- https://lora.algokit.io/testnet/transaction/4YLKLQKKWXXFW3UT5APJVYKXI7T7A6OACTAWCC5YBAN3XGOGHRVQ
 
 ### 7.6 Live 402 challenge
 
@@ -441,6 +566,18 @@ cd /d/MedRail/contracts && ./.venv/Scripts/python.exe scripts/exercise_contract.
 # TestNet account holding USDC ASA 10458941 in PROOF_MNEMONIC / DEPLOYER_MNEMONIC.
 cd /d/MedRail/api && API_BASE=http://localhost:4021 npx tsx scripts/e2e-proof.ts
 cat /d/MedRail/contracts/artifacts/e2e-proof.json
+
+# TC-057 — the composition proof: grant -> free status check -> paid call -> audit append.
+# Idempotent: skips grant_access when a grant is already active. Each run appends one
+# audit entry, so total_audit_entries increases by 1 per successful run.
+cd /d/MedRail/api && API_BASE=http://localhost:4021 npx tsx scripts/e2e-consent-proof.ts
+cat /d/MedRail/contracts/artifacts/e2e-consent-proof.json
+
+# TC-058 — the G-01 impersonation attempt plus its control. Exits non-zero unless the
+# attack is blocked AND the legitimate call succeeds. Creates one new grant per run
+# (to a freshly generated third-party address) and one audit entry via the control leg.
+cd /d/MedRail/api && API_BASE=http://localhost:4021 npx tsx scripts/verify-g01-fix.ts
+cat /d/MedRail/contracts/artifacts/g01-verification.json
 ```
 
 ### 7.8 Confirming the absences
@@ -459,11 +596,16 @@ cd /d/MedRail && grep -n '"test"' web/package.json ; echo "exit=$?"
 # No vitest config anywhere
 cd /d/MedRail && find . -maxdepth 3 -name "vitest*" -not -path "*/node_modules/*"
 
-# No security scanning, no coverage gate, no image build in CI (CI-3)
-cd /d/MedRail && grep -nEi "audit|codeql|snyk|trivy|coverage|docker" .github/workflows/ci.yml ; echo "exit=$?"
+# CI scanning: `npm audit` IS present on both Node jobs; codeql/snyk/trivy/pip-audit,
+# a coverage gate and an image build are all still absent (TC-202, TC-203, TC-204)
+cd /d/MedRail && grep -nEi "audit|codeql|snyk|trivy|coverage|docker|pip-audit" .github/workflows/ci.yml
 
-# No .dockerignore anywhere (D-3 / SEC-015)
-cd /d/MedRail && find . -name ".dockerignore" -not -path "*/node_modules/*" ; echo "none found"
+# .dockerignore now exists at both build roots (D-3 / SEC-015 closed)
+cd /d/MedRail && find . -name ".dockerignore" -not -path "*/node_modules/*"
+cd /d/MedRail && grep -c "" .dockerignore web/.dockerignore
+
+# Neither Dockerfile uses `npm install` any more — both install from the lockfile (D-4)
+cd /d/MedRail && grep -n "npm ci\|npm install" api/Dockerfile web/Dockerfile
 
 # No .env tracked by git — the gitignore discipline is real (SEC-005)
 cd /d/MedRail && git ls-files | grep -i "\.env"   # -> only .env.example entries
@@ -478,14 +620,20 @@ cd /d/MedRail && grep -rn "@x402/extensions" api/src web/lib web/components api/
 
 | Question | Answer |
 |---|---|
-| Do the tests that exist pass? | **Yes — 32/32, reproducibly, on two independent runs.** |
-| Does "32 passing" mean 32 behaviours are verified? | **No.** At least one test runs directly over a live defect and asserts nothing about it (§3.4, measured). Assertion strength is unmeasured — there is no mutation testing and no coverage. |
-| Do the builds pass? | **Yes — API and web, typecheck and build, zero errors.** |
-| Is there real on-chain evidence? | **Yes — a live, undeleted application; four verified lifecycle/funding transactions; one genuine facilitator-settled x402 payment.** |
-| Is the system's headline feature proven? | **No.** `log_access` has never executed on TestNet (**E-1**). |
-| Is the consent gate proven to restrict access? | **No.** It authorises a self-asserted identity (**S-1**); the test that would catch it does not exist (TC-110). |
-| Has CI ever verified a commit? | **No** (**CI-1**). |
+| Do the tests that exist pass? | **Yes — 73/73, reproducibly.** |
+| Does "73 passing" mean 73 behaviours are verified? | **No.** At least one test still runs directly over a live defect and asserts nothing about it (§3.4, measured). Assertion strength remains unmeasured — no mutation testing, no coverage. |
+| Do the builds pass? | **Yes — API and web, typecheck and build, zero errors; both dependency audits clean.** |
+| Is there real on-chain evidence? | **Yes** — a live, undeleted application; the lifecycle and funding transactions; two genuine facilitator-settled x402 payments (`/v1/triage` and `/v1/records/summary`); and five `log_access` appends. |
+| Is the system's headline feature proven? | **Yes, on-chain.** `total_audit_entries = 5`; the full grant → pay → verify → append composition has executed against TestNet and its transaction ids are public (**E-1 closed**). |
+| Is the consent gate proven to restrict access? | **Yes.** The payer is recovered from the payment signature and must equal `requesterAddress`; the impersonation was executed against the live deployment and rejected with a 403 while the control call returned 200 (§5.6, TC-110, TC-058). |
+| Was a settled payment ever at risk on an error path? | **No — and it never was.** `@x402/hono` settles only on a sub-400 response, so REL-002 is satisfied structurally by the SDK. The 500 that G-03 described cost MedRail the sale, never the caller's money, and it is now degraded to `200 { auditStatus: "pending" }`. |
+| Are consent-denied calls charged? | **No.** A 403 cancels settlement; the response says `charged: false` and points at the free status endpoint. The residual cost is MedRail's — one chain fee for the denial audit write — and is bounded by rate limiting. |
+| Has CI ever verified a commit? | **Yes** (**CI-1 / E-5 closed**) — `push` on `[main, master]`, `pull_request`, `workflow_dispatch`, with caching, dependency audits and an artifact-freshness gate. |
+| Has either container image ever been built? | **No.** NFR-007 remains **UNVALIDATED** (**E-6**), though both Dockerfiles and `fly.toml` are now correct. |
+| Is anything publicly hosted? | **No.** No public HTTPS endpoint, no MainNet deployment, no Bazaar listing. Every payment recorded here is a self-payment from the project's own account. |
 | Can a coverage number be quoted? | **No** (**E-2**). |
-| Can a latency or throughput number be quoted? | **No**, beyond two disclosed single observations (**E-3**). |
+| Can a latency or throughput number be quoted? | **No**, beyond two disclosed single observations (**E-3**). G-24 is open. |
 
-The tests that exist are honest and they pass. The evidence that is missing is missing for reasons that are specific, enumerated, and — with the exception of the S-1 fix — cheap to close.
+The tests that exist are honest and they pass. Five defects that this document previously recorded as *argued* are now recorded as *pinned by a regression test that fails without the fix*, and the largest evidence gap in the project is closed with public transaction ids.
+
+What is left is left, and it is worth naming rather than burying: no coverage measurement, no performance measurement, no mutation testing, no route-level test for `records.ts`, no concurrency test for the audit lock, no container image ever built, two rule-engine defects still open and unpinned, and two contract fixes that are correct in source and absent from the deployed bytecode by choice.

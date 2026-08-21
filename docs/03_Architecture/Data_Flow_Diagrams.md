@@ -1,16 +1,8 @@
 # MedRail — Data Flow Diagrams
 
-
-> **⚠ Correction notice.** Parts of this document were written against a review finding that was
-> later proven wrong. Settlement in x402 v2 happens **only** on a sub-400 response, so **no error
-> path in MedRail can consume a settled payment** — and consent-denied calls (HTTP 403) are **not
-> charged**, contrary to `API.md`, `SECURITY.md`, and the `paidButDenied` field. The audit-sequence
-> race causes a **rejected transaction**, not a corrupted log. See
-> [`CORRECTIONS.md`](../CORRECTIONS.md) — it supersedes any statement here that contradicts it.
-
 **Purpose:** trace every data item through the system, name the trust boundary it crosses, and classify its sensitivity.
 
-**Status of this document:** Descriptive of commit `32ffd73` on branch `master`. Classic DFD notation. **The data stores shown are the complete set**: three Algorand BoxMaps, Algorand global state, two static in-process reference tables, one static artefact file served from disk, and the browser's `sessionStorage`. There is no database, cache, queue, log store, session store or object store anywhere in this system. Status labels per the project fact ledger.
+**Status of this document:** Descriptive of the working tree on branch `main`. Classic DFD notation. **The data stores shown are the complete set**: three Algorand BoxMaps, Algorand global state, two static in-process reference tables, one static artefact file served from disk, and the browser's `sessionStorage`. There is no database, cache, queue, log store, session store or object store anywhere in this system. Status labels per the project fact ledger.
 
 Related: [`./Component_Diagram.md`](./Component_Diagram.md) · [`./Sequence_Diagrams.md`](./Sequence_Diagrams.md) · [`./LLD.md`](./LLD.md) · [`../04_Data/`](../04_Data/) · [`../06_Security/Threat_Model.md`](../06_Security/Threat_Model.md) · [`../02_Requirements/SRS.md`](../02_Requirements/SRS.md)
 
@@ -28,8 +20,8 @@ Related: [`./Component_Diagram.md`](./Component_Diagram.md) · [`./Sequence_Diag
 | ID | Store | Location | Durability | Who can read it |
 |---|---|---|---|---|
 | **D1** | `grants` BoxMap, prefix `g` | Algorand app `768743428` | Permanent, replicated by the network | **Anyone on earth** |
-| **D2** | `audit_seq` BoxMap, prefix `s` | Same | Permanent | Anyone — **currently zero boxes** |
-| **D3** | `audit_log` BoxMap, prefix `a` | Same | Permanent, append-only | Anyone — **currently zero boxes** |
+| **D2** | `audit_seq` BoxMap, prefix `s` | Same | Permanent | Anyone — populated, one box per audited patient |
+| **D3** | `audit_log` BoxMap, prefix `a` | Same | Permanent, append-only | Anyone — populated, `total_audit_entries = 5` |
 | **D4** | Global state: `admin` + 4 counters | Same | Permanent | Anyone |
 | **D5** | `api/src/data/interactions.json` | API process memory, `readFileSync` at module load | Immutable for the process lifetime | Process only; content is published in every response's `source` field |
 | **D6** | `RED_FLAGS` constant array | Compiled into the API bundle | Immutable | Process only; labels are published in `matchedFlags` |
@@ -85,7 +77,7 @@ Note what does **not** flow into MedRail: no patient private key ever crosses an
 
 ---
 
-## 2. Level 1 — major flows across all seven endpoints
+## 2. Level 1 — major flows across all eight endpoints
 
 ```mermaid
 flowchart TB
@@ -96,8 +88,8 @@ flowchart TB
         THIRD["Any third party<br/>indexer, explorer, integrator"]
     end
 
-    subgraph APIZONE["MedRail API process — stateless · no authentication on any endpoint"]
-        P1((("P1<br/>CORS +<br/>payment gate")))
+    subgraph APIZONE["MedRail API process — stateless · identity comes from the payment, not a session"]
+        P1((("P1<br/>CORS · rate limit ·<br/>payment gate")))
         P2((("P2<br/>triage<br/>scoring")))
         P3((("P3<br/>interaction<br/>checking")))
         P4((("P4<br/>consent gate +<br/>record release")))
@@ -130,8 +122,8 @@ flowchart TB
     CALLER -->|"1 · POST /v1/triage with symptoms + payment"| P1
     CALLER -->|"2 · POST /v1/interaction-check with a medication list + payment"| P1
     CALLER -->|"3 · POST /v1/records/summary with patientId and requesterAddress + payment"| P1
-    CALLER -->|"4 · GET /v1/consent/status — FREE, UNAUTHENTICATED"| P5
-    CALLER -->|"5 · GET /v1/health · GET / · GET /v1/consent/arc56 — FREE"| P8
+    CALLER -->|"4 · GET /v1/consent/status — FREE, UNAUTHENTICATED, 60/min"| P5
+    CALLER -->|"5 · GET /v1/health · GET / · GET /v1/consent/app-info<br/>GET /v1/consent/arc56 — FREE"| P8
     BROWSER --> P1
     BROWSER --> P5
 
@@ -140,7 +132,7 @@ flowchart TB
 
     P1 -->|"symptom free text"| P2
     P1 -->|"medication list"| P3
-    P1 -->|"addresses only"| P4
+    P1 -->|"addresses only + the payer recovered<br/>from PAYMENT-SIGNATURE"| P4
 
     D6 --> P2
     D5 --> P3
@@ -162,7 +154,7 @@ flowchart TB
     SECRET -.-> P5
     SECRET -.-> P6
 
-    P4 -->|"SYNTHETIC_RECORD + auditTxId + auditSequence"| CALLER
+    P4 -->|"SYNTHETIC_RECORD + auditStatus + auditTxId + auditSequence"| CALLER
     P5 -->|"patient · requester · scope · granted boolean"| CALLER
 
     PATIENT --> P7
@@ -173,15 +165,15 @@ flowchart TB
     D1 -->|"grants are PUBLIC — patient as sender, requester as ABI arg 0"| THIRD
     D3 -->|"audit entries are PUBLIC"| THIRD
     D4 -->|"counters are PUBLIC"| THIRD
-    THIRD -.->|"harvest (patient, requester) pairs — reconnaissance for S-1"| CALLER
+    THIRD -.->|"harvest (patient, requester) pairs — reconnaissance still works,<br/>but a harvested pair is no longer usable — see P4"| CALLER
 ```
 
 **Five observations a reviewer should take from Level 1.**
 
 1. **No flow reaches a database, because there is none.** Every persistent arrow terminates in D1–D4 on the public ledger. D5, D6 and D7 are read-only reference data loaded once and never written.
-2. **`OPERATOR_MNEMONIC` fans out to three processes, including a free one.** P5 serves the free, unauthenticated `GET /v1/consent/status`, and it cannot run without the admin key, because `simulate` still requires a sender and signer (`api/src/services/algorand.ts:8-14`, `:84`).
-3. **The dotted arrow from D1 back to the caller is the attack surface.** Grants are necessarily public, so the transparency that makes the consent layer auditable also publishes the `(patient, requester)` pairs an S-1 attacker needs. See [`./Sequence_Diagrams.md`](./Sequence_Diagrams.md) §7.
-4. **P6 has never executed against the live chain.** D2 and D3 hold zero boxes on application `768743428` and `total_audit_entries = 0`. Evidence gap **E-1**.
+2. **`OPERATOR_MNEMONIC` fans out to three processes, including a free one.** P5 serves the free, unauthenticated `GET /v1/consent/status`, and it cannot run without the admin key, because `simulate` still requires a sender and signer (`api/src/services/algorand.ts:8-14`, `:84`). SEC-012 **NOT IMPLEMENTED**.
+3. **The dotted arrow from D1 back to the caller is reconnaissance that no longer converts.** Grants are necessarily public, so the transparency that makes the consent layer auditable also publishes every `(patient, requester)` pair. What has changed is that P4 now recovers the payer from `PAYMENT-SIGNATURE` and refuses the request unless it equals the asserted `requesterAddress` — so knowing that R is authorised does not let a caller *be* R. See [`./Sequence_Diagrams.md`](./Sequence_Diagrams.md) §7.
+4. **P6 has executed against the live chain.** D2 and D3 hold boxes on application `768743428` and `total_audit_entries` is 5. First live write: `4YLKLQKKWXXFW3UT5APJVYKXI7T7A6OACTAWCC5YBAN3XGOGHRVQ`.
 5. **D8 holds a plaintext key in the browser.** Any XSS on the demo page exfiltrates it. Bounded to TestNet play money, disclosed in-code (`web/lib/demoWallet.ts:10-12`) and in the UI (`web/components/DemoWalletCard.tsx:74-77`).
 
 ---
@@ -220,9 +212,9 @@ flowchart LR
     C -->|"d3 PAYMENT-SIGNATURE header"| A1
     A1 --> A2
     A2 -->|"d3 forwarded verbatim"| F
-    F -->|"d4 settlement verdict + settled tx id"| A2
+    F -->|"d4 verify verdict, then settlement + settled tx id<br/>settlement only if the handler returns below 400"| A2
     F --> PAY
-    A2 -->|"d1 or d2 — reaches the handler ONLY after settlement"| A3
+    A2 -->|"d1 or d2 — reaches the handler ONLY after a VERIFIED payment"| A3
     A3 -->|"validated d1 or d2"| A4
     DS1 --> A4
     DS2 --> A4
@@ -234,9 +226,9 @@ flowchart LR
 
 **AI-007, demonstrated structurally rather than asserted.** These two endpoints touch no data store other than D5 and D6, both read-only. `scoreTriage` and `checkInteractions` are pure functions: they take a string or an array, consult a constant table, and return an object (`api/src/services/triageScorer.ts:53-73`, `api/src/services/interactionChecker.ts:36-55`). Neither imports the chain gateway; neither has a code path to `logAccess`. The free-text clinical input has **nowhere to go** — it is garbage-collected with the request. This is a structural guarantee, not a policy.
 
-**What is public about this flow.** Only the payment: an axfer of 20000 base units of ASA `10458941` to the configured `payTo`, permanently visible — for the one real call, transaction `OYRQRKYA7WUKBVLWTOFJSJMZFBW7VCNGP5VGH5EBUJGRCVFQFJRQ`. The payment reveals *that* someone paid MedRail $0.02 and *when*; it reveals nothing about the symptoms.
+**What is public about this flow.** Only the payment: an axfer of 20000 base units of ASA `10458941` to the configured `payTo`, permanently visible — for example transaction `OYRQRKYA7WUKBVLWTOFJSJMZFBW7VCNGP5VGH5EBUJGRCVFQFJRQ`, and `2VRBXOMH…` from a later repeat run. The payment reveals *that* someone paid MedRail $0.02 and *when*; it reveals nothing about the symptoms.
 
-**Residual privacy exposure worth naming.** The symptoms are in the API process's memory and in TLS-terminated transit for the request's lifetime. There is no request logging that would capture them (`console.error(err)` in `app.onError` logs the error object, and no handler logs the body), and no structured logging exists at all — so the absence of an accidental PHI sink here is a consequence of OPS-002 being **NOT IMPLEMENTED**, not of a deliberate redaction control. If structured request logging is ever added, that is the moment this property could silently break.
+**Residual privacy exposure worth naming.** The symptoms are in the API process's memory and in TLS-terminated transit for the request's lifetime. No handler logs the request body, and the two structured log events that now exist — `audit_write_failed` and `facilitator_unavailable` — carry addresses, an endpoint constant and an error message, never caller free text. `app.onError` logs the method, path, error message and stack against a generated `requestId`, again never the body. So the absence of a PHI sink here is real but shallow: it holds because no request logging exists (OPS-002 **NOT IMPLEMENTED**), not because a redaction control enforces it. If structured request logging is ever added, that is the moment this property could silently break.
 
 ---
 
@@ -246,14 +238,15 @@ flowchart LR
 
 ```mermaid
 flowchart TB
-    subgraph TB1["TB-1 — untrusted · NOTHING HERE IS AUTHENTICATED"]
-        C["Caller — pays, and self-asserts an identity"]
+    subgraph TB1["TB-1 — untrusted · identity is proven by the payment, not asserted"]
+        C["Caller — pays, and asserts an identity<br/>the payment must corroborate"]
     end
 
     subgraph API["MedRail API process"]
         direction TB
-        B1((("B1<br/>payment gate")))
-        B2((("B2<br/>zod validate<br/>LENGTH 58 ONLY, no checksum")))
+        B1((("B1<br/>rate limit +<br/>payment gate")))
+        B2((("B2<br/>zod validate<br/>length 58 AND checksum")))
+        B2b((("B2b<br/>recover payer from<br/>PAYMENT-SIGNATURE<br/>reject unless it equals<br/>requesterAddress")))
         B3((("B3<br/>derive grant box key<br/>g + sha256 triple")))
         B4((("B4<br/>check_access<br/>via simulate")))
         B5((("B5<br/>branch on the verdict")))
@@ -276,11 +269,14 @@ flowchart TB
         D4S[("D4 total_audit_entries")]
     end
 
-    C -->|"e1 patientId 58 chars<br/>e2 requesterAddress 58 chars — CALLER-ASSERTED<br/>e3 PAYMENT-SIGNATURE"| B1
+    C -->|"e1 patientId 58 chars<br/>e2 requesterAddress 58 chars — asserted<br/>e3 PAYMENT-SIGNATURE"| B1
     B1 -->|"e3"| F
-    F -->|"e4 SETTLED — $0.05 has moved, irreversibly"| B1
-    B1 -->|"e1 e2"| B2
-    B2 -->|"e1 e2"| B3
+    F -->|"e4 VERIFIED — nothing settled yet"| B1
+    B1 -->|"e1 e2 e3"| B2
+    B2 -->|"e1 e2 e3"| B2b
+    B2b -->|"e13 payer recovered from<br/>paymentGroup at paymentIndex"| B2b
+    B2b -->|"403 if e13 does not equal e2 — settlement cancelled"| C
+    B2b -->|"e1 e2, now corroborated"| B3
     KEY -.-> B4
     KEY -.-> B7
     B3 -->|"e5 33-byte box key"| B4
@@ -289,8 +285,8 @@ flowchart TB
     D1S -->|"e6 grant status + expiry, evaluated on-chain"| AL
     AL -->|"e7 boolean"| B5
 
-    B5 -->|"DENIED — e1 e2 + constants, write WRAPPED in .catch"| B6
-    B5 -->|"ALLOWED — e1 e2 + constants, write NOT WRAPPED"| B6
+    B5 -->|"DENIED — e1 e2 + constants, write wrapped in .catch"| B6
+    B5 -->|"ALLOWED — e1 e2 + constants, write wrapped in try/catch"| B6
     B6 -->|"reads current sequence"| D2S
     B6 -->|"e8 predicted box name a+patient+itob(seq)"| B7
     B7 -->|"e1 e2 + e9 scope + e10 endpoint + e11 action<br/>ADMIN-SIGNED"| AL
@@ -300,17 +296,16 @@ flowchart TB
     AL -->|"e12 audit tx id + sequence"| B8
 
     SR --> B8
-    B8 -->|"200 · synthetic record · consentVerifiedOnChain · e12 · disclaimer<br/>OR 403 · paidButDenied true<br/>OR 500 after settlement — R-2"| C
+    B8 -->|"200 · synthetic record · consentVerifiedOnChain · auditStatus<br/>recorded with e12, or pending with nulls<br/>OR 403 · charged false — settlement cancelled"| C
 
-    C -.->|"e2 is chosen by the caller and never compared to the payer<br/>S-1 · SEC-007 NOT IMPLEMENTED"| B2
-    D3S -.->|"the FORGED requester becomes a permanent public record<br/>S-1 second-order effect · SEC-008 NOT IMPLEMENTED"| TB1
+    D3S -->|"the requester recorded here is the account that PAID<br/>SEC-008 IMPLEMENTED"| TB1
 ```
 
-**The one flow that is missing is the whole security finding.** There is no arrow from `e3` (the payment signature, which contains the payer's identity) to `B2` or `B5`. The payer is proven to the middleware and then discarded; the handler reads `e2` from the request body instead. Adding that arrow — `decodePaymentSignatureHeader` + `getSenderFromTransaction`, then reject unless `payer === requesterAddress` — is roughly 10–15 lines and closes S-1. FR-039, SEC-007 **NOT IMPLEMENTED**.
+**The flow that used to be missing is now the centre of the diagram.** Process **B2b** is the arrow from `e3` — the payment signature, which carries the payer's identity — into the authorisation decision. `payerFromRequest` decodes the header, takes `paymentGroup[paymentIndex]` (the caller's own asset transfer, not the facilitator's fee-payer legs), and recovers its sender; the handler then refuses with 403 unless that address equals `e2`. Because the payment is a signed transaction, this costs one decode and no extra round trip: **under x402 the money and the identity are the same artefact**, which is why an on-chain consent grant can be enforced by an off-chain API without any session, token or login. FR-039, SEC-006, SEC-007, SEC-008 **IMPLEMENTED**.
 
-**What actually lands on the permanent public record.** Exactly five fields, from `AuditEntry` (`contracts/smart_contracts/consent/contract.py:66-73`): a timestamp, the requester address, and three strings that are **module constants**, not caller input — `scope = "records:summary"`, `endpoint = "/v1/records/summary"`, `action = "consent_checked" | "consent_denied"` (`api/src/routes/records.ts:10-11`, `:37`, `:49`). SEC-004 **IMPLEMENTED**.
+**What actually lands on the permanent public record.** Exactly five fields, from `AuditEntry` (`contracts/smart_contracts/consent/contract.py:69-76`): a timestamp, the requester address, and three strings that are **module constants**, not caller input — `scope = "records:summary"`, `endpoint = "/v1/records/summary"`, `action = "consent_checked" | "consent_denied"` (`api/src/routes/records.ts:12-13`, `:58`, `:84`). SEC-004 **IMPLEMENTED**. And the requester address written there is now provably the account that paid, so the audit trail records a fact rather than a claim.
 
-**And the whole right-hand side is unproven.** D2, D3 and the `total_audit_entries` increment have never occurred on TestNet (E-1). `routes/records.ts` has no test. FR-010, FR-011, FR-012 all **UNVALIDATED**.
+**The right-hand side is proven.** D2, D3 and the `total_audit_entries` increment have all occurred on TestNet — `total_audit_entries = 5`, first write `4YLKLQKK…` — and `api/scripts/e2e-consent-proof.ts` reproduces the whole path on demand. FR-010, FR-011, FR-012 **VALIDATED**. What is still thin is *unit* coverage: `routes/records.ts` is exercised by `api/test/app.spec.ts` and `api/test/x402Payer.spec.ts` at its boundaries, and `services/algorand.ts` has no dedicated unit-test file at all (finding **G-05**, open).
 
 ---
 
@@ -323,14 +318,14 @@ Sensitivity scale: **Public** (on a public ledger or intended for publication) �
 | Free-text symptoms (`d1`) | **Caller-sensitive** | TB-1 inbound only | **Nowhere** | Request lifetime | Never logged, never persisted, never reaches the chain; 2000-char cap | Held in process memory and in TLS transit. AI-007 **IMPLEMENTED** structurally, not by an explicit redaction control |
 | Medication list (`d2`) | **Caller-sensitive** | TB-1 inbound only | **Nowhere** | Request lifetime | Same | Same |
 | Triage / interaction result (`d5`, `d6`) | Caller-sensitive, derived | TB-1 outbound only | Nowhere | Request lifetime | Always carries a non-diagnostic disclaimer, asserted by test (FR-009, AI-002 **VALIDATED**) | — |
-| `patientId` (`e1`) | **Pseudonymous, permanent** | TB-1 → TB-3 → TB-4 | D2, D3 keys; D1 key input | **Forever** | Only the SHA-256 digest of the triple appears in D1's key; the raw address appears in D2/D3 keys | Length-58 validation only; no checksum (SEC-010 **NOT IMPLEMENTED**, R-3) |
-| `requesterAddress` (`e2`) | **Pseudonymous, permanent** | TB-1 → TB-3 → TB-4 | D3 value, **in the clear** | **Forever** | Contract records exactly what it is given | **Caller-asserted. S-1. A forged value becomes a permanent false attribution** (SEC-008 **NOT IMPLEMENTED**) |
+| `patientId` (`e1`) | **Pseudonymous, permanent** | TB-1 → TB-3 → TB-4 | D2, D3 keys; D1 key input | **Forever** | Only the SHA-256 digest of the triple appears in D1's key; the raw address appears in D2/D3 keys. Validated for length **and** checksum by `algorandAddress` before any chain call (SEC-010, SEC-011 **IMPLEMENTED**) | Still caller-chosen, but it only selects which grant is checked — a grant naming a patient who did not issue it does not exist |
+| `requesterAddress` (`e2`) | **Pseudonymous, permanent** | TB-1 → TB-3 → TB-4 | D3 value, **in the clear** | **Forever** | Asserted by the caller, then **corroborated against the payer** recovered from `PAYMENT-SIGNATURE`; a mismatch is a 403 before any chain call (SEC-006, SEC-007, SEC-008 **IMPLEMENTED**) | Permanent and linkable once written. The value is now provably the paying account, so a false attribution cannot be induced by a caller |
 | `scope`, `endpoint`, `action` (`e9`–`e11`) | **Public** | TB-1 → TB-4 | D3 value | Forever | Module constants, never caller-derived | — |
-| `PAYMENT-SIGNATURE` (`e3`) | **Secret in transit, bearer-equivalent** | TB-1 → TB-2 | Nowhere in MedRail | Request lifetime | HTTPS; forwarded verbatim; never logged | Never used to identify the payer to the handler — the S-1 root cause. No replay defence implemented by MedRail; the facilitator and the AVM handle that |
+| `PAYMENT-SIGNATURE` (`e3`) | **Secret in transit, bearer-equivalent** | TB-1 → TB-2 | Nowhere in MedRail | Request lifetime | HTTPS; forwarded verbatim to the facilitator; never logged. Also **read locally, read-only**, by `payerFromRequest` to recover the payer (`e13`) | No replay defence implemented by MedRail; the facilitator and the AVM handle that. `payerFromRequest` returns `null` on any decode failure and callers must treat `null` as unauthenticated |
 | Settled transaction id (`e12`, `d4`) | **Public** | TB-2 → TB-1, and TB-4 | Algorand ledger | Forever | Deliberately published — the proof artefact | Links payer to endpoint and timestamp forever. Inherent to x402 |
-| Grant record — status, `granted_at`, `expires_at` | **Public** | TB-4 | D1 | Forever | 17 bytes; no PHI | The `(patient, requester)` relationship is inferable from the transaction that created it — the reconnaissance surface for S-1 |
+| Grant record — status, `granted_at`, `expires_at` | **Public** | TB-4 | D1 | Forever | 17 bytes; no PHI | The `(patient, requester)` relationship is inferable from the transaction that created it. That is inherent to an auditable on-chain consent registry and cannot be removed; what it no longer buys an observer is the ability to *use* the pair |
 | Global counters | **Public** | TB-4 | D4 | Forever | — | — |
-| Synthetic record | **Not sensitive by construction** | TB-1 outbound | D-none, a code constant | — | Fixed, patient-independent; response carries an explicit disclaimer (DATA-004 **IMPLEMENTED**) | Would become the most sensitive item in the system the moment real data replaced it — at which point S-1 becomes a live PHI breach |
+| Synthetic record | **Not sensitive by construction** | TB-1 outbound | D-none, a code constant | — | Fixed, patient-independent; response carries an explicit disclaimer (DATA-004 **IMPLEMENTED**) | Would become the most sensitive item in the system the moment real data replaced it. The authorisation control that would then be load-bearing already exists — what is absent is encryption at rest, key management and a retention policy (DATA-006 **PLANNED**) |
 | `OPERATOR_MNEMONIC` | **Secret — highest value** | Never crosses a boundary | Env var + process memory, memoised for the process lifetime | Process lifetime | Gitignored and verified untracked (SEC-005 **VALIDATED**) | Single hot key, no multisig, no HSM, no rotation policy or runbook. Grants audit forgery + `set_admin` + `withdraw_excess`. SEC-012 **NOT IMPLEMENTED**. Also sits in the repo-root Docker build context (SEC-015 **NOT IMPLEMENTED**, D-3) |
 | `DEPLOYER_MNEMONIC` | **Secret** | Never crosses a boundary | `contracts/.env` | — | Gitignored, untracked | Same build-context exposure (D-3) |
 | Demo wallet mnemonic (D8) | **Secret, TestNet-only** | Never leaves the browser tab | `sessionStorage`, **plaintext** | Tab lifetime | `sessionStorage` rather than `localStorage`; TestNet only; disclosed in-code and in the UI | Any XSS on the page exfiltrates it. Impact bounded to play money |
@@ -341,9 +336,9 @@ Sensitivity scale: **Public** (on a public ledger or intended for publication) �
 
 Caller-sensitive content flows **inbound only** and terminates inside the process. Pseudonymous identifiers flow **inbound and onward to a permanent public record**. The system is designed so that the two never mix, and the design holds — the audit entry's only variable field is an address, and its three strings are compile-time constants.
 
-Two conditions would break it, and neither is defended against:
+Two conditions would strain it, and they are not symmetrical.
 
-1. **Adding structured request logging** without an explicit body-redaction rule would create the first durable sink for `d1`/`d2`. OPS-002 is **NOT IMPLEMENTED**, so today there is no sink — but there is also no policy that would stop one being added.
-2. **Replacing `SYNTHETIC_RECORD` with real data** would turn S-1 from a latent flaw into a live PHI breach on day one, with the additional insult that the breach would be recorded on the immutable audit trail under the *attacker's chosen* name.
+1. **Adding structured request logging** without an explicit body-redaction rule would create the first durable sink for `d1`/`d2`. Two structured events now exist (`audit_write_failed`, `facilitator_unavailable`) and neither carries caller free text, but that is a property of how they were written, not of an enforced rule. OPS-002 remains **NOT IMPLEMENTED**, so there is no sink today — and no policy that would stop one being added.
+2. **Replacing `SYNTHETIC_RECORD` with real data** is the larger step, and the honest position on it has changed. The authorisation control that would have to hold now exists and is proven: the payer is bound to the asserted requester, so a stranger cannot read a record by naming an authorised party, and the audit trail records the account that actually paid rather than a claim. What remains true is that the endpoint currently returns a fixed constant, so **nothing sensitive sits behind that control yet** — the risk is deferred, not exercised. Turning it on would additionally require encryption at rest, key management, a retention policy, a breach-notification process and a regulatory posture, **none of which exists in this repository**.
 
-`docs/SECURITY.md` describes off-chain encrypted storage with on-chain content-address pointers as the eventual direction for real clinical payloads. **DATA-006 is PLANNED — no encryption pipeline exists in this repository.**
+`docs/SECURITY.md` describes off-chain encrypted storage with on-chain content-address pointers as the eventual direction for real clinical payloads. **DATA-006 is PLANNED — no encryption pipeline exists in this repository**, and no HIPAA, GDPR or SOC-2 status is claimed anywhere.

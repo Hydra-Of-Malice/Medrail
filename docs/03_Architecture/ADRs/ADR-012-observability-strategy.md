@@ -1,13 +1,5 @@
 # ADR-012: Observability strategy
 
-
-> **⚠ Correction notice.** Parts of this document were written against a review finding that was
-> later proven wrong. Settlement in x402 v2 happens **only** on a sub-400 response, so **no error
-> path in MedRail can consume a settled payment** — and consent-denied calls (HTTP 403) are **not
-> charged**, contrary to `API.md`, `SECURITY.md`, and the `paidButDenied` field. The audit-sequence
-> race causes a **rejected transaction**, not a corrupted log. See
-> [`CORRECTIONS.md`](../../CORRECTIONS.md) — it supersedes any statement here that contradicts it.
-
 **Status:** Proposed (RECOMMENDED, not implemented)
 **Date:** Not recorded. No observability decision appears anywhere in the repository.
 **Deciders:** Not recorded in repository

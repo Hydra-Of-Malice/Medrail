@@ -2,7 +2,7 @@
 
 **Purpose:** document the two endpoints MedRail markets as "AI intelligence endpoints" — what they actually are, how they work, what has and has not been verified about them, and where they fail.
 
-**Status of this document:** Descriptive of commit `32ffd73` on branch `master`. Every claim carries a `path:line` citation, a transaction ID, or an explicit statement that no evidence exists.
+**Status of this document:** Descriptive of commit `3b387df` on branch `main`. Every claim carries a `path:line` citation, a transaction ID, or an explicit statement that no evidence exists.
 
 ---
 
@@ -14,7 +14,7 @@ MedRail's `/v1/triage` and `/v1/interaction-check` endpoints contain **no artifi
 
 Because there is no AI and no ML in it, and a directory named after a capability the system does not have would be the first thing a reviewer catches.
 
-The word "AI" does appear in MedRail's own marketing copy — `README.md:3`, `api/src/app.ts:74`, `web/app/layout.tsx:18`, `web/app/page.tsx:18`, and `docs/JUDGES.md:8` all describe "x402-paid AI intelligence endpoints." That phrasing is **inaccurate** and this directory says so plainly rather than building a documentation set that props it up. What those endpoints genuinely are is *machine-readable clinical intelligence sold per-call to an autonomous agent* — the x402 use case is real and unaffected — but the intelligence is a rule table, not a model.
+The word "AI" does appear in MedRail's own marketing copy — `README.md:3`, `api/src/app.ts:152`, `web/app/layout.tsx:18`, `web/app/page.tsx:18`, and `docs/JUDGES.md:8` all describe "x402-paid AI intelligence endpoints." That phrasing is **inaccurate** and this directory says so plainly rather than building a documentation set that props it up. What those endpoints genuinely are is *machine-readable clinical intelligence sold per-call to an autonomous agent* — the x402 use case is real and unaffected — but the intelligence is a rule table, not a model.
 
 Two consequences follow, and both are stated throughout this directory rather than buried:
 

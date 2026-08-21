@@ -1,13 +1,5 @@
 # MedRail — Demo Runbook
 
-
-> **⚠ Correction notice.** Parts of this document were written against a review finding that was
-> later proven wrong. Settlement in x402 v2 happens **only** on a sub-400 response, so **no error
-> path in MedRail can consume a settled payment** — and consent-denied calls (HTTP 403) are **not
-> charged**, contrary to `API.md`, `SECURITY.md`, and the `paidButDenied` field. The audit-sequence
-> race causes a **rejected transaction**, not a corrupted log. See
-> [`CORRECTIONS.md`](../CORRECTIONS.md) — it supersedes any statement here that contradicts it.
-
 **Purpose:** the operational procedure for running the MedRail demo without failing on stage — pre-flight checks at T-24h / T-1h / T-5min, exact start-up sequence, and a failure-mode table with detection, fallback, and the exact words to say.
 
 **Status of this document:** Operational runbook, 2026-08-21. Every verification command below was executed against live public infrastructure during authoring and produced the stated output, except those marked ⚠ which depend on local state (a running API, a funded wallet). Assumes TestNet only — no MainNet, public hosting, Bazaar listing, or leaderboard presence is involved. Companion to [`Demo_Script.md`](Demo_Script.md), which contains the beats and the words; this document contains everything that has to be true before those work.
@@ -21,8 +13,8 @@ Related: [`Judge_Evaluation.md`](Judge_Evaluation.md), [`Winning_Strategy.md`](W
 Read these before the checklist. Everything else is detail.
 
 1. **An Algorand account cannot receive an ASA it has not opted in to.** This is a protocol rule, not an app quirk. Your demo wallet must opt in to USDC ASA `10458941` *before* any faucet send will land. Miss this and the faucet appears to work, the balance stays zero, and you find out on stage. `contracts/scripts/opt_in_usdc.py` does it for the deployer; the browser demo wallet needs its own opt-in.
-2. **The 402 cannot be constructed offline.** `accepts[].asset` and `extra.feePayer` come from the facilitator's `/supported`, fetched at initialisation — not from MedRail config (`api/src/x402.ts:16-32` deliberately omits `asset`). If `facilitator.goplausible.xyz` is unreachable, **every priced route returns HTTP 500 with no `PAYMENT-REQUIRED` header** (finding R-1). Check it at T-5min, not T-24h.
-3. **`log_access` has never run on TestNet** (finding E-1). `total_audit_entries = 0`; zero audit boxes exist. If you have not closed this (`Winning_Strategy.md` M2), Beat 6 of the demo is not demonstrable and you must use the fallback line. **Verify at T-24h so you know which script you are running.**
+2. **The 402 cannot be constructed offline.** `accepts[].asset` and `extra.feePayer` come from the facilitator's `/supported`, fetched at initialisation — not from MedRail config (`api/src/x402.ts:16-32` deliberately omits `asset`). If `facilitator.goplausible.xyz` is unreachable, **every priced route returns HTTP 503 with `Retry-After: 30`** and code `PAYMENT_FACILITATOR_UNAVAILABLE` (`api/src/app.ts:69-105`). Free routes are unaffected. That is a much better failure than the opaque 500 it used to be — but it is still four of your eight beats gone. **Check it at T-5min, not T-24h.**
+3. **ALGO, not USDC, is your funding constraint.** The project wallet `2WDV2J2F…` currently holds **$20.00 of TestNet USDC** (20,000,000 base units) — roughly a thousand $0.02 calls or four hundred $0.05 ones, so payments are not going to run out. It holds **0.984 ALGO** with 0.464 locked as minimum balance, leaving about **0.52 ALGO of spendable headroom**. Every `grant_access` and `revoke_access` pays its own fee out of that (payments are fee-sponsored; consent transactions are not), and the operator account pays a fee for every audit write. Rehearsing burns ALGO faster than USDC. **Check the ALGO balance at T-1h, not just the USDC one.**
 
 ---
 
@@ -49,12 +41,15 @@ for kv in a['params']['global-state']:
 created-at-round: 66088624 | deleted: False
 total_requests         = 2
 total_revocations      = 2
-total_audit_entries    = 0
-total_grants_active    = 0
+total_audit_entries    = 5
+total_grants_active    = 4
 ```
 
 - `deleted: False` — **must** be false. If it is true the demo has no contract and you are rebuilding, not rehearsing.
-- `total_audit_entries` — **if this is 0, E-1 is open.** Close it today (§1.6) or commit to the fallback script.
+- `total_audit_entries` — **must be ≥ 5.** This is the counter Beat 8 lands on, and it is the single number that carries the differentiator. If it ever reads 0, you are pointed at the wrong App ID.
+- `total_grants_active` — expect 4 or more. It is **not** decremented when a grant expires (finding G-32, open), so it drifts upward over time. Do not present it as a live count of currently-valid grants; it counts grants that were made active and not explicitly revoked.
+
+> **Note on what this App ID is running.** App `768743428` executes the **pre-fix bytecode**: two contract defects (C-1, the swapped `AccessRequested` event fields; C-2, the 400 µALGO MBR under-estimate) are fixed in `contracts/contract.py` with regression tests, and deliberately **not** redeployed, because `deploy_testnet.py` uses `OnUpdate.AppendApp` and would mint a new App ID — discarding every transaction id in your evidence log. Neither defect affects the demo. **Know this cold**, because it is the sharpest question a prepared judge can ask; the answer is in `Demo_Script.md`'s risk register.
 
 ### 1.2 Verify app-account balance and box headroom
 
@@ -73,14 +68,16 @@ print('boxes      :', a.get('total-boxes'), '/', a.get('total-box-bytes'), 'byte
 **Expected** (verified live 2026-08-21):
 ```
 balance    : 5000000 uALGO
-min-balance: 145000 uALGO
-headroom   : 4855000 uALGO
-boxes      : 2 / 100 bytes
+min-balance: 550400 uALGO
+headroom   : 4449600 uALGO
+boxes      : 12 / 1051 bytes
 ```
 
-**Threshold:** headroom must exceed ~50,000 µALGO to create the two new boxes an audit write needs (one `s`, one `a`). 4.85 ALGO is ample. If headroom ever drops below ~200,000 µALGO, top up via `fund_mbr` before the demo.
+**Threshold:** headroom must exceed ~50,000 µALGO to create the boxes a new grant plus audit write needs. 4.45 ALGO is ample. If headroom ever drops below ~200,000 µALGO, top up via `fund_mbr` before the demo.
 
-> **Known defect, worth knowing but not fixing today:** the contract's own `get_grant_box_mbr()` returns **22,100** µALGO per grant box (`contract.py:52` computes `400 * (32 + 17)`), while the true cost is **22,500** — the effective box key includes the 1-byte `"g"` prefix. The on-chain numbers above confirm it: 145,000 − 100,000 base = 45,000 = 2 × 22,500. Finding C-2. It under-quotes by 1.8%; it will not break this demo. **Do not redeploy to fix it** — a new App ID destroys every transaction id in your evidence log.
+**Box inventory, so you can read the number rather than trust it:** 12 boxes — **6** `g`-prefixed grant boxes, **5** `a`-prefixed audit-entry boxes, and **1** `s`-prefixed per-patient sequence box. In base64 the prefixes render as `Z…` for `g`, `Yd…` for `a`, and `c…` for `s`. The five audit boxes are the on-chain form of `total_audit_entries = 5`; if the counter and the box count ever disagree, something is wrong with the App ID you are querying, not with the contract.
+
+> **Known defect, worth knowing but not fixing today:** the contract's `get_grant_box_mbr()` **as deployed** returns **22,100** µALGO per grant box (it computes `400 * (32 + 17)`), while the true cost is **22,500** — the effective box key includes the 1-byte `"g"` prefix. It is fixed in source (`400 * (33 + 17)`) with a regression test, and **the deployed app still runs the old value on purpose** (finding C-2; see §1.1). It under-quotes by 1.8% and will not break this demo. **Do not redeploy to fix it** — a new App ID destroys every transaction id in your evidence log.
 
 ### 1.3 Verify the facilitator is alive and speaks what you expect
 
@@ -88,7 +85,7 @@ boxes      : 2 / 100 bytes
 curl -s --max-time 15 https://facilitator.goplausible.xyz/supported | head -c 600; echo
 ```
 
-**Expected:** a JSON body listing supported payment kinds, including an `algorand:SGO1GKSzyE7IEPItTxCByw9x8FmnrCDexi9/cOUJOiI=` entry with the `exact` scheme. If this returns nothing, the priced half of your demo does not exist — see §5, R-1.
+**Expected:** a JSON body listing supported payment kinds, including an `algorand:SGO1GKSzyE7IEPItTxCByw9x8FmnrCDexi9/cOUJOiI=` entry with the `exact` scheme. If this returns nothing, the priced half of your demo does not exist — see §5, the facilitator-outage row.
 
 ### 1.4 Fund both accounts — ALGO **and** USDC
 
@@ -129,27 +126,36 @@ Two accounts matter:
 ### 1.5 Verify the local stack builds and tests pass
 
 ```bash
-cd /d/MedRail/contracts && .venv/Scripts/python.exe -m pytest tests/ -q     # expect 14 passed
-cd /d/MedRail/api      && npx tsc --noEmit && npx vitest run                # expect 18 passed
+cd /d/MedRail/contracts && .venv/Scripts/python.exe -m pytest tests/ -q     # expect 28 passed
+cd /d/MedRail/api      && npx tsc --noEmit && npx vitest run                # expect 45 passed
 cd /d/MedRail/web      && npx tsc --noEmit -p tsconfig.json && npm run build
 ```
 
-**Expected:** 14 passed (~0.4s), 18 passed (~4s), both typechecks clean, web build succeeds.
+**Expected:** 28 passed, 45 passed, both typechecks clean, web build succeeds. **73 total** — that is the number you quote on stage.
 
 > **Note:** `api/test/x402-flow.spec.ts` makes a **live call to the facilitator at module import**. If the API suite fails with "no supported payment kinds loaded from any facilitator," that is §1.3 failing, not your code. Distinguish these before you start debugging.
 
-### 1.6 ⚠ Close E-1 if it is still open
+### 1.6 Rehearse the two beats that changed
 
-If §1.1 showed `total_audit_entries = 0`, do this today. Full procedure in `Winning_Strategy.md` M2; the short version:
+Both are scripts, both need funded keys, and both are worth running once the day before so you know their timing and their output on a real screen.
 
-1. Operator account funded with ALGO (§1.4).
-2. `CONSENT_APP_ID=768743428` and `OPERATOR_MNEMONIC` set in `api/.env`.
-3. Start the API; in the web app click **Grant myself access**.
-4. Select **Consent-gated record summary**, blank patient field, pay $0.05.
-5. Re-run §1.1 — `total_audit_entries` should read `1`.
-6. Record the `auditTxId` in `docs/PROOF.md` and in `Demo_Script.md` Beat 6.
+**The consent-gated composition** — this is Beat 6, and it is also how you generate fresh, dated evidence:
 
-**Do `Winning_Strategy.md` M1 (payer↔requester binding) first** so the first audit entry ever written on-chain is a correctly-attributed one.
+```bash
+cd /d/MedRail/api && API_BASE=http://localhost:4021 npx tsx scripts/e2e-consent-proof.ts
+```
+
+Grants consent on-chain (if not already granted), makes the paid `$0.05` call, appends the audit entry, and writes `contracts/artifacts/e2e-consent-proof.json` with four explorer links. Costs $0.05 plus fees. Re-run §1.1 afterwards: `total_audit_entries` should have incremented.
+
+**The attack demonstration** — this is Beat 7 in the 5-minute script, and the strongest fifteen seconds available to you:
+
+```bash
+cd /d/MedRail/api && API_BASE=http://localhost:4021 npx tsx scripts/verify-g01-fix.ts
+```
+
+Grants a *third party* consent, pays with a different key while asserting the third party's address, asserts the **403**, then runs a legitimate control call. Exits non-zero if either half fails, and writes `contracts/artifacts/g01-verification.json`. **It costs the payment for the control call only** — the attack's settlement is cancelled by the 4xx, so a refused attack is free.
+
+> **Time it.** The script performs an on-chain grant before the attack, so it takes longer than a single API call — rehearse it so you know exactly how long you are talking over, and have Terminal C pre-typed rather than typing it live.
 
 ### 1.7 Rehearse both variants end to end, with the clock running
 
@@ -201,7 +207,9 @@ curl -s http://localhost:4021/v1/health | python -m json.tool
     "time": "..."
 }
 ```
-**Three things must be true:** `network` is `testnet` (not `mainnet` — `api/fly.toml:10` defaults to mainnet, finding D-2; if you are running a container, check this), `consentAppId` is `768743428` (**not `null`** — null means `CONSENT_APP_ID` is unset and the `deploy_testnet.json` fallback did not resolve, finding D-1, and both `/v1/records/summary` and `/v1/consent/status` will 500), and `ok` is true.
+**Three things must be true:** `network` is `testnet` (`api/fly.toml` now sets this correctly, so a container matches a local run), `consentAppId` is `768743428` (**not `null`** — null means `CONSENT_APP_ID` is unset and the `deploy_testnet.json` fallback did not resolve, and both `/v1/records/summary` and `/v1/consent/status` will fail), and `ok` is true.
+
+> If the API refuses to start with a message about `PAY_TO_ADDRESS`, that is deliberate: `config.ts::assertPayToConfigured()` runs at boot and refuses to launch without a checksum-valid pay-to address. Set it in `api/.env` and restart. A loud failure at boot is the intended behaviour — the alternative was a service that started fine and failed on the first paid call.
 
 ```bash
 # Terminal C — Web
@@ -215,7 +223,7 @@ Open http://localhost:3000. The network badge must resolve to a live reading, no
 curl -s -o /dev/null -w "%{http_code}\n" -X POST http://localhost:4021/v1/triage \
   -H "content-type: application/json" -d '{"symptoms":"chest pain"}'
 ```
-**Expected:** `402`. If it returns **500**, the facilitator is unreachable and initialisation failed (R-1) — go to §5. If it returns **200**, payment middleware is not applied and something is badly wrong with the build.
+**Expected:** `402`. If it returns **503**, the facilitator is unreachable — go to §5. If it returns **429**, you have tripped the rate limiter by smoke-testing too enthusiastically; wait out the `Retry-After` and note that only the free and refundable surface is throttled (`/v1/consent/status` 60/min, `/v1/consent/arc56` and `/v1/records/summary` 30/min), never `/v1/triage`. If it returns **200**, payment middleware is not applied and something is badly wrong with the build.
 
 ### 2.5 Smoke-test the consent read
 
@@ -224,18 +232,20 @@ curl -s "http://localhost:4021/v1/consent/status?patient=<ADDR>&requester=<ADDR>
 ```
 Use any valid 58-character TestNet address for both. **Expected:** a 200 with `{"patient":...,"requester":...,"scope":"records:summary","granted":false}` (or `true` if you granted during rehearsal). Reviewer-measured cold latency: **505 ms** — two sequential algod round-trips. Budget for that pause in the demo; do not talk over it, talk *through* it.
 
-> If this returns **500** with `{"error":"wrong checksum for address"}`, you used a malformed address. That is finding R-3 — zod validates length only (`consent.ts:6-10`), so a 58-character non-address reaches `algosdk.decodeAddress` and throws, and `app.ts:60` echoes the internal message. It is a real defect; here it just means retype the address.
+> If this returns **400** with `{"error":"invalid request","details":{...}}` naming a checksum failure, you used a malformed address — retype it. This used to be a 500 that echoed the internal exception text (finding R-3); `api/src/validation.ts` now validates by checksum with `algosdk.isValidAddress`, so a bad address is a client error reported as one. If you *do* see a 500, its body is a generic `INTERNAL_ERROR` carrying a `requestId` — quote that id when you look in the API log, because the detail is server-side only now.
 
 ### 2.6 Pre-load every browser tab
 
-Per `Demo_Script.md` §Setup. All seven. Loaded, scrolled to position, and **left alone**. The pre-loaded explorer tabs are your entire Wi-Fi-failure insurance policy.
+Per `Demo_Script.md` §Setup. All eight, including Terminal C with `verify-g01-fix.ts` typed but **not run**. Loaded, scrolled to position, and **left alone**. The pre-loaded explorer tabs are your entire Wi-Fi-failure insurance policy.
 
 ### 2.7 Save static evidence locally
 
 ```bash
 cat /d/MedRail/contracts/artifacts/e2e-proof.json
+cat /d/MedRail/contracts/artifacts/e2e-consent-proof.json
+cat /d/MedRail/contracts/artifacts/g01-verification.json
 ```
-Open it in the editor as tab 7 and leave it open. If the network dies completely, this file plus the pre-loaded explorer pages are the demo.
+Open all three in the editor as tab 7 and leave them open. If the network dies completely, these files plus the pre-loaded explorer pages are the demo — and between them they carry a settled payment, a full grant → pay → audit sequence with four explorer links, and a recorded impersonation attempt with `"blocked": true` and `"result": "CLOSED"`.
 
 ---
 
@@ -247,15 +257,16 @@ Fast, no debugging. If something is broken here, you switch scripts — you do n
 |---|---|---|---|
 | 1 | API alive | `curl -s http://localhost:4021/v1/health` | `ok:true`, `consentAppId:768743428`, `network:testnet` |
 | 2 | Facilitator alive | `curl -s -o /dev/null -w "%{http_code}\n" --max-time 10 https://facilitator.goplausible.xyz/supported` | `200` |
-| 3 | Priced route returns 402 | `curl -s -o /dev/null -w "%{http_code}\n" -X POST http://localhost:4021/v1/triage -H "content-type: application/json" -d '{"symptoms":"chest pain"}'` | `402` (**not** 500) |
+| 3 | Priced route returns 402 | `curl -s -o /dev/null -w "%{http_code}\n" -X POST http://localhost:4021/v1/triage -H "content-type: application/json" -d '{"symptoms":"chest pain"}'` | `402` (**not** 503) |
 | 4 | Web app loads | Refresh tab 3 | Network badge live, not error |
 | 5 | Demo wallet has USDC | Look at the wallet card in the UI | Non-zero USDC balance shown |
-| 6 | Indexer responsive | `curl -s -o /dev/null -w "%{time_total}s\n" https://testnet-idx.algonode.cloud/v2/applications/768743428` | < 1s |
-| 7 | Commands in history | ↑↑↑ in Terminal B | Beat 3 and Beat 8 commands walk forward |
-| 8 | Fallback tabs loaded | Glance at tabs 4, 5, 7 | Rendered, not spinners |
-| 9 | E-1 status known | You already know from §1.1 | You know which Beat 6 script you're running |
+| 6 | Demo wallet has ALGO | Same card | ≥ 0.1 ALGO spendable — consent transactions are **not** fee-sponsored (§0.3) |
+| 7 | Indexer responsive | `curl -s -o /dev/null -w "%{time_total}s\n" https://testnet-idx.algonode.cloud/v2/applications/768743428` | < 1s |
+| 8 | Commands in history | ↑↑↑ in Terminal B | Beat 3 and Beat 8 commands walk forward |
+| 9 | Attack script pre-typed | Glance at Terminal C | `verify-g01-fix.ts` command on the prompt, **unrun** |
+| 10 | Fallback tabs loaded | Glance at tabs 4, 5, 7 | Rendered, not spinners |
 
-**If check 3 fails, run the R-1 script from §5 immediately.** Do not spend the five minutes debugging — you will lose them and start flustered.
+**If check 3 fails, run the facilitator-outage script from §5 immediately.** Do not spend the five minutes debugging — you will lose them and start flustered.
 
 ---
 
@@ -287,6 +298,23 @@ cd /d/MedRail/api && npx tsx scripts/e2e-proof.ts
 #    Worth doing at T-1h: a fresh transaction id dated today is better
 #    evidence than one from two weeks ago.
 
+# ── Optional: re-prove the consent-gated composition ───────────────
+cd /d/MedRail/api && API_BASE=http://localhost:4021 npx tsx scripts/e2e-consent-proof.ts
+#    Costs $0.05 plus fees. Grant -> free consent check -> paid call ->
+#    on-chain audit append, in one run, printing four Lora links.
+#    Rewrites contracts/artifacts/e2e-consent-proof.json and increments
+#    total_audit_entries. This is Beat 6, runnable from a terminal.
+
+# ── Optional: re-prove the payer-binding control (Beat 7) ──────────
+cd /d/MedRail/api && API_BASE=http://localhost:4021 npx tsx scripts/verify-g01-fix.ts
+#    Grants a THIRD PARTY consent, then pays with a different key while
+#    asserting that third party's address -> expects 403. Then a control
+#    call with a matching identity -> expects 200 + an audit tx.
+#    Exits non-zero if either half fails. Writes
+#    contracts/artifacts/g01-verification.json.
+#    The refused attack is free (a 4xx cancels settlement); only the
+#    control call costs $0.05.
+
 # ── Optional: re-prove the consent lifecycle ───────────────────────
 cd /d/MedRail/contracts && .venv/Scripts/python.exe scripts/exercise_contract.py
 #    Funds two throwaway accounts from the deployer (~2 ALGO), runs
@@ -303,14 +331,15 @@ cd /d/MedRail/contracts && .venv/Scripts/python.exe scripts/exercise_contract.py
 
 Detection, immediate fallback, and the exact words. Keep this page open on a second device.
 
-### R-1 — Facilitator unreachable → priced routes return HTTP 500
+### Facilitator unreachable → priced routes return HTTP 503 + `Retry-After`
 
 | | |
 |---|---|
-| **Detection** | T-5min check 3 returns `500` instead of `402`. On stage: Beat 2 shows 500. API logs show `"Failed to initialize: no supported payment kinds loaded from any facilitator."` |
-| **Why** | `accepts[].asset` and `extra.feePayer` come from the facilitator's `/supported`, not MedRail config (`api/src/x402.ts:16-32`). Without it, the 402 cannot be constructed. There is no timeout, retry, circuit breaker, or cached fallback. Free routes are unaffected (`REL-005` **VALIDATED**). |
+| **Detection** | T-5min check 3 returns `503` instead of `402`, with a `Retry-After: 30` header and body `{"error":{"code":"PAYMENT_FACILITATOR_UNAVAILABLE","retryable":true,"facilitator":"…"}}`. On stage: Beat 2 shows 503. API logs carry a structured `facilitator_unavailable` event. |
+| **Why** | `accepts[].asset` and `extra.feePayer` come from the facilitator's `/supported`, not MedRail config (`api/src/x402.ts:16-32`). Without it the 402 cannot be constructed at all — that part is structural and unfixable from our side. What *is* fixed is the answer: `api/src/app.ts:69-105` catches exactly this initialisation failure and converts it, re-throwing every other error untouched. Free routes are unaffected (`REL-005` **VALIDATED**). Formerly finding R-1, now closed. |
 | **Fallback** | Skip Beats 2, 3, 4, 6 entirely. Run **Beat 8** (indexer read) first, then switch to tab 5 — the pre-loaded settled payment — and tab 4. Demo the consent lifecycle (Beat 5), which touches Algorand directly and does not need the facilitator at all. |
-| **Say** | *"Our facilitator's unreachable right now, and it takes the priced routes with it — a reliability gap we've documented, because the asset id and fee-payer address come from its `/supported` endpoint, so we literally can't build a 402 offline. The free consent layer is untouched, which is the part that talks straight to Algorand. And here's a payment that settled through that facilitator, on the public ledger, with a transaction id you can check."* |
+| **Say** | *"Our facilitator's unreachable right now, and it takes the priced routes with it — the asset id and fee-payer address come from its `/supported` endpoint, so we genuinely can't build a 402 offline. But look at what we return: a 503 with a `Retry-After` and `retryable: true`, not a 500. Our callers are agents; the difference between 'come back in thirty seconds' and 'this endpoint is dead' is the difference between a retry and a permanent delisting. The free consent layer is untouched, which is the part that talks straight to Algorand. And here's a payment that settled through that facilitator, on the public ledger, with a transaction id you can check."* |
+| **Note** | This is the rare failure mode that makes you look *better*. Do not skip past the 503 — decode it on screen. |
 
 ### Demo wallet has no USDC → signed-but-unsettled 402
 
@@ -362,9 +391,9 @@ Detection, immediate fallback, and the exact words. Keep this page open on a sec
 | | |
 |---|---|
 | **Detection** | Health check returns `"consentAppId": null`. |
-| **Why** | `CONSENT_APP_ID` unset **and** `contracts/artifacts/deploy_testnet.json` not resolvable from the working directory (`api/src/config.ts:31-40`, `:56`). In a container this fallback cannot work at all — the file is not copied into the image (finding D-1). |
+| **Why** | `CONSENT_APP_ID` unset **and** `contracts/artifacts/deploy_testnet.json` not resolvable from the working directory (`api/src/config.ts`). In a container the fallback cannot work at all — the file is not copied into the image, which is why `api/fly.toml` now sets `CONSENT_APP_ID = "768743428"` explicitly in `[env]`. |
 | **Fallback** | Set `CONSENT_APP_ID=768743428` in `api/.env` and restart. Ten seconds. |
-| **Consequence if missed** | `requireConsentAppId()` throws → both `/v1/records/summary` and `/v1/consent/status` return HTTP 500. Beats 5 and 6 die. |
+| **Consequence if missed** | `requireConsentAppId()` throws → both `/v1/records/summary` and `/v1/consent/status` fail. Beats 5, 6 and 7 die. |
 
 ### A judge types a negation or garbage input into the demo
 
@@ -372,7 +401,26 @@ Detection, immediate fallback, and the exact words. Keep this page open on a sec
 |---|---|
 | **Detection** | `I have no chest pain` → `score: 35`, `band: "urgent"`. Or `a, b` in the medications field → 5 severe matches. Both measured 2026-08-21. |
 | **Fallback** | None — and none needed. These are known, measured limitations. Own them in one breath. |
-| **Say** | *"Thirty-five, urgent — substring matching has no notion of negation. That's the cost of picking rules you can audit over a model you can't, it's a screening trigger rather than a diagnosis, and it's why every response ships a disclaimer a unit test enforces. It's on the fix list."* **Do not act surprised.** See `Demo_Script.md` Beat 7b for the pre-emptive version, which is strictly better. |
+| **Say** | *"Thirty-five, urgent — substring matching has no notion of negation. That's the cost of picking rules you can audit over a model you can't, it's a screening trigger rather than a diagnosis, and it's why every response ships a disclaimer a unit test enforces. It's on the fix list as G-26."* **Do not act surprised.** See `Demo_Script.md` Beat 7b for the pre-emptive version, which is strictly better. |
+
+### The audit write comes back `pending`
+
+| | |
+|---|---|
+| **Detection** | Beat 6 returns **HTTP 200** with the record present, but `auditStatus: "pending"` and `auditTxId: null`. Terminal A shows a structured `audit_write_failed` JSON line. |
+| **Why** | The on-chain append failed — almost always the operator account out of ALGO, occasionally an algod 5xx or a validity-window expiry. The route deliberately does **not** let this turn a legitimate paid request into an error (`records.ts:76-100`). |
+| **Fallback** | None needed on stage; the call succeeded. Fund the operator account before the next run. |
+| **Say** | *"There's the flag — `auditStatus: pending`. The record still came back, because a chain hiccup shouldn't cost you something you paid for, and we log the failure server-side with the settlement so it's reconcilable. And you can't be charged for a failure anyway: x402 settles only on a sub-400 response."* |
+| **Note** | This is a good answer, not a save. It demonstrates a designed failure path rather than an accident — but check the operator balance afterwards, because the second occurrence is not a talking point. |
+
+### A judge asks whether the deployed contract has the contract fixes in it
+
+| | |
+|---|---|
+| **Detection** | *"Your repo says you fixed the event field order. Is that live?"* |
+| **Fallback** | None needed. Answer completely and immediately. |
+| **Say** | *"No, deliberately. Our deploy script uses `OnUpdate.AppendApp`, which mints a new application — redeploying would give us a new App ID and abandon everything I just showed you: the consent lifecycle, the settled payments, five audit entries. Both defects are non-exploitable, both are fixed in `contract.py`, and there are three regression tests we ran against the old code first to watch them fail. The fixed source is what ships to MainNet."* |
+| **Note** | **A hedged answer here is worse than the full one.** See §1.1. |
 
 ---
 
@@ -380,9 +428,9 @@ Detection, immediate fallback, and the exact words. Keep this page open on a sec
 
 **Record a 2-minute screen capture of a clean run, and have it on the presenting machine as a local file.** Not in the cloud. Not on a USB stick you have to find.
 
-**Why this is worth the twenty minutes.** Your demo depends on four things you do not control: the venue's network, AlgoNode, `facilitator.goplausible.xyz`, and TestNet block production. R-1 alone means one third-party outage removes four of your eight beats. A recording converts a catastrophic failure into a ten-second apology.
+**Why this is worth the twenty minutes.** Your demo depends on four things you do not control: the venue's network, AlgoNode, `facilitator.goplausible.xyz`, and TestNet block production. A facilitator outage still removes four of your eight beats, however politely the 503 explains itself. A recording converts a catastrophic failure into a ten-second apology.
 
-**What to record.** The full 2-minute script — 402 decode, settled payment, explorer click-through, consent grant → check → revoke, audit write (only if E-1 is closed), indexer read. Capture the terminal at presentation font size. Speak the actual script over it so you can play it muted and narrate live if you prefer.
+**What to record.** The full 2-minute script — 402 decode, settled payment, explorer click-through, consent grant → check → revoke, audit write, indexer read — **plus one run of `verify-g01-fix.ts`**, which is the beat you least want to lose and the one most dependent on a working network. Capture the terminal at presentation font size. Speak the actual script over it so you can play it muted and narrate live if you prefer.
 
 **How to use it.** Only after a live attempt has visibly failed. Never lead with it. Say:
 
@@ -392,8 +440,10 @@ That last clause is what makes a recording acceptable to a skeptical judge: your
 
 **Also keep, as a static tier below the video:**
 - `contracts/artifacts/e2e-proof.json` — the settled transaction id, on disk.
+- `contracts/artifacts/e2e-consent-proof.json` — grant, payment and audit transaction ids from one consent-gated run.
+- `contracts/artifacts/g01-verification.json` — the recorded impersonation attempt, `"blocked": true`, `"result": "CLOSED"`.
 - The four consent-lifecycle transaction ids from `docs/PROOF.md` §5.
-- A screenshot of the indexer global-state read.
+- A screenshot of the indexer global-state read showing `total_audit_entries = 5`.
 
 ---
 
@@ -426,7 +476,7 @@ for kv in json.load(sys.stdin)['application']['params']['global-state']:
 "
 ```
 
-If you ran Beat 6 successfully this should have incremented. **If it did not increment but the endpoint returned 200, you have hit finding R-2** — the success-path `logAccess` at `api/src/routes/records.ts:49` is unguarded, so a failure there produces a 500 *after* the payment settled. Check the API logs. This is a genuine defect and a post-demo increment check is how you catch it.
+If you ran Beat 6 successfully this should have incremented past 5. **If it did not increment but the endpoint returned 200, check the response body for `auditStatus: "pending"`** — the success-path `logAccess` is guarded (`api/src/routes/records.ts:76-100`), so a chain failure returns the record with a null `auditTxId` and an explicit flag rather than an error. Grep Terminal A for `audit_write_failed`; the usual cause is the operator account out of ALGO. The caller was never charged for that call either way, because settlement only occurs on a sub-400 response.
 
 ### 7.3 Confirm box growth
 
@@ -434,11 +484,11 @@ If you ran Beat 6 successfully this should have incremented. **If it did not inc
 curl -s https://testnet-idx.algonode.cloud/v2/applications/768743428/boxes
 ```
 
-Boxes beginning `Zx`/`Z3` in base64 are `g`-prefixed grant boxes; a successful audit write adds one `s`-prefixed and one `a`-prefixed box. Before the demo there were exactly **2**, both `g`.
+Boxes beginning `Z…` in base64 are `g`-prefixed grant boxes; `Yd…` are `a`-prefixed audit entries; `c…` is the `s`-prefixed per-patient sequence box. Before the demo there were **12**: 6 grant, 5 audit, 1 sequence. A successful audit write adds one `a` box (and the first write for a new patient also adds their `s` box); a new grant adds one `g`.
 
 ### 7.4 Update the evidence log
 
-Add any new transaction ids to `docs/PROOF.md` — especially a first `log_access` transaction (closes E-1) or a payment made by someone other than the deployer (a materially better answer to *"has anyone else ever paid for this?"* — `Winning_Strategy.md` H1). A demo that generates fresh, checkable, dated evidence is worth more afterwards than during.
+Add every new transaction id to `docs/PROOF.md` — and prioritise one kind above all others: **a payment made by a wallet that is not the project's own.** That is the single materially better answer to *"has anyone else ever paid for this?"* (`Winning_Strategy.md` M11), and a live demo in front of an audience is the most likely place it will ever happen by accident. If anyone in the room pays, get the transaction id before they leave. A demo that generates fresh, checkable, dated evidence is worth more afterwards than during.
 
 ### 7.5 Check balances before the next run
 

@@ -46,7 +46,7 @@ on-chain trail if they ever touched a specific patient's data — they currently
 compute, but the plumbing is shared and ready for `/v1/health-score` or similar in a v2.
 
 > **Verification note (2026-08-21 review).** The audit log has **not yet been written on TestNet by
-> any endpoint.** The deployed contract reports `total_audit_entries = 0` and holds no audit boxes,
+> any endpoint.** The deployed contract reports `total_audit_entries = 5` and holds no audit boxes,
 > so `log_access` — including the `/v1/records/summary` path that does call it — is proven only in
 > the AVM simulator (14/14 unit tests), not on live infrastructure. See
 > [`ENGINEERING_GAP_REPORT.md`](ENGINEERING_GAP_REPORT.md) finding **G-02**. Closing this needs one

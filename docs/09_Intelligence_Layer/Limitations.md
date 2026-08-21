@@ -2,7 +2,7 @@
 
 **Purpose:** state, without hedging, everything MedRail's intelligence endpoints cannot do, the harm each limitation could cause if the system were used for real, and the safety controls that are actually implemented and enforced against them.
 
-**Status of this document:** Descriptive of commit `32ffd73` on branch `master`. Every limitation is derived from source and, where marked, confirmed by executing the shipped code. Severity ratings are the author's assessment of *harm if this system were used to make a real care decision* — which it must not be. Nothing here is aspirational; sections marked **RECOMMENDED** describe nothing that exists.
+**Status of this document:** Descriptive of commit `3b387df` on branch `main`. Every limitation is derived from source and, where marked, confirmed by executing the shipped code. Severity ratings are the author's assessment of *harm if this system were used to make a real care decision* — which it must not be. Nothing here is aspirational; sections marked **RECOMMENDED** describe nothing that exists.
 
 **Cross-references:** [`Evaluation.md`](./Evaluation.md) · [`Algorithm_Inventory.md`](./Algorithm_Inventory.md) · [`Intelligence_Architecture.md`](./Intelligence_Architecture.md) · [`../06_Security/Threat_Model.md`](../06_Security/Threat_Model.md) · [`../07_Testing/Test_Cases.md`](../07_Testing/Test_Cases.md) · [`../IMPLEMENTATION_PLAN.md`](../IMPLEMENTATION_PLAN.md) §4
 
@@ -34,7 +34,7 @@ No labelled corpus, no clinician adjudication, no held-out evaluation, no metric
 
 ### L-03 — No synonyms, lay terms, abbreviations, or misspelling tolerance · **CRITICAL**
 
-Verified at commit `32ffd73`: `"heart attack"` ⇒ **0 / routine**. `"MI"` ⇒ **0 / routine**. `"SOB"` ⇒ **0 / routine**. `"chest pian"` ⇒ **0 / routine**.
+Verified at commit `3b387df`: `"heart attack"` ⇒ **0 / routine**. `"MI"` ⇒ **0 / routine**. `"SOB"` ⇒ **0 / routine**. `"chest pian"` ⇒ **0 / routine**.
 
 The single most direct way a person describes a cardiac emergency in plain English produces the same output as a request to book an annual checkup. **This is the worst property of the system**, because the error direction is a **false negative** and the output carries no signal that anything went unrecognised.
 
@@ -96,17 +96,17 @@ Worse, it is **exercised but never asserted**: `interactionChecker.spec.ts:33-37
 
 ### L-13 — No per-item length cap on medication names · **LOW**
 
-`api/src/routes/interaction.ts:6` bounds the array to 20 items but sets no maximum length on an individual name, unlike the 2000-character cap on the triage string. The only ceiling on per-call work is the HTTP body limit, not an application constraint. AI-059 **PARTIALLY IMPLEMENTED**. Compounded by the absence of rate limiting anywhere in the API (SEC-013 **NOT IMPLEMENTED**).
+`api/src/routes/interaction.ts:6` bounds the array to 20 items but sets no maximum length on an individual name, unlike the 2000-character cap on the triage string. The only ceiling on per-call work is the HTTP body limit, not an application constraint. AI-059 **PARTIALLY IMPLEMENTED**. Rate limiting now exists (`api/src/rateLimit.ts`; SEC-013 **IMPLEMENTED**) but is deliberately scoped to the free and refundable surface — `/v1/consent/status`, `/v1/consent/arc56`, `/v1/records/summary` — and not to this route, on the reasoning that a caller must settle $0.02 per request here, so the endpoint is economically self-limiting. That reasoning holds for cost; it does not bound the per-call work an unusually long medication name can cause.
 
 ### L-14 — `/v1/records/summary` returns a fixed synthetic constant · **INFORMATIONAL — disclosed by design**
 
-`api/src/routes/records.ts:15-21` defines one `SYNTHETIC_RECORD` — blood type `O+`, allergies `["penicillin"]`, chronic conditions `["type 2 diabetes (controlled)"]`, medications `["metformin 500mg","lisinopril 10mg"]`, `lastUpdated "2026-01-15"` — returned **identically for every `patientId`**. There is no patient datastore, and there are no real patients in this system. DATA-004 **IMPLEMENTED**.
+`api/src/routes/records.ts:17-23` defines one `SYNTHETIC_RECORD` — blood type `O+`, allergies `["penicillin"]`, chronic conditions `["type 2 diabetes (controlled)"]`, medications `["metformin 500mg","lisinopril 10mg"]`, `lastUpdated "2026-01-15"` — returned **identically for every `patientId`**. There is no patient datastore, and there are no real patients in this system. DATA-004 **IMPLEMENTED**.
 
-This is honestly disclosed in the response itself, in `docs/SECURITY.md`, and in `docs/IMPLEMENTATION_PLAN.md:67`. It is listed here so no reader mistakes the endpoint for a data-retrieval capability. **Note that this endpoint carries the repository's one CRITICAL security finding (S-1 — the requester identity is caller-asserted and never bound to the payer), which is documented in [`../06_Security/Threat_Model.md`](../06_Security/Threat_Model.md), not here.** The reason S-1 causes no data exposure *today* is precisely this limitation: there is nothing sensitive behind the gate. That is a fact about the demo, not a mitigation.
+This is honestly disclosed in the response itself, in `docs/SECURITY.md`, and in `docs/IMPLEMENTATION_PLAN.md:67`. It is listed here so no reader mistakes the endpoint for a data-retrieval capability. **Note that this endpoint used to carry the repository's one CRITICAL security finding (S-1 / G-01 — the requester identity was caller-asserted and never bound to the payer). It is now CLOSED**: `api/src/x402Payer.ts` recovers the address that signed the settled payment from the verified `PAYMENT-SIGNATURE` header, and the route returns 403 unless that address equals the asserted `requesterAddress` — verified live against TestNet by `api/scripts/verify-g01-fix.ts`, which grants a third party consent, pays with a different key, and confirms the rejection. The control is documented in [`../06_Security/Threat_Model.md`](../06_Security/Threat_Model.md), not here. What remains true of this limitation is narrower and still worth stating: there is nothing sensitive behind the gate, so the gate has never had anything to protect. That is a fact about the demo, and it is independent of the control now in front of it.
 
 ### L-15 — No evaluation, monitoring, or feedback loop in operation · **MEDIUM**
 
-No metrics are exported (OPS-003 **NOT IMPLEMENTED**), no structured logging exists (OPS-002 **NOT IMPLEMENTED**), and no mechanism captures whether output was ever appropriate. If a rule were wrong, nothing in the system would surface it. Combined with L-02, there is neither an up-front nor an ongoing quality signal.
+No metrics are exported, no tracing exists, and nothing alerts (OPS-003 **NOT IMPLEMENTED**; finding G-15 remains open). Structured JSON logging exists only for three failure events — `facilitator_unavailable`, `audit_write_failed`, and the generic `app.onError` record carrying a generated `requestId` — so OPS-002 is **PARTIALLY IMPLEMENTED**, and none of those events concerns the intelligence layer, which logs nothing at all. No mechanism captures whether output was ever appropriate. If a rule were wrong, nothing in the system would surface it. Combined with L-02, there is neither an up-front nor an ongoing quality signal.
 
 ### L-16 — Rule tables are unversioned · **LOW**
 
@@ -148,10 +148,10 @@ Not mitigations for the limitations above — none of these makes the output cli
 | **Mandatory disclaimer on every response** | A module constant concatenated unconditionally on the single return path of each engine. Not conditional, not caller-suppressible, not generated. | **VALIDATED** — AI-002, FR-009 | `triageScorer.ts:18-21,71`; `interactionChecker.ts:20-23,53` |
 | **Disclaimer tested as a correctness property** | A developer who deletes the disclaimer breaks the build, not just the tone. | **VALIDATED** | `triageScorer.spec.ts:40-43`; `interactionChecker.spec.ts:33-37` |
 | **Mandatory source citation** | Every interaction response carries the provenance string, unconditionally, and it is asserted by a test. | **VALIDATED** — AI-004, DATA-005 | `interactionChecker.ts:52`; `interactions.json:2`; `interactionChecker.spec.ts:35` |
-| **Disclosure *before* payment** | The x402 `PAYMENT-REQUIRED` challenge names the method in its resource description — *"Rule-based clinical red-flag triage score. Not medical advice."* An agent evaluating whether to spend $0.02 learns it is rule-based before paying, not after. | **VALIDATED** | `api/src/app.ts:41`; live 402 capture in the project fact ledger §4 |
+| **Disclosure *before* payment** | The x402 `PAYMENT-REQUIRED` challenge names the method in its resource description — *"Rule-based clinical red-flag triage score. Not medical advice."* An agent evaluating whether to spend $0.02 learns it is rule-based before paying, not after. | **VALIDATED** | `api/src/app.ts:52`; live 402 capture in the project fact ledger §4 |
 | **Transparent, inspectable logic** | The complete decision surface is 11 keyword groups and 14 pairs, readable in one screen by a clinician with no software background. No opaque component in the decision path. | **VALIDATED** — AI-001, NFR-009 | `triageScorer.ts:32-44`; `interactions.json:3-74` |
 | **Deterministic output** | Same input, same output, forever. No sampling, no clock, no provider that can change behaviour without a commit. | **VALIDATED** — NFR-009 | `triageScorer.spec.ts:45-49` (case-insensitivity); structural otherwise |
-| **No clinical free text on-chain** | The intelligence routes never touch the ledger. The one route that does writes constant `scope`/`endpoint`/`action` strings only. Symptom text and medication lists cannot reach a public, immutable, permanent ledger. | **IMPLEMENTED** — AI-007, SEC-004 | `records.ts:10-11,37,49`; no `algorand.js` import in `triage.ts` or `interaction.ts` |
+| **No clinical free text on-chain** | The intelligence routes never touch the ledger. The one route that does writes constant `scope`/`endpoint`/`action` strings only. Symptom text and medication lists cannot reach a public, immutable, permanent ledger. | **IMPLEMENTED** — AI-007, SEC-004 | `records.ts:12-13,58,84`; no `algorand.js` import in `triage.ts` or `interaction.ts` |
 | **No input retention** | Neither engine writes, logs, caches or forwards its input. No database exists. The only application logging is `console.log` at boot and `console.error(err)` on failure. | **IMPLEMENTED** | `triageScorer.ts:53-73`; `interactionChecker.ts:36-55`; `api/src/app.ts:59` |
 | **Synthetic data only** | No real patient data exists anywhere in the system. | **IMPLEMENTED** — DATA-004 | `records.ts:13-21` |
 | **Output drawn only from repository strings** | The engines cannot emit a sentence that is not already committed to git. No hallucination is possible because no generation occurs. | **IMPLEMENTED** | `triageScorer.ts:33-43`; `interactions.json` |
@@ -204,11 +204,11 @@ Quoted exactly as it appears in source, so a reviewer can diff this document aga
 
 > "Widely-taught, textbook-level severe drug-interaction pairs (e.g. standard pharmacology references such as Lexicomp/Micromedex-class severity classifications). Not exhaustive and not a substitute for a pharmacist or prescriber review."
 
-**Records — `api/src/routes/records.ts:59`**, returned on every successful `/v1/records/summary` response:
+**Records — `api/src/routes/records.ts:110`**, returned on every successful `/v1/records/summary` response:
 
 > "Synthetic demo data for the Global x402 Challenge — no real patient information exists in this system."
 
-**Pre-payment resource description — `api/src/app.ts:41`**, carried in the `PAYMENT-REQUIRED` header of every 402 on `/v1/triage`:
+**Pre-payment resource description — `api/src/app.ts:52`**, carried in the `PAYMENT-REQUIRED` header of every 402 on `/v1/triage`:
 
 > "Rule-based clinical red-flag triage score. Not medical advice."
 
@@ -240,7 +240,7 @@ Quoted exactly as it appears in source, so a reviewer can diff this document aga
 | Presenting output to a patient or clinician as clinical information | L-01. The disclaimer must travel with the output |
 | Stripping or suppressing the disclaimer or `source` fields when relaying the response | AI-002, AI-004. They are the controls; removing them removes the safety posture |
 | Citing MedRail as evidence that a drug pair is safe, or that a symptom is benign | L-06, L-07. Absence of a finding is not a finding |
-| Deploying this to serve real patients | Every row above, plus the repository's CRITICAL security finding S-1 |
+| Deploying this to serve real patients | Every row above. The intelligence layer, not the payment or consent layer, is what disqualifies it |
 
 **For integrators:** if you relay these responses to a human, relay `disclaimer` and `source` with them. They are unconditional in the response for a reason, and dropping them is the most likely way this system causes harm.
 
@@ -253,7 +253,7 @@ MedRail is a hackathon submission in a domain where an over-claimed demonstratio
 1. **Label the mechanism, not just the disclaimer.** Every response says it is a heuristic; the `PAYMENT-REQUIRED` challenge says "rule-based" *before* payment; this directory publishes the complete decision tables. A reader never has to infer what is inside.
 2. **State the absence of evaluation as prominently as any capability.** [`Evaluation.md`](./Evaluation.md) opens with it. A capability claim and its evidence gap should not live in different documents at different reading depths.
 3. **Name the failure modes, including the embarrassing ones.** `"heart attack"` ⇒ `routine` and `["a","b"]` ⇒ five flagged interactions are both documented here, with the observation that the second is exercised by a passing test that never asserts on it. A limitation a reviewer discovers is worse than one the authors published.
-4. **Do not let "AI" in marketing copy stand uncorrected in the technical documentation.** `README.md:3`, `api/src/app.ts:74`, `web/app/layout.tsx:18`, `web/app/page.tsx:18` and `docs/JUDGES.md:8` all say "AI intelligence endpoints." That phrasing is inaccurate. **RECOMMENDED:** change it to "rule-based intelligence endpoints" or "deterministic clinical rule endpoints" in all five places. Until that happens, this directory is the correction, and it is named `09_Intelligence_Layer` rather than `09_AI_ML` for exactly this reason.
-5. **Keep synthetic data synthetic and say so in-band.** No real patient data exists; `records.ts:59` says so in the response body, not only in a document.
+4. **Do not let "AI" in marketing copy stand uncorrected in the technical documentation.** `README.md:3`, `api/src/app.ts:152`, `web/app/layout.tsx:18`, `web/app/page.tsx:18` and `docs/JUDGES.md:8` all say "AI intelligence endpoints." That phrasing is inaccurate. **RECOMMENDED:** change it to "rule-based intelligence endpoints" or "deterministic clinical rule endpoints" in all five places. Until that happens, this directory is the correction, and it is named `09_Intelligence_Layer` rather than `09_AI_ML` for exactly this reason.
+5. **Keep synthetic data synthetic and say so in-band.** No real patient data exists; `records.ts:110` says so in the response body, not only in a document.
 6. **Keep clinical text off the immutable ledger.** AI-007 is a design constraint, not an afterthought: nothing written on-chain can be retracted, so nothing clinical is written.
 7. **Report defects against this system to the repository's issue tracker.** The rule tables and both engines are public and in one directory; a clinician who disagrees with a weight or a severity tier can cite the exact line. That is the intended review path, and it is the practical benefit of choosing an inspectable component.

@@ -10,14 +10,14 @@ hosting accounts and are therefore yours to run.
 # Contract: compile + unit test
 cd contracts
 .venv/Scripts/python.exe -m puyapy smart_contracts/consent/contract.py --out-dir artifacts
-.venv/Scripts/python.exe -m pytest tests/ -v          # expect 14 passed
+.venv/Scripts/python.exe -m pytest tests/ -v          # expect 28 passed
 
 # API: typecheck, build, unit + structural tests
 cd ../api
 npm install
 npx tsc --noEmit
 npm run build
-npx vitest run                                         # expect 18 passed
+npx vitest run                                         # expect 45 passed
 
 # Frontend: typecheck + production build
 cd ../web

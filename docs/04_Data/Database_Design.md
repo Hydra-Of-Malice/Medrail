@@ -1,16 +1,8 @@
 # Data Layer Design — Algorand Box Storage as the System of Record
 
-
-> **⚠ Correction notice.** Parts of this document were written against a review finding that was
-> later proven wrong. Settlement in x402 v2 happens **only** on a sub-400 response, so **no error
-> path in MedRail can consume a settled payment** — and consent-denied calls (HTTP 403) are **not
-> charged**, contrary to `API.md`, `SECURITY.md`, and the `paidButDenied` field. The audit-sequence
-> race causes a **rejected transaction**, not a corrupted log. See
-> [`CORRECTIONS.md`](../CORRECTIONS.md) — it supersedes any statement here that contradicts it.
-
 **Purpose:** specify, structure by structure, the only durable state MedRail has — Algorand global state and three box maps on App ID `768743428`, plus two static reference datasets compiled into the API image — including exact key bytes, exact value encodings, mutability, write authority, minimum-balance cost, lifecycle, capacity limits, and the absence of any migration path.
 
-**Status of this document:** **IMPLEMENTED** for everything on the `grants` path (verified against source, the compiled TEAL, and the live TestNet ledger on 2026-08-21) and **UNVALIDATED on-chain** for everything on the `audit_seq` / `audit_log` path (verified against source and compiled TEAL only — see §2.0). Defect **C-2** in §6 is confirmed by three independent on-chain measurements.
+**Status of this document:** **IMPLEMENTED** and, since the audit path has now executed against App `768743428`, **validated against the live TestNet ledger on both the `grants` path and the `audit_seq` / `audit_log` path** (see §2.0). Encoding and size figures for `AuditEntry` remain derived from `contract.py`, the compiled TEAL and the ARC-4 rules rather than from a decoded box, and are labelled where that matters. Defect **C-2** in §6 is confirmed by three independent on-chain measurements.
 
 ---
 
@@ -37,11 +29,11 @@ The durable state is exhaustively enumerated in §1 and §7. If a structure is n
 | # | Structure | Location | Kind | Instances live on TestNet | Writable by |
 |---|---|---|---|---|---|
 | S1 | Application global state | App `768743428` | 4 × uint64 + 1 × byteslice | 1 (the app) | contract methods only |
-| S2 | `grants` BoxMap | App `768743428` boxes, prefix `0x67` | fixed-size 33 B key → 17 B value | **2** | `grant_access`, `revoke_access` |
-| S3 | `audit_seq` BoxMap | App `768743428` boxes, prefix `0x73` | fixed-size 33 B key → 8 B value | **0** | `log_access` |
-| S4 | `audit_log` BoxMap | App `768743428` boxes, prefix `0x61` | fixed 41 B key → variable value | **0** | `log_access` |
+| S2 | `grants` BoxMap | App `768743428` boxes, prefix `0x67` | fixed-size 33 B key → 17 B value | **6** | `grant_access`, `revoke_access` |
+| S3 | `audit_seq` BoxMap | App `768743428` boxes, prefix `0x73` | fixed-size 33 B key → 8 B value | **1** | `log_access` |
+| S4 | `audit_log` BoxMap | App `768743428` boxes, prefix `0x61` | fixed 41 B key → variable value | **5** | `log_access` |
 | S5 | `interactions.json` | `api/src/data/interactions.json` | static JSON, 14 rows | 1 file | nobody at runtime |
-| S6 | `SYNTHETIC_RECORD` | `api/src/routes/records.ts:15-21` | TypeScript `const` | 1 object | nobody, ever |
+| S6 | `SYNTHETIC_RECORD` | `api/src/routes/records.ts:17-23` | TypeScript `const` | 1 object | nobody, ever |
 
 ### 1.1 The application itself is immutable
 
@@ -73,12 +65,16 @@ schema: {"num-uint": 4, "num-byte-slice": 1}
 
 admin                = 2WDV2J2FTWF535SMSUVEBOF5IGXF2OTV7ZZTLTCRBXPVS32UMLOPTI64GE
 total_requests       = 2
-total_grants_active  = 0
+total_grants_active  = 4
 total_revocations    = 2
-total_audit_entries  = 0        <-- see evidence gap E-1
+total_audit_entries  = 5
+
+boxes: 6 with prefix 'g', 1 with prefix 's', 5 with prefix 'a'   (12 total)
 ```
 
-> **Evidence gap E-1.** `total_audit_entries = 0` and no `s`- or `a`-prefixed box exists. **`log_access` has never executed on Algorand TestNet.** Everything in §4 and §5 is specified from `contract.py`, the compiled TEAL, and the ARC-4 encoding rules — it has not been observed. Sections §2 and §3 are, by contrast, read from the ledger.
+> **Evidence gap E-1 is closed.** `total_audit_entries = 5`, one `s`-prefixed box and five `a`-prefixed boxes now exist. **`log_access` has executed on Algorand TestNet**, and `api/scripts/e2e-consent-proof.ts` reproduces the whole grant → check → paid call → audit append sequence on demand.
+>
+> The encoding specified in §5 from `contract.py` and the ARC-4 rules is now **confirmed by observation**. All five live audit boxes decode to exactly **101 bytes** — head 46, tail offsets `46 / 63 / 84` — carrying `scope = "records:summary"`, `endpoint = "/v1/records/summary"`, `action = "consent_checked"`, with sequences `1..5` dense for a single patient. That is the predicted layout, byte for byte, and the predicted 101-byte figure for the `consent_checked` triple (§5.4). The derivation and the ledger agree.
 
 ### 2.1 Schema
 
@@ -148,7 +144,7 @@ Global state is charged to the **creator** account at application creation, not 
 | Backend (Node) | `api/src/services/algorand.ts:64-69` | `node:crypto` `createHash("sha256")` |
 | Frontend (browser) | `web/lib/consent.ts:26-34` | `crypto.subtle.digest("SHA-256", …)` |
 
-NFR-011 requires these to be byte-identical. There is **no test that checks it** — status **UNVALIDATED**. See §9.
+NFR-011 requires these to be byte-identical, and a test now checks it. `api/test/fixtures/box-key-vectors.json` holds shared golden vectors asserted by `api/test/boxKeyParity.spec.ts` — which exercises both the Node `createHash` path and the browser `crypto.subtle` path — and by `contracts/tests/test_box_keys.py` for the Python path. All three implementations are pinned to the same fixture, so a divergence in any one of them fails a build. Status **VALIDATED**. See §9.
 
 ### 3.2 Value schema — `GrantRecord`, exactly 17 bytes
 
@@ -215,7 +211,7 @@ Note the strict `<`: a grant is invalid *at* its expiry second, not one second l
 
 ## 4. S3 — `audit_seq` BoxMap
 
-> **UNVALIDATED on-chain** — zero instances exist (§2.0, E-1).
+> **VALIDATED on-chain** — one instance exists on App `768743428` (§2.0).
 
 **Purpose.** A per-patient monotonic counter, so that audit entries have a dense, gap-free sequence starting at 1 and each patient's sequence is independent of every other patient's (FR-027).
 
@@ -257,7 +253,7 @@ Created on the first `log_access` for a patient; then incremented on every subse
 
 ## 5. S4 — `audit_log` BoxMap
 
-> **UNVALIDATED on-chain** — zero instances exist (§2.0, E-1). The `auditTxId` and `auditSequence` fields documented in [`../05_API/API_Documentation.md`](../05_API/API_Documentation.md) have never been produced by a real run.
+> **VALIDATED on-chain** — five instances exist on App `768743428` (§2.0). The `auditTxId` and `auditSequence` fields documented in [`../05_API/API_Documentation.md`](../05_API/API_Documentation.md) are produced by real runs; the byte-level tail layout below is still derived from the ARC-4 rules rather than from a decoded box.
 
 **Purpose.** The append-only, per-patient access ledger — the structure MedRail's product story rests on. One box per access event.
 
@@ -281,7 +277,7 @@ Big-endian sequence encoding is not incidental: it makes the key space **lexicog
 | Offset | Length | Field | ARC-4 type | Note |
 |---|---|---|---|---|
 | 0 | 8 | `ts` | `uint64` | `Global.latest_timestamp` at write |
-| 8 | 32 | `requester` | `address` (`byte[32]`) | **caller-asserted** — see §5.5 |
+| 8 | 32 | `requester` | `address` (`byte[32]`) | **proved against the payment signer** — see §5.5 |
 | 40 | 2 | offset of `scope` | `uint16` BE | `0x002E` = 46 |
 | 42 | 2 | offset of `endpoint` | `uint16` BE | |
 | 44 | 2 | offset of `action` | `uint16` BE | |
@@ -321,9 +317,9 @@ Note that a *caller-supplied* `scope`/`endpoint`/`action` would change this. `lo
 
 ### 5.5 The field that is not what it looks like
 
-`requester` is written from the `requester` ABI argument, which the MedRail backend takes verbatim from `requesterAddress` in the HTTP request body (`api/src/routes/records.ts:7`, `records.ts:49`) with only a 58-character length check. **Nothing binds it to the account that paid.** This is finding **S-1**; SEC-007 and SEC-008 are **NOT IMPLEMENTED**.
+`requester` is written from the `requester` ABI argument, which the MedRail backend takes from `requesterAddress` in the HTTP request body. That value used to be accepted on the caller's word. It is now bound to the payment: `api/src/x402Payer.ts` decodes the verified `PAYMENT-SIGNATURE` header, recovers the address that signed the payment transaction, and `records.ts:41-51` returns **403** unless the two match — before any chain call is made. SEC-007 and SEC-008 are **IMPLEMENTED**, verified live against TestNet by `api/scripts/verify-g01-fix.ts`.
 
-The data-layer consequence is specific and worth naming precisely: *the immutable audit log is exactly as trustworthy as its least-authenticated field*, and one of its five fields is unauthenticated. Immutability guarantees that nobody can change what was written; it says nothing about whether what was written was true. Detail and remediation in [`../06_Security/Threat_Model.md`](../06_Security/Threat_Model.md).
+The data-layer principle is worth naming precisely, because it survives the fix: *the immutable audit log is exactly as trustworthy as its least-authenticated field*. Immutability guarantees that nobody can change what was written; it says nothing about whether what was written was true. What changed is where the guarantee comes from — the field is now authenticated at the API boundary by an unforgeable signature, rather than accepted as a claim. What has **not** changed is that the guarantee is off-chain: `log_access` is admin-only, so the contract trusts whatever its admin writes. A compromised operator key still forges entries (SEC-012). Detail in [`../06_Security/Threat_Model.md`](../06_Security/Threat_Model.md).
 
 ### 5.6 Sequence prediction, the backend side
 
@@ -335,7 +331,7 @@ const predictedSeq = currentCount + 1n;
 ... boxes: [ auditSeqBoxName(patient), auditLogBoxName(patient, predictedSeq) ]
 ```
 
-If the prediction is wrong, the contract writes to a box the transaction did not reference and the AVM rejects the call. `withPatientLock` (`algorand.ts:129-138`) serialises this per patient — **within one Node process only**. REL-004 is **PARTIALLY IMPLEMENTED**, and `api/fly.toml`'s `auto_start_machines = true` / `min_machines_running = 1` permits more than one machine, which reintroduces the race (defect D-7).
+If the prediction is wrong, the contract writes to a box the transaction did not reference and the AVM rejects the call — a **rejected transaction, not a corrupted log**. `withPatientLock` (`algorand.ts:129-138`) serialises this per patient — **within one Node process only**. REL-004 is **PARTIALLY IMPLEMENTED**: `api/fly.toml` now sets `max_machines_running = 1`, deliberately, so the in-process lock is the whole lock and the race cannot occur. Defect D-7 is closed at the cost of horizontal scale — the deployment cannot be scaled out until the sequence prediction moves off the process (G-11, open).
 
 ---
 
@@ -418,20 +414,20 @@ Operationally this means the app account's ALGO requirement is monotonically non
 |---|---|---|
 | App account balance | 5,000,000 µALGO (5 ALGO) | funded by tx `KYH3H5CG2CCUPUUTJIBX47WD4RWSUV3QWTEUJQRQFYLWO5YAO3QA`, round 66088626 |
 | App account base MBR | 100,000 µALGO | Algorand protocol |
-| Currently locked by boxes | 45,000 µALGO (2 grants) | `min-balance = 145000` |
-| Free headroom right now | **4,855,000 µALGO** | `5,000,000 − 145,000` |
+| Currently locked by boxes | 450,400 µALGO (6 grants, 1 `audit_seq`, 5 `audit_log`) | `min-balance = 550400`, `total-boxes = 12`, `total-box-bytes = 1051` |
+| Free headroom right now | **4,449,600 µALGO** | `5,000,000 − 550,400` |
 
 ### 7.2 Capacity of the current 5 ALGO balance
 
 | Scenario | Formula | Capacity |
 |---|---|---|
 | Grant boxes only, counted from an empty app | `⌊(5,000,000 − 100,000) / 22,500⌋` | **217 grants total** |
-| …of which remain available now | `217 − 2` | **215 more grants** |
-| Audit entries for **one** patient, from today | `⌊(4,855,000 − 18,900) / 59,300⌋` | **81 entries** |
+| …of which remain fundable from today's headroom | `⌊4,449,600 / 22,500⌋` | **197 more grants** |
+| Audit entries for a **new** patient, from today | `⌊(4,449,600 − 18,900) / 59,300⌋` | **74 entries** |
 | First audit entry for a **new** patient | `18,900 + 59,300` | **78,200 µALGO** (0.0782 ALGO) |
 | Each subsequent entry for that patient | `59,300` | **0.0593 ALGO** |
 | 100 audit entries for one patient | `18,900 + 100 × 59,300 = 5,948,900` | **exceeds the current balance** — 5 ALGO cannot fund 100 accesses for a single patient |
-| Mixed: `P` patients × `E` entries each | `P × (18,900 + E × 59,300) ≤ 4,855,000` | e.g. `P=10, E=7` fits (4,340,000); `P=10, E=8` does not (4,933,000) |
+| Mixed: `P` patients × `E` entries each | `P × (18,900 + E × 59,300) ≤ 4,449,600` | e.g. `P=10, E=7` fits (4,340,000); `P=10, E=8` does not (4,933,000) |
 
 ### 7.3 Per-call economics of `POST /v1/records/summary`
 
@@ -442,7 +438,7 @@ Operationally this means the app account's ALGO requirement is monotonically non
 | First-access-per-patient extra | 18,900 µALGO | **app account** | **no** — permanent |
 | `log_access` transaction fee | the network's suggested fee, fetched at `algorand.ts:156` (Algorand's protocol minimum is 1,000 µALGO) | **operator account** | no — spent |
 
-Two distinct balances therefore drain in different ways on every paid, consent-gated call: the **app account's MBR headroom** (locked, monotonic) and the **operator account's ALGO** (spent, per transaction). Neither is monitored. Both are single points of failure for FR-012: if either is exhausted, `logAccess` throws, and on the *allowed* path that exception is not caught (`records.ts:49`) — the request 500s **after** the $0.05 has settled. That is finding **R-2**, and it is a data-layer capacity problem before it is a code problem. REL-002, **NOT IMPLEMENTED**.
+Two distinct balances therefore drain in different ways on every paid, consent-gated call: the **app account's MBR headroom** (locked, monotonic) and the **operator account's ALGO** (spent, per transaction). Neither is monitored (G-15, open). Both are single points of failure for FR-012: if either is exhausted, `logAccess` throws. The HTTP consequence is now bounded — `records.ts:83-99` catches it and returns **200 with the record and `auditStatus: "pending"`**, so an exhausted balance costs MedRail the audit entry, not the sale; and because settlement only happens on a sub-400 response, it never cost the caller anything even before that guard existed. REL-002 is **VALIDATED**, satisfied by the SDK. But the *data-layer* problem is untouched: a `"pending"` access is permanently missing from the patient's on-chain trail unless an operator replays it, and nothing watches either balance to prevent it. This is a capacity problem before it is a code problem, and it is still open.
 
 ### 7.4 What would need to change to scale
 
@@ -489,7 +485,7 @@ An off-chain, re-signature-driven re-issuance:
 
 ### 8.4 The practical implication for the current build
 
-Defect **C-2** (§6.3) is a one-character fix in source that **cannot be shipped to App `768743428` at all**. Any correction requires a new deployment, a new App ID, a config change, and re-granting by every patient. For a hackathon submission with 2 revoked grants and 0 audit entries that cost is negligible — which makes *now* the cheapest moment this defect will ever be fixable. Stated plainly because it stops being cheap the instant a real grant exists.
+Defect **C-2** (§6.3) is a one-character fix in source that **cannot be shipped to App `768743428` at all**. Any correction requires a new deployment, a new App ID, a config change, and re-granting by every patient. For a hackathon submission with six grants and five audit entries, all of them the project's own, that cost is still negligible — which makes *now* the cheapest moment this defect will ever be fixable, and every audit entry written makes it slightly less so. Stated plainly because it stops being cheap the instant a grant that is not ours exists. This is the same reasoning that keeps the §5.5-era contract fixes unshipped: `deploy_testnet.py` uses `OnUpdate.AppendApp`, which mints a *new* App ID rather than upgrading in place, so any redeploy discards App `768743428`'s history.
 
 ---
 
@@ -517,14 +513,14 @@ These are the only two data sources that are not on chain. Neither is mutable at
 | Property | Value |
 |---|---|
 | Purpose | The entire payload of `POST /v1/records/summary` |
-| Definition | `api/src/routes/records.ts:15-21`, a module-level `const` |
+| Definition | `api/src/routes/records.ts:17-23`, a module-level `const` |
 | Contents | `bloodType: "O+"`, `allergies: ["penicillin"]`, `chronicConditions: ["type 2 diabetes (controlled)"]`, `currentMedications: ["metformin 500mg", "lisinopril 10mg"]`, `lastUpdated: "2026-01-15"` |
 | Cardinality | **exactly one**, for all patients |
-| Selected by `patientId`? | **No.** `patientId` selects which *grant* is checked (`records.ts:32`); it does not select data. `records.ts:55` returns the same constant regardless. |
+| Selected by `patientId`? | **No.** `patientId` selects which *grant* is checked (`records.ts:53`); it does not select data. `records.ts:105` returns the same constant regardless. |
 | Mutability | none — it is a compile-time constant |
 | Requirement | DATA-004, **IMPLEMENTED** |
 
-**There is no patient datastore.** No table, no file, no fixture directory, no seeded records. This is disclosed in `../SECURITY.md` and must stay disclosed: the consent gate in this build protects a constant, which is precisely why finding **S-1** leaks nothing today and would leak everything the moment real data sat behind it.
+**There is no patient datastore.** No table, no file, no fixture directory, no seeded records. This is disclosed in `../SECURITY.md` and must stay disclosed: the consent gate in this build protects a constant. That is worth remembering when reading any claim about the gate's strength — the gate is now a genuine authorisation check (§5.5), but nothing behind it is sensitive, so it has never been tested by an adversary with something to gain.
 
 ---
 
@@ -533,9 +529,9 @@ These are the only two data sources that are not on chain. Neither is mutable at
 | Structure | Key bytes | Value bytes | MBR (µALGO) | Writer | Auth | Deletable | Live count |
 |---|---|---|---|---|---|---|---|
 | Global state | n/a | 4×8 + 32 | creator-charged at create | contract methods | per-method | no | 1 |
-| `grants` | 33 (`0x67` + sha256) | 17 (fixed) | 22,500 | `grant_access`, `revoke_access` | patient = `Txn.sender` | **no** | **2** |
-| `audit_seq` | 33 (`0x73` + pubkey) | 8 (fixed) | 18,900 | `log_access` | admin only | **no** | **0** |
-| `audit_log` | 41 (`0x61` + pubkey + itob) | 100–101 for MedRail's strings | 58,900–59,300 | `log_access` | admin only | **no** | **0** |
+| `grants` | 33 (`0x67` + sha256) | 17 (fixed) | 22,500 | `grant_access`, `revoke_access` | patient = `Txn.sender` | **no** | **6** |
+| `audit_seq` | 33 (`0x73` + pubkey) | 8 (fixed) | 18,900 | `log_access` | admin only | **no** | **1** |
+| `audit_log` | 41 (`0x61` + pubkey + itob) | 100–101 for MedRail's strings | 58,900–59,300 | `log_access` | admin only | **no** | **5** (all 101 B, `consent_checked`) |
 | `interactions.json` | n/a | 14 rows | n/a | nobody at runtime | n/a | n/a | 1 file |
 | `SYNTHETIC_RECORD` | n/a | 1 object | n/a | nobody | n/a | n/a | 1 const |
 
@@ -550,4 +546,4 @@ These are the only two data sources that are not on chain. Neither is mutable at
 | Where each value originates, what transforms it, and who can read it | [`Data_Flow.md`](Data_Flow.md) |
 | Query patterns available vs. required | [`Indexing_And_Query_Strategy.md`](Indexing_And_Query_Strategy.md) |
 | The ABI as a public interface, and the HTTP surface | [`../05_API/API_Documentation.md`](../05_API/API_Documentation.md) |
-| S-1, false audit attribution, admin-key blast radius | [`../06_Security/Threat_Model.md`](../06_Security/Threat_Model.md) |
+| Payer binding, false audit attribution, admin-key blast radius | [`../06_Security/Threat_Model.md`](../06_Security/Threat_Model.md) |

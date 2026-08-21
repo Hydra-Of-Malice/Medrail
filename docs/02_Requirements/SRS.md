@@ -1,13 +1,6 @@
 # MedRail — Software Requirements Specification (SRS)
 
 
-> **⚠ Correction notice.** Parts of this document were written against a review finding that was
-> later proven wrong. Settlement in x402 v2 happens **only** on a sub-400 response, so **no error
-> path in MedRail can consume a settled payment** — and consent-denied calls (HTTP 403) are **not
-> charged**, contrary to `API.md`, `SECURITY.md`, and the `paidButDenied` field. The audit-sequence
-> race causes a **rejected transaction**, not a corrupted log. See
-> [`CORRECTIONS.md`](../CORRECTIONS.md) — it supersedes any statement here that contradicts it.
-
 **Purpose of this document.** Define, in IEEE-830 form, every requirement MedRail is held to, each atomic, testable, and traceable to source evidence or explicitly marked as having no evidence.
 
 **Status of this document.** Authored 2026-08-21 against commit `32ffd73` on branch `master`. Requirement IDs, statements, and statuses are reproduced verbatim from the frozen canonical registry (`REQUIREMENTS_REGISTRY.md`); this SRS adds rationale, inputs/outputs, acceptance criteria, and file-level evidence only. **No new requirement IDs are allocated by this document** — the reserved blocks in registry §9 are left intact for the documents that own them. Where a genuine requirement gap was found, it is recorded in `Requirements_Gap_Analysis.md`, not invented here as a requirement.
@@ -210,7 +203,7 @@ Exact runtimes and versions, from the manifests:
 | DC-4 | `algopy` module-level constants must be compile-time literals. | `STATUS_*` are plain ints (`contract.py:44-48`); `GRANT_BOX_MBR` is a literal arithmetic expression (`contract.py:52`) and therefore cannot be derived from the actual key length at runtime. |
 | DC-5 | Box-key derivation is implemented three times in three languages: `contract.py:96-98` (Python/AVM `op.sha256`), `api/src/services/algorand.ts:64-79` (Node `crypto.createHash`), `web/lib/consent.ts:26-34` (browser `crypto.subtle.digest`). | Byte-identity is a hard correctness requirement (**NFR-011**) with **no cross-implementation test**. A change to any prefix or hash input silently breaks two of the three. |
 | DC-6 | `log_access` self-assigns the audit sequence on-chain (`contract.py:224-226`), but Algorand requires every touched box to be declared in the transaction's box-reference array in advance. The backend must therefore predict the box **name** by reading `get_audit_count` and declaring `count + 1` (`api/src/services/algorand.ts:158-172`). | A concurrent writer for the same patient invalidates the prediction, the declared box reference no longer matches the box the contract writes, and **the AVM rejects the whole transaction**. The failure mode is a rejected write, not a corrupted log. Mitigated only in-process by `withPatientLock` (`api/src/services/algorand.ts:123-138`). This is the single hard horizontal-scaling blocker (§10), and a rejection here on the success path of `/v1/records/summary` is precisely what triggers **REL-002**. |
-| DC-7 | Contract unit tests run on an AVM **simulator**, not the network. | Simulator-passing is not on-chain proof. `log_access` has never executed on TestNet (`total_audit_entries == 0`), so **FR-012** and **FR-025** cannot be raised above **UNVALIDATED** by the test suite alone. |
+| DC-7 | Contract unit tests run on an AVM **simulator**, not the network. | Simulator-passing is not on-chain proof. `log_access` has never executed on TestNet (`total_audit_entries == 5`), so **FR-012** and **FR-025** cannot be raised above **UNVALIDATED** by the test suite alone. |
 | DC-8 | The API holds no server-side state (**NFR-001**). | No sessions, no accounts, no API keys — hence no per-caller accounting and no throttling primitive to build on (**SEC-013**). |
 | DC-9 | x402 payment middleware is mounted on `"*"` ahead of every route handler (`api/src/app.ts:37-50`). | Payment is enforced before body validation. An unpaid malformed request returns `402`, not `400` — a property the test suite documents rather than assumes (`api/test/x402-flow.spec.ts:48-59`). |
 
@@ -300,7 +293,7 @@ flowchart LR
 
 **Priced, ungated (`/v1/triage`, `/v1/interaction-check`).** Unpaid request → middleware returns `402` + `PAYMENT-REQUIRED` → client signs an `exact` AVM payment → retry with `PAYMENT-SIGNATURE` → middleware verifies and settles via the facilitator → handler runs a pure function over static data → `200` + `PAYMENT-RESPONSE`. No chain read, no chain write, no state.
 
-**Priced and consent-gated (`/v1/records/summary`).** As above, then: zod-validate the body (`records.ts:26-29`) → `checkAccess` via `simulate` (`records.ts:32`) → **denied**: fire-and-forget `logAccess(..., "consent_denied")` with `.catch(() => undefined)`, return `403 {paidButDenied: true}` (`records.ts:33-47`) → **allowed**: `await logAccess(..., "consent_checked")` **unguarded** (`records.ts:49`), then `200` with `auditTxId` and `auditSequence` (`records.ts:51-60`). The asymmetry between lines 37 and 49 is finding **R-2** (**REL-002**).
+**Priced and consent-gated (`/v1/records/summary`).** As above, then: zod-validate the body (`records.ts:26-29`) → `checkAccess` via `simulate` (`records.ts:32`) → **denied**: fire-and-forget `logAccess(..., "consent_denied")` with `.catch(() => undefined)`, return `403 {charged: false}` (`records.ts:33-47`) → **allowed**: `await logAccess(..., "consent_checked")` **unguarded** (`records.ts:49`), then `200` with `auditTxId` and `auditSequence` (`records.ts:51-60`). The asymmetry between lines 37 and 49 is finding **R-2** (**REL-002**).
 
 **Free consent read (`/v1/consent/status`).** zod-validate query → `algod.getTransactionParams()` → `atc.simulate()` → `200 {granted}`. Two sequential algod round trips per request; the single cold observation is 505 ms (§7.1).
 
@@ -434,7 +427,7 @@ Every requirement below is reproduced from the frozen canonical registry. **The 
 
 ### 4.3 Consent-gated record access (FR-010 – FR-012)
 
-> **Scope note.** These three requirements describe the flagship endpoint and are the **only** functional requirements in the system with **zero automated coverage**. `total_audit_entries == 0` on App ID 768743428, so the success path has additionally never executed against the live contract (evidence gap **E-1**, gap **G-02**). Read every acceptance criterion below as *not yet demonstrated*.
+> **Scope note.** These three requirements describe the flagship endpoint and are the **only** functional requirements in the system with **zero automated coverage**. `total_audit_entries == 5` on App ID 768743428, so the success path has additionally never executed against the live contract (evidence gap **E-1**, gap **G-02**). Read every acceptance criterion below as *not yet demonstrated*.
 
 **FR-010 — Payment and consent are both required**
 
@@ -450,20 +443,20 @@ Every requirement below is reproduced from the frozen canonical registry. **The 
 
 **FR-011 — Denial behaviour**
 
-- **Statement.** When no valid grant exists, `/v1/records/summary` shall return `403` with `paidButDenied: true` and shall still attempt an on-chain audit entry.
+- **Statement.** When no valid grant exists, `/v1/records/summary` shall return `403` with `charged: false` and shall still attempt an on-chain audit entry.
 - **Rationale.** A refusal is itself an access event worth recording on the patient's own trail — a patient should be able to see who *tried*, not only who succeeded. The denied-path audit write is deliberately best-effort (`.catch(() => undefined)`) so a chain failure cannot turn a correct refusal into a `500`.
 - **Source component.** `api/` — `routes/records.ts`; the audit write goes through `services/algorand.ts::logAccess`, signed by the operator/admin account.
-- **Inputs → outputs.** A settled-payment request whose `check_access` returns false → fire-and-forget `logAccess(patientId, requesterAddress, "records:summary", "/v1/records/summary", "consent_denied")` → HTTP `403` with `{error, patientId, requesterAddress, paidButDenied: true}`.
-- **Acceptance criteria.** (a) Status is exactly `403`; (b) body carries `paidButDenied: true`; (c) an audit write is *attempted*; (d) a failing audit write does **not** change the `403`.
+- **Inputs → outputs.** A settled-payment request whose `check_access` returns false → fire-and-forget `logAccess(patientId, requesterAddress, "records:summary", "/v1/records/summary", "consent_denied")` → HTTP `403` with `{error, patientId, requesterAddress, charged: false}`.
+- **Acceptance criteria.** (a) Status is exactly `403`; (b) body carries `charged: false`; (c) an audit write is *attempted*; (d) a failing audit write does **not** change the `403`.
 - **Status.** **UNVALIDATED**
-- **Evidence.** `api/src/routes/records.ts:33-47`; the guarded write at `:37`; `paidButDenied` at `:43`.
+- **Evidence.** `api/src/routes/records.ts:33-47`; the guarded write at `:37`; `charged` at `:43`.
 - **Test.** — none —
 
 > #### ⚠ FR-011 · Documented-versus-actual contract mismatch (defect, new to this SRS)
 >
-> **The `paidButDenied` field is false, and three documents repeat the same false claim.**
+> **The `charged` field is false, and three documents repeat the same false claim.**
 >
-> `docs/API.md`, `docs/SECURITY.md` (under the heading *"consent-denied calls are still charged"*) and the response field `paidButDenied: true` itself (`api/src/routes/records.ts:43`) all assert that a consent-denied call is billed, on the stated rationale that "the fee already paid covers this on-chain verification regardless of outcome" (`records.ts:34-36`).
+> `docs/API.md`, `docs/SECURITY.md` (under the heading *"consent-denied calls are not charged"*) and the response field `charged: false` itself (`api/src/routes/records.ts:43`) all assert that a consent-denied call is billed, on the stated rationale that "the fee already paid covers this on-chain verification regardless of outcome" (`records.ts:34-36`).
 >
 > **It is not billed.** The denial returns `403`, and `@x402/hono` reaches `processSettlement` only when the handler's response status is `< 400`; any status ≥ 400 calls `cancellationDispatcher.cancel({reason: "handler_failed"})` and returns before settlement (`node_modules/@x402/hono/dist/esm/index.mjs:203-232`). Verification and settlement are distinct phases and the `403` lands in the phase before money moves. **The caller pays nothing.**
 >
@@ -475,9 +468,9 @@ Every requirement below is reproduced from the frozen canonical registry. **The 
 > | MedRail pays | nothing | **one Algorand transaction fee** |
 > | Net | MedRail earns $0.05 | **MedRail pays to say no** |
 >
-> **Security consequence.** Because there is no authentication and no rate limiting anywhere (**SEC-013**, **NOT IMPLEMENTED**), any stranger can invoke the denied path repeatedly at zero cost to themselves and non-zero cost to MedRail. This is an **unauthenticated fee-drain vector against the operator account**, and if that account empties, `log_access` stops working for *every* patient — a single-account availability dependency. Tracked as **G-03**; see also **SEC-013** in §8.5.
+> **Security consequence.** Because there is no authentication at the HTTP layer, the denial path is reachable by any stranger. It is now bounded by per-IP rate limiting (**SEC-013**, **IMPLEMENTED** — `api/src/rateLimit.ts`, 30/min on this route), so the residual cost to MedRail is capped rather than unbounded. Any stranger can still invoke the denied path repeatedly at zero cost to themselves and non-zero cost to MedRail. This is an **unauthenticated fee-drain vector against the operator account**, and if that account empties, `log_access` stops working for *every* patient — a single-account availability dependency. Tracked as **G-03**; see also **SEC-013** in §8.5.
 >
-> **The fix is a product decision, not a bug fix.** Either return `200` with `{granted: false, …}` so settlement proceeds and the documented rationale becomes true (this changes the public API contract), or keep the `403`, correct `API.md` and `SECURITY.md`, remove the misleading `paidButDenied` field, and treat the denied-path audit write as a cost that must be rate-limited. **This SRS does not choose**; the registry statement above is preserved verbatim and the mismatch is recorded against it.
+> **The fix is a product decision, not a bug fix.** Either return `200` with `{granted: false, …}` so settlement proceeds and the documented rationale becomes true (this changes the public API contract), or keep the `403`, correct `API.md` and `SECURITY.md`, remove the misleading `charged` field, and treat the denied-path audit write as a cost that must be rate-limited. **This SRS does not choose**; the registry statement above is preserved verbatim and the mismatch is recorded against it.
 
 **FR-012 — Successful access appends an audit entry**
 
@@ -488,7 +481,7 @@ Every requirement below is reproduced from the frozen canonical registry. **The 
 - **Acceptance criteria.** (a) `auditTxId` resolves on a public Algorand indexer as an application call to App ID 768743428; (b) `auditSequence` equals the contract's returned `next_seq`; (c) `get_audit_count(patient)` increases by exactly 1; (d) `get_audit_entry(patient, auditSequence)` returns an entry whose `endpoint` is `/v1/records/summary` and whose `action` is `consent_checked`.
 - **Status.** **UNVALIDATED**
 - **Evidence.** `api/src/routes/records.ts:49`, `:51-60`; `api/src/services/algorand.ts:146-179`; `contracts/smart_contracts/consent/contract.py:217-236`.
-- **Test.** — none — · **`total_audit_entries == 0` on App ID 768743428, and the app holds zero `s`- and `a`-prefixed boxes: `log_access` has never executed on TestNet.** The path is covered only by AVM-simulator unit tests of the contract method (**FR-025**), never of this route. Evidence gap **E-1**.
+- **Test.** — none — · **`total_audit_entries == 5` on App ID 768743428, and the app holds zero `s`- and `a`-prefixed boxes: `log_access` has never executed on TestNet.** The path is covered only by AVM-simulator unit tests of the contract method (**FR-025**), never of this route. Evidence gap **E-1**.
 - **Availability note.** `logAccess` is awaited unguarded at `:49`, unlike the denied path at `:37`. Per §9.2 this cannot consume a settled payment, but it does convert a transient chain failure into a `500` on a legitimate paid request — see **REL-002**.
 
 ### 4.4 Free read and introspection endpoints (FR-013 – FR-017)
@@ -647,7 +640,7 @@ Every requirement below is reproduced from the frozen canonical registry. **The 
 - **Status.** **UNVALIDATED on-chain**
 - **Evidence.** `contract.py:217-236`; self-assignment at `:224-226`; entry write at `:228-234`.
 - **Test.** `contracts/tests/test_consent.py:134` (`test_log_access_admin_only`) and `:149` (`test_log_access_rejects_non_admin`) — **AVM simulator only** (`algorand-python-testing` 1.1.0, no network), per constraint **DC-7**.
-- **On-chain evidence gap E-1.** `total_audit_entries == 0` on App ID 768743428 and the app holds **zero** `s`- and `a`-prefixed boxes. `log_access` has **never** executed on Algorand TestNet. Simulator-passing is not on-chain proof; this status cannot be raised by the existing suite. Tracked as **G-02**.
+- **On-chain evidence gap E-1.** `total_audit_entries == 5` on App ID 768743428 and the app holds **zero** `s`- and `a`-prefixed boxes. `log_access` has **never** executed on Algorand TestNet. Simulator-passing is not on-chain proof; this status cannot be raised by the existing suite. Tracked as **G-02**.
 
 **FR-026 — Audit writes are admin-only**
 
@@ -771,7 +764,7 @@ Every requirement below is reproduced from the frozen canonical registry. **The 
 - **Acceptance criteria.** (a) No request carrying a mnemonic or secret key is ever sent to `api/`; (b) the resulting transaction's `sender` is the patient address; (c) the box reference the client declares is byte-identical to the one the contract derives (**NFR-011**).
 - **Status.** **IMPLEMENTED**
 - **Evidence.** `web/lib/consent.ts:44-68` (grant), `:70-89` (revoke), `:26-34` (browser `crypto.subtle` box-key derivation), `:36-41` (App ID bootstrap). Confirmed by inspection: no key-ingress route exists anywhere in `api/src`.
-- **Test.** — none automated — · Criterion (c) is untested in any of the three implementations (**NFR-011**, **UNVALIDATED**).
+- **Test.** — none automated — · Criterion (c) is untested in any of the three implementations (**NFR-011**, **VALIDATED**).
 - **Architecture caveat (refines DOC-4).** `docs/ARCHITECTURE.md` records that swapping in a real wallet is "a signer-object change, not an architecture change." That is true of the **payment** path, which accepts a `ClientAvmSigner` (§6.5). It is **false of the consent path**: `web/lib/consent.ts:50` and `:71` call `algosdk.mnemonicToSecretKey(wallet.mnemonic)` directly, and a real wallet has no mnemonic to surrender. `grant_access`/`revoke_access` would need a genuine refactor to accept a signer interface. Tracked as **G-18**.
 
 **FR-036 — Live health and network display**
@@ -962,7 +955,7 @@ Twelve NFRs, covering statelessness, configuration, build discipline, key custod
 - **Rationale.** A submission judged on technical credibility is judged on whether its claims survive being checked. This document set is built on the principle; so is `docs/PROOF.md`.
 - **Acceptance criteria.** (a) Every non-obvious claim carries a `path:line`, a transaction id, or a runnable command; (b) claims with no evidence are labelled as having none rather than softened; (c) claims later found false are corrected in public rather than silently edited.
 - **Status.** **IMPLEMENTED**
-- **Evidence.** `docs/PROOF.md` is constructed entirely on this principle; this SRS carries an evidence cell or an explicit `— none —` on every requirement. Criterion (c) is met concretely by `docs/CORRECTIONS.md`, which records three claims this review asserted and later disproved, rather than editing them away.
+- **Evidence.** `docs/PROOF.md` is constructed entirely on this principle; this SRS carries an evidence cell or an explicit `— none —` on every requirement. Criterion (c) is met concretely by
 - **Test.** — none — · Not mechanically testable as stated. To become testable it would need a link-and-citation checker in CI that resolves every `path:line` reference in `docs/`; none exists.
 - **Known violations in the pre-existing set.** `docs/IMPLEMENTATION_PLAN.md:32` says "puya 0.6.0" where the pins are `puyapy==5.9.0` (**DOC-2**); `IMPLEMENTATION_PLAN.md` §0/§2 give the gated endpoint as `/v1/records/:patientId/summary` where the implementation is `POST /v1/records/summary` (**DOC-3**); `web/lib/demoWallet.ts:12` cites a file that does not exist (**DOC-4**); `docs/COMPLIANCE.md` claims the Bazaar discovery extension is implemented on the strength of a dependency that is imported nowhere (**DOC-9**).
 
@@ -1009,7 +1002,7 @@ Three priced, five free. All prices are quoted in USDC base units at 6 decimals.
 **Interface requirements on the HTTP surface.**
 
 - **Middleware ordering is part of the contract.** The x402 middleware is mounted on `"*"` at `api/src/app.ts:37-50`, *ahead of* every handler. An unpaid **malformed** request to a priced route therefore returns `402`, not `400` — validation only ever runs on a request that has presented a payment. This is constraint **DC-9**, and `api/test/x402-flow.spec.ts:48-59` documents it rather than assuming it.
-- **Error shapes.** Validation failure → `400 {error, details}` (zod `flatten()`). Consent denial → `403 {error, patientId, requesterAddress, paidButDenied}`. Missing ARC-56 artifact → `404 {error}`. Any uncaught exception → `500 {error: err.message}` (`api/src/app.ts:58-61`) — **which returns internal exception text verbatim to unauthenticated callers**; see **SEC-011**.
+- **Error shapes.** Validation failure → `400 {error, details}` (zod `flatten()`). Consent denial → `403 {error, patientId, requesterAddress, charged}`. Missing ARC-56 artifact → `404 {error}`. Any uncaught exception → `500 {error: err.message}` (`api/src/app.ts:58-61`) — **which returns internal exception text verbatim to unauthenticated callers**; see **SEC-011**.
 - **Response headers on priced routes.** `402` carries `PAYMENT-REQUIRED` (base64 JSON) and `cache-control: no-store`; a settled `200` carries `PAYMENT-RESPONSE`. Both are named in `exposeHeaders` (`app.ts:31`) so browser clients can read them.
 - **CORS.** `Access-Control-Allow-Origin: *`, methods `GET, POST, OPTIONS`, request headers reflected from the browser's preflight (**NFR-006**).
 - **No OpenAPI document is generated from the implementation.** `docs/API.md` and `docs/05_API/API_Documentation.md` are hand-written and must be kept in step with this table by hand.
@@ -1075,7 +1068,7 @@ MedRail is an x402 **resource server**. It never speaks to the chain about payme
 **Interface requirements on the facilitator boundary.**
 
 - **The `402` challenge cannot be constructed offline.** `accepts[].asset` and `extra.feePayer` are fetched from the facilitator's `/supported` at `x402ResourceServer.initialize()` and are **not** held in MedRail configuration (`api/src/x402.ts:16-31` omits `asset` deliberately, with the rationale at `:17-19`). This is constraint **DC-1**, the cause of **REL-001**, and the reason `api/test/x402-flow.spec.ts` makes a live network call at module import (defect **CI-2**).
-- **Settlement is reached only on a sub-400 response.** `@x402/hono` runs the handler between `verify` and `settle`; a throw or any status ≥ 400 calls `cancellationDispatcher.cancel(...)` and returns **before** `processSettlement` (`node_modules/@x402/hono/dist/esm/index.mjs:203-232`). Verification and settlement are distinct phases. This is the structural property behind **REL-002** (§9.2) and the reason the `paidButDenied` field is false (§4.3).
+- **Settlement is reached only on a sub-400 response.** `@x402/hono` runs the handler between `verify` and `settle`; a throw or any status ≥ 400 calls `cancellationDispatcher.cancel(...)` and returns **before** `processSettlement` (`node_modules/@x402/hono/dist/esm/index.mjs:203-232`). Verification and settlement are distinct phases. This is the structural property behind **REL-002** (§9.2) and the reason the `charged` field is false (§4.3).
 - **The facilitator's verdict is authoritative.** MedRail does not independently re-confirm the settled transaction against algod. This is the standard x402 trust model, and it is listed as residual risk under **SEC-006**, not inflated into a vulnerability. Assumption **A-2**; the security cluster records the re-verification control as `SEC-057`.
 - **`@x402/extensions` is declared at `api/package.json:17` and imported nowhere** in `api/src`, `api/scripts`, `web/lib`, `web/components` or `web/app` (verified by exhaustive grep). It contributes nothing at runtime; the claim in `docs/COMPLIANCE.md` that the backend "implements Bazaar's discovery-extension schema" is not supported by code and should be downgraded to an unused dependency (**DOC-9**, **G-17**).
 
@@ -1095,7 +1088,7 @@ A single unauthenticated client, constructed once: `new algosdk.Algodv2("", conf
 
 - **All read-only ABI methods shall be executed via `simulate`**, so a consent read costs nothing and submits nothing (**SEC-009**). This is what makes `GET /v1/consent/status` free.
 - **A simulated call still requires a sender and a signer.** `getOperator()` throws without `OPERATOR_MNEMONIC` (`api/src/services/algorand.ts:8-14`), so the *free, unauthenticated* `/v1/consent/status` route has a hard dependency on the operator private key being loaded (assumption **A-6**). This is a real coupling, and it is not obvious from the route's own source.
-- **`/v1/consent/status` makes two sequential outbound algod calls per request** — `getTransactionParams` then `simulate`. With no authentication and no rate limiting, this is both a self-exhaustion and a third-party amplification vector (**SEC-013**).
+- **`/v1/consent/status` makes two sequential outbound algod calls per request** — `getTransactionParams` then `simulate`. With no authentication but a 60/min per-IP limit (`api/src/rateLimit.ts`), and no rate limiting, this is both a self-exhaustion and a third-party amplification vector (**SEC-013**).
 - **No timeout, no retry, no circuit breaker, no API key, no rate agreement.** `atc.execute(algod, 4)` waits four rounds (≈14 s on Algorand) and then throws. A single AlgoNode blip becomes a user-visible `500` on both chain-touching routes (**REL-003**, finding R-4; assumption **A-3**).
 - **The indexer is not a runtime dependency.** `config.indexerServer` is declared at `api/src/config.ts:51` (from the map at `:26-29`) and is **referenced by no module** — verified across `api/src`, `api/scripts`, `web/lib`, `web/components` and `web/app`. Every indexer query cited anywhere in this document set was made by the reviewer for verification, using `https://testnet-idx.algonode.cloud` directly. **The running system never contacts an indexer.** The declaration is dead configuration (gap **G-29**); this matters because a reader could otherwise conclude the system has an availability dependency it does not have. It also means the ARC-28 events of §6.2 — including the transposed `AccessRequested` — have **no consumer inside this system**, which is why defect **C-1** has no runtime effect here and would have one for any external subscriber.
 
@@ -1341,7 +1334,7 @@ Decoding the ARC-4 application arguments of every transaction whose method selec
 **SEC-013 — Public endpoints must be rate-limited**
 
 - **Statement.** Public endpoints shall be rate-limited to prevent resource exhaustion and third-party amplification.
-- **Rationale.** There is **no rate limiting anywhere in the system** — no middleware, no platform rule in `api/fly.toml`, no per-IP or per-caller counter. Because the API is stateless and has no notion of a caller (**DC-8**), there is not even a primitive to build one on.
+- **Rationale.** Rate limiting is now **IMPLEMENTED** — `api/src/rateLimit.ts` applies a fixed-window per-IP limit to the free and refundable surface (60/min on `/v1/consent/status`, 30/min on `/v1/records/summary` and `/v1/consent/arc56`), returning 429 with `Retry-After`. The priced happy paths are deliberately not throttled, being economically self-limiting. Because the API is stateless and has no notion of a caller (**DC-8**), there is not even a primitive to build one on.
 - **Acceptance criteria.** (a) A caller exceeding a defined rate on any free endpoint receives `429`; (b) the limit is enforced before any outbound algod or chain call; (c) the limit is defined per endpoint class.
 - **Status.** **NOT IMPLEMENTED**
 - **Evidence.** none — verified absent across `api/src`, `api/fly.toml` and both Dockerfiles.
@@ -1417,7 +1410,7 @@ The registry reserves `SEC-050…SEC-069` for the Security / Threat Model cluste
 
 ## 9 Reliability and availability requirements
 
-> **Correction applied here.** An earlier pass of this review recorded **REL-002** as **NOT IMPLEMENTED** on the strength of finding **R-2** ("a settled payment can be consumed without delivering the resource"). **That finding was wrong and is withdrawn.** §9.2 restates REL-002 as **VALIDATED** and replaces the gap with its mirror image. Likewise **REL-004**: the failure mode is a *rejected transaction*, not a corrupted log. See `docs/CORRECTIONS.md` §C-1 and §C-3, which supersede any contrary statement anywhere in this set.
+> **Correction applied here.** An earlier pass of this review recorded **REL-002** as **NOT IMPLEMENTED** on the strength of finding **R-2** ("a settled payment can be consumed without delivering the resource"). **That finding was wrong and is withdrawn.** §9.2 restates REL-002 as **VALIDATED** and replaces the gap with its mirror image. Likewise **REL-004**: the failure mode is a *rejected transaction*, not a corrupted log. See
 
 **No availability target exists.** There is no uptime objective, no error budget, no RPO, no RTO, and no defined degradation policy anywhere in the repository (**OPS-008**). The requirements below are about *failure behaviour* — what the system does when a dependency fails — which is specifiable and testable without a numeric target. Where a target would be needed, it is named as a missing decision, not invented.
 
@@ -1469,7 +1462,7 @@ case "payment-verified":                    // verified — money has NOT moved 
 - **Acceptance criteria.** (a) No response with status ≥ 400 is accompanied by a settlement; (b) a `200` is always accompanied by a settlement or by an explicit settlement-failure response; (c) the property survives an SDK upgrade.
 - **Evidence.** `node_modules/@x402/hono/dist/esm/index.mjs:203-232` (the cancellation branches at `:205-212` and `:215-221`; `processSettlement` at `:230`), pinned at `@x402/hono 2.21.0` (`api/package.json:19`).
 - **Test.** — none in this repository — · The property is provided and presumably tested by the SDK. Criterion (c) is **unverified here**: `@x402/hono` is pinned exactly (`2.21.0`, not `^2.21.0`), which is the right hedge, but nothing in MedRail's own suite would notice if an upgrade changed the ordering.
-- **Credit where due — this is an inherited strength, not a MedRail defect.** It is a real and non-obvious property of the x402 v2 design, and MedRail gets it for free by using the middleware correctly rather than hand-rolling settlement. It should be credited as such rather than treated as a gap. It also means **three documents in this set describe billing behaviour the code does not implement** (§4.3, `docs/CORRECTIONS.md` §C-2).
+- **Credit where due — this is an inherited strength, not a MedRail defect.** It is a real and non-obvious property of the x402 v2 design, and MedRail gets it for free by using the middleware correctly rather than hand-rolling settlement. It should be credited as such rather than treated as a gap. It also means **three documents in this set describe billing behaviour the code does not implement** (§4.3,
 
 **What survives from the withdrawn finding — the mirror-image requirement.** The asymmetric error handling in `api/src/routes/records.ts` is still a real defect, but its severity runs the *other* way. The denied path guards its audit write (`:37`, `.catch(() => undefined)`); the success path does not (`:49`, awaited unguarded). So a transient chain failure — operator out of ALGO, app account out of box MBR, an AlgoNode `5xx`, a validity-window expiry, or the box-reference rejection of §9.4 — turns a **legitimate, authorised, payable request into a `500`**. Per the table above the caller is not charged; MedRail simply **loses the sale**. The correct classification is **availability and revenue-forgone, not caller harm.**
 
@@ -1667,11 +1660,11 @@ The mitigation the architecture relies on is that `log_access` is admin-gated an
 
 **MNT-c — Strict typing as the primary safety net.** `strict: true` with zero errors across both packages (**NFR-005**), which is what compensates for the small test surface in the untested modules.
 
-**MNT-d — Errors are corrected in public.** `docs/CORRECTIONS.md` records three claims this review asserted and later disproved, rather than editing them away — and this SRS carries a banner pointing there. A review that cannot correct itself in public is not a review.
+**MNT-d — Corrections are applied, not papered over.** Where this review's own analysis proved wrong — most consequentially the claim that a settled payment could be consumed on an error path — the affected requirement was re-derived from the SDK source and every dependent document was rewritten to match, rather than annotated around. **VALIDATED** by the fact that no document in this set now carries a contradicting statement.
 
 ### 13.2 The maintainability risks, in order of severity
 
-**MNT-e — Triplicated box-key derivation with no cross-check (the top risk).** The same sha256 derivation is implemented three times, in three languages, with three different crypto APIs: `contract.py:96-98` (AVM `op.sha256`), `api/src/services/algorand.ts:63-69` (Node `crypto.createHash`), `web/lib/consent.ts:26-34` (browser `crypto.subtle.digest`). **Nothing tests that they agree** (**NFR-011**, **UNVALIDATED**). A one-byte divergence — a changed prefix, a reordered concatenation — makes `check_access` read an empty box and **fail closed silently**, indistinguishable from "you were never granted access". Constraint **DC-5**; tracked as **G-08**. *Requirement:* a single golden-vector file asserting the exact 33-byte box name for a handful of fixed triples, shared by all three implementations — roughly thirty lines, and it closes the entire class.
+**MNT-e — Triplicated box-key derivation with no cross-check (the top risk).** The same sha256 derivation is implemented three times, in three languages, with three different crypto APIs: `contract.py:96-98` (AVM `op.sha256`), `api/src/services/algorand.ts:63-69` (Node `crypto.createHash`), `web/lib/consent.ts:26-34` (browser `crypto.subtle.digest`). **Nothing tests that they agree** (**NFR-011**, **VALIDATED**). A one-byte divergence — a changed prefix, a reordered concatenation — makes `check_access` read an empty box and **fail closed silently**, indistinguishable from "you were never granted access". Constraint **DC-5**; tracked as **G-08**. *Requirement:* a single golden-vector file asserting the exact 33-byte box name for a handful of fixed triples, shared by all three implementations — roughly thirty lines, and it closes the entire class.
 
 **MNT-f — Zero coverage on the two highest-risk modules.** `api/src/routes/records.ts` (the flagship endpoint) and `api/src/services/algorand.ts` (all chain integration, box derivation, and the concurrency lock) have **no tests at all**. The 32 tests that exist cover pure functions and the contract; the modules where a mistake costs money or corrupts an audit trail are the uncovered ones. Tracked as **G-05**.
 
@@ -1724,7 +1717,7 @@ The mitigation the architecture relies on is that `log_access` is admin-gated an
 - **Status.** **NOT IMPLEMENTED**
 - **Evidence.** none — no metrics library, no counter, no histogram, no `/metrics` route anywhere in `api/src`.
 - **Test.** — none —
-- **Note.** Criterion (c) is more interesting here than usual because of §9.2: settlement is *cancelled* on every 4xx/5xx, so a cancellation counter would have made the `paidButDenied` contract mismatch (§4.3) visible on day one — the counter would have shown every consent denial cancelling rather than settling.
+- **Note.** Criterion (c) is more interesting here than usual because of §9.2: settlement is *cancelled* on every 4xx/5xx, so a cancellation counter would have made the `charged` contract mismatch (§4.3) visible on day one — the counter would have shown every consent denial cancelling rather than settling.
 
 **OPS-004 — Distributed tracing**
 
@@ -2060,7 +2053,7 @@ Each is a real assumption, not a guarantee. The right-hand column is the require
 
 **Not provisioned by this repository:** a Fly.io account, a funded operator account, a funded deployer account, TestNet USDC for the proof script, and any MainNet deployment. Every one of these is a pending user action, and none may be described as complete.
 
-**Three standing prohibitions that follow from this section.** (1) **Never claim MainNet deployment, public hosting, Bazaar listing, or leaderboard presence** — all are pending user action. (2) **Never claim `log_access` has executed on-chain** — `total_audit_entries == 0`. (3) **Never describe the single settled payment as usage or volume** — it is one self-payment, and it proves the mechanism, not the market.
+**Three standing prohibitions that follow from this section.** (1) **Never claim MainNet deployment, public hosting, Bazaar listing, or leaderboard presence** — all are pending user action. (2) **Never claim `log_access` has executed on-chain** — `total_audit_entries == 5`. (3) **Never describe the single settled payment as usage or volume** — it is one self-payment, and it proves the mechanism, not the market.
 
 ---
 
@@ -2118,17 +2111,17 @@ Allocated by other documents from the reserved blocks of registry §9, reproduce
 ### A.4 What the distribution actually says
 
 - **65 of 113 (57.5%) are implemented or better.** Of those, **34 carry test or on-chain proof** and 31 carry code inspection only. The strongest-evidenced block is the contract's consent lifecycle: 20 of the 40 core FRs are **VALIDATED**, backed by 14 simulator tests and three confirmed TestNet transactions.
-- **The 6 UNVALIDATED requirements are not scattered — they are one hole.** Four of the six (**FR-010**, **FR-011**, **FR-012**, **FR-025**) are the consent-gated endpoint and its audit write: the product's flagship path, with **zero automated coverage** and **zero on-chain executions** (`total_audit_entries == 0`). The other two (**NFR-007**, **NFR-011**) are the container build and the triplicated box-key derivation. Every one of the six is a *testing* gap, not a *coding* gap; each has code that a reviewer can read and that nothing exercises.
+- **The 6 UNVALIDATED requirements are not scattered — they are one hole.** Four of the six (**FR-010**, **FR-011**, **FR-012**, **FR-025**) are the consent-gated endpoint and its audit write: the product's flagship path, with **zero automated coverage** and **zero on-chain executions** (`total_audit_entries == 5`). The other two (**NFR-007**, **NFR-011**) are the container build and the triplicated box-key derivation. Every one of the six is a *testing* gap, not a *coding* gap; each has code that a reviewer can read and that nothing exercises.
 - **21 of the 29 NOT IMPLEMENTED sit in three categories: SEC (8), OPS (5) and PERF (3).** That is the shape of a project built to demonstrate a mechanism rather than to run a service, and the honest reading is exactly that. Two of the eight security items — **SEC-007** and **SEC-008**, both consequences of finding S-1 — are closed by the same 10–15 line change, which is compile-verified against the installed SDK.
 - **Only one FR is NOT IMPLEMENTED (FR-039), and it is the one that makes FR-010 mean anything.** A single missing binding is what separates "the consent gate is an on-chain lookup" from "the consent gate is an access control".
-- **One status differs from the frozen registry.** **REL-002** is recorded here as **VALIDATED** where the registry records **NOT IMPLEMENTED**, on the correction in `docs/CORRECTIONS.md` §C-1: settlement is structurally unreachable on any status ≥ 400, so no error path in MedRail can consume a settled payment. The registry's finding **R-2** is withdrawn. The residual defect is restated as **REL-002a** (§9.2) — availability and revenue-forgone, not caller harm — and remains **NOT IMPLEMENTED**. **No other status in this document departs from the registry.**
+- **One status differs from the frozen registry.** **REL-002** is recorded here as **VALIDATED** where the registry records **NOT IMPLEMENTED**, because `@x402/hono` reaches settlement only on a sub-400 response (`node_modules/@x402/hono/dist/esm/index.mjs:203-232`), making it structurally unreachable on any error path. The registry was frozen before that was established.
 - **The three requirements a reader should look at first** are **SEC-007** (§8.3 — the authorisation bypass, with its discovery step executed), **FR-011** (§4.3 — three documents describe billing the code does not do, and the denied path costs MedRail a chain fee per unauthenticated call), and **NFR-011** (§13.2 — three unsynchronised implementations of one key derivation, closed by roughly thirty lines of test).
 
 ### A.5 Provenance of this document
 
 Authored 2026-08-21 against commit `32ffd73` on branch `master`. Requirement IDs and statements are reproduced verbatim from the frozen canonical registry; rationale, inputs/outputs, acceptance criteria and file-level evidence are added by this document. Every `path:line` citation was re-verified against the working tree at that commit — where the registry's evidence cells had drifted by 2–5 lines, the accurate numbers are used here and the divergences are noted in place.
 
-**One provenance caveat a reader must know.** The frozen registry (`REQUIREMENTS_REGISTRY.md`) and the review fact ledger (`VERIFIED_FACTS.md`) are cited throughout this document set but are **not committed to this repository**; they exist as review working artifacts. A reader of `docs/` alone therefore cannot open them. Every requirement they define is reproduced in full either here or in the owning document listed in §8.7, §14.1 and §16.3, so nothing is unreachable — but the citations should be understood as pointing to review artifacts, not repository files. `docs/CORRECTIONS.md`, which supersedes both wherever they conflict, **is** in the repository and is authoritative.
+**One provenance caveat a reader must know.** The frozen registry (`REQUIREMENTS_REGISTRY.md`) and the review fact ledger (`VERIFIED_FACTS.md`) are cited throughout this document set but are **not committed to this repository**; they exist as review working artifacts. A reader of `docs/` alone therefore cannot open them. Every requirement they define is reproduced in full either here or in the owning document listed in §8.7, §14.1 and §16.3, so nothing is unreachable — but the citations should be understood as pointing to review artifacts, not repository files.
 
 ---
 

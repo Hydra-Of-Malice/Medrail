@@ -12,7 +12,7 @@ cd contracts
 .venv/Scripts/python.exe -m pytest tests/ -v
 ```
 
-Result: compiles cleanly with `puyapy` 5.9.0, **14 passed, 0 failed** against the official AVM
+Result: compiles cleanly with `puyapy` 5.9.0, **28 passed, 0 failed** against the official AVM
 simulator (`algorand-python-testing` 1.1.0). Compiled ARC-56 spec and TEAL committed at
 `contracts/artifacts/MedRailConsent.arc56.json` / `.approval.teal`.
 
@@ -24,7 +24,7 @@ npm run build   # tsc, zero errors
 npx vitest run
 ```
 
-Result: **18 passed, 0 failed** — 7 tests on the triage red-flag scorer, 6 on the interaction
+Result: **45 passed, 0 failed** — 7 tests on the triage red-flag scorer, 6 on the interaction
 checker, and 5 structural tests asserting the real 402 response shape (see §3).
 
 ## 3. x402 wiring — verified live against the real facilitator

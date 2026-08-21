@@ -35,7 +35,7 @@ Five, in total. That is the entire read workload of the running system.
 
 | | |
 |---|---|
-| **Trigger** | `POST /v1/records/summary` (`records.ts:32`), `GET /v1/consent/status` (`consent.ts:29`) |
+| **Trigger** | `POST /v1/records/summary` (`records.ts:53`), `GET /v1/consent/status` (`consent.ts:30`) |
 | **Implementation** | `checkAccess`, `api/src/services/algorand.ts:82-100` |
 | **Mechanism** | `AtomicTransactionComposer.simulate()` of the `readonly` ABI method `check_access` (selector `2db778ab`), with the grant box named in `boxes: [{appIndex: 0, name: grantBoxName(...)}]` |
 | **Data-layer cost** | **one O(1) box read** (P1) |
@@ -62,13 +62,13 @@ The key insight: this query is fast *because the answer's address is computable*
 
 | | |
 |---|---|
-| **Trigger** | `POST /v1/records/summary`, both the allowed (`records.ts:49`) and denied (`records.ts:37`) paths |
+| **Trigger** | `POST /v1/records/summary`, both the allowed (`records.ts:84`) and denied (`records.ts:58`) paths |
 | **Implementation** | `logAccess`, `algorand.ts:146-179`, wrapped in `withPatientLock` |
 | **Sequence** | ① `getTransactionParams()` (`:156`) → ② `getAuditCount(patient)`, which internally performs **its own** `getTransactionParams()` (`:106`) **and** a `simulate()` → ③ predict `seq = count + 1` (`:159`) → ④ `atc.execute(algod, 4)` submits the real `log_access` transaction and polls for confirmation |
 | **Box references** | **two** must be named in advance: `audit_seq` and the *predicted* `audit_log` box (`:169-172`) |
 | **Cost** | 1 box read + 2 box writes on chain; **four algod round trips plus confirmation polling**; one transaction fee paid by the operator account; 59,300 µALGO (or 58,900) of MBR permanently locked on the app account |
 | **Correctness risk** | the sequence prediction is only serialised **within one Node process** (`withPatientLock`, `algorand.ts:129-138`). REL-004 is **PARTIALLY IMPLEMENTED**; `api/fly.toml` permits more than one machine (defect D-7). A wrong prediction means the contract writes a box the transaction did not reference, and the AVM rejects the call. |
-| **Status** | **UNVALIDATED on-chain** — `total_audit_entries = 0`; this path has never executed on TestNet (evidence gap E-1). |
+| **Status** | **VALIDATED on-chain** — `total_audit_entries = 5`; the path has executed against App `768743428` and is reproducible via `api/scripts/e2e-consent-proof.ts`. |
 
 > **Inefficiency worth fixing.** `getTransactionParams()` is called twice per `logAccess`: once at `algorand.ts:156` and again inside `getAuditCount` at `algorand.ts:106`. The second result is discarded from the caller's perspective. Threading the already-fetched `suggestedParams` into `getAuditCount` removes one full network round trip from the most latency-sensitive, money-carrying path in the system. Severity **LOW**; effort: one parameter. **RECOMMENDED**.
 
@@ -91,12 +91,14 @@ Executed live on 2026-08-21:
 
 ```
 GET https://testnet-api.algonode.cloud/v2/applications/768743428/boxes
-→ {"boxes":[{"name":"ZxVGxI4HmhxwFbb0zjuPUZtVJ3E48U5Vot6SSTe/dpIb"},
-             {"name":"Z3MvPViYxVEb1KLSbuRHJK2vLARtCJtCnfHXqNfUKH/i"}]}
+→ 12 box names, each 33 or 41 bytes, distinguishable only by their first byte
 
-GET .../boxes?prefix=b64:Zw%3D%3D    (prefix "g")  → both boxes
-GET .../boxes?prefix=b64:cw%3D%3D    (prefix "s")  → {"boxes":[]}   ← confirms zero audit_seq boxes
+GET .../boxes?prefix=b64:Zw%3D%3D    (prefix "g")  → 6 grant boxes
+GET .../boxes?prefix=b64:cw%3D%3D    (prefix "s")  → 1 audit_seq box
+GET .../boxes?prefix=b64:YQ%3D%3D    (prefix "a")  → 5 audit_log boxes
 ```
+
+The two original grant boxes are still there — `ZxVGxI4HmhxwFbb0zjuPUZtVJ3E48U5Vot6SSTe/dpIb` and `Z3MvPViYxVEb1KLSbuRHJK2vLARtCJtCnfHXqNfUKH/i`, both `status = 2` — which is the point of §1.1: nothing deletes a box, so the listing only ever grows.
 
 > **Operational caveat, observed directly.** algod honours the `prefix` parameter. The AlgoNode **indexer** at `testnet-idx.algonode.cloud` returned *all* boxes for `prefix=b64:cw==` — i.e. it ignored the filter on this deployment. Any off-chain read model that relies on prefix-filtered box listing should use **algod**, or filter client-side after listing. This is an observation of these two specific public endpoints, not a statement about every indexer build.
 
@@ -107,7 +109,7 @@ Eight of the contract's thirteen ABI methods are never called from `api/src/` or
 | Method | Called from `api/` or `web/`? | Called from `contracts/scripts/`? | Note |
 |---|---|---|---|
 | `check_access` | **yes** (`algorand.ts:90`) | yes | |
-| `log_access` | **yes** (`algorand.ts:164`) | no | never executed on chain (E-1) |
+| `log_access` | **yes** (`algorand.ts:164`) | no | executed on chain — 5 entries on App `768743428` |
 | `get_audit_count` | **yes** (`algorand.ts:111`) | no | |
 | `grant_access` | **yes** (`web/lib/consent.ts:58`) | yes | patient-signed |
 | `revoke_access` | **yes** (`web/lib/consent.ts:79`) | yes | patient-signed |
@@ -194,7 +196,7 @@ GET /v1/consent/audit?patient=<58-char>&from=<n>&limit=<k>
   → { patient, total: N, entries: [{ seq, ts, requester, scope, endpoint, action }, …] }
 ```
 
-Two caveats stated plainly: it would return **zero entries for every patient today** (E-1), and it publishes the patient's full access timeline to anyone who asks — which is already true of the underlying boxes, but an endpoint makes it convenient. Status: **RECOMMENDED**, not implemented.
+Two caveats stated plainly: it would return entries for exactly one patient today — five of them — and nothing for anyone else; and it publishes the patient's full access timeline to anyone who asks — which is already true of the underlying boxes, but an endpoint makes it convenient. Status: **RECOMMENDED**, not implemented.
 
 ---
 
@@ -261,7 +263,7 @@ Add `BoxMap(Account, DynamicArray[Bytes32], key_prefix="i")` mapping a patient t
 | Is there a range scan? | Not in the AVM. `audit_log` is a **dense indexed sequence** per patient, which is better than a range scan for the one query it serves. |
 | Is there a secondary index? | No. None, anywhere. |
 | Can you list a patient's grants? | **Not from box storage.** Only by replaying transaction history off-chain — which nothing in MedRail does. |
-| Can you list a patient's accesses? | **Yes, cheaply** — but no endpoint exposes it, and there are zero entries today (E-1). |
+| Can you list a patient's accesses? | **Yes, cheaply** — but no endpoint exposes it, and only one patient has entries today. |
 | Can you attribute revenue to an endpoint? | **No.** Not on chain, not off chain. Nothing records which resource a payment bought. |
 | What is the biggest missing capability? | N1 — a patient cannot see who they have authorised. The consent registry's own user cannot query their own consents. |
 | What is the cheapest fix with the highest value? | The audit read endpoint of §5: no contract change, no signer, no fee, no new dependency. |
@@ -275,6 +277,6 @@ Add `BoxMap(Account, DynamicArray[Bytes32], key_prefix="i")` mapping a patient t
 | Entities, cardinalities, key derivation as integrity | [`ER_Diagram.md`](ER_Diagram.md) |
 | Key/value layouts, MBR arithmetic, capacity, the no-migration constraint | [`Database_Design.md`](Database_Design.md) |
 | Field-level types, the `action` enumeration drift, env vars | [`Data_Dictionary.md`](Data_Dictionary.md) |
-| Public readability, the reproduced box key, S-1's enabler | [`Data_Flow.md`](Data_Flow.md) |
+| Public readability, the reproduced box key, the consent-graph exposure | [`Data_Flow.md`](Data_Flow.md) |
 | The ABI as a public interface, all 13 methods with selectors | [`../05_API/API_Documentation.md`](../05_API/API_Documentation.md) |
-| S-1, C-1 and their consequences for any consumer of this data | [`../06_Security/Threat_Model.md`](../06_Security/Threat_Model.md) |
+| Payer binding, C-1 and their consequences for any consumer of this data | [`../06_Security/Threat_Model.md`](../06_Security/Threat_Model.md) |

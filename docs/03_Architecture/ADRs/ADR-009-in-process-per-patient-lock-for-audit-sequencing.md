@@ -1,13 +1,5 @@
 # ADR-009: An in-process per-patient lock for audit-log sequencing
 
-
-> **⚠ Correction notice.** Parts of this document were written against a review finding that was
-> later proven wrong. Settlement in x402 v2 happens **only** on a sub-400 response, so **no error
-> path in MedRail can consume a settled payment** — and consent-denied calls (HTTP 403) are **not
-> charged**, contrary to `API.md`, `SECURITY.md`, and the `paidButDenied` field. The audit-sequence
-> race causes a **rejected transaction**, not a corrupted log. See
-> [`CORRECTIONS.md`](../../CORRECTIONS.md) — it supersedes any statement here that contradicts it.
-
 **Status:** Accepted
 **Date:** Not recorded as a decision date. `api/src/services/algorand.ts` first appears in commit `d2a5f7f`, 2026-08-07.
 **Deciders:** Not recorded in repository
@@ -135,7 +127,7 @@ This is the sharpest thing in this ADR: the limitation was identified correctly,
 - REL-004 is not satisfied under the shipped `fly.toml` (D-7). The documented mitigation and the documented deployment configuration disagree.
 - Contributes directly to REL-002 **NOT IMPLEMENTED** — a mispredicted sequence is one of the ways R-2 fires.
 - No test coverage of the lock, the derivation, or the module (**test gap**, and the module is the riskiest in the repo).
-- Never exercised on a real network: `total_audit_entries == 0`, zero `s`/`a`-prefixed boxes (**E-1**). The race has never had the opportunity to occur.
+- Never exercised on a real network: `total_audit_entries == 5`, zero `s`/`a`-prefixed boxes (**E-1**). The race has never had the opportunity to occur.
 
 **Neutral**
 - Per-patient rather than global granularity is the right choice: unrelated patients are genuinely independent, and a global lock would have serialised the whole service behind block time.

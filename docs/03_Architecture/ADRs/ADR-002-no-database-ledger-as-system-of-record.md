@@ -1,13 +1,5 @@
 # ADR-002: No database — Algorand box storage is the only system of record
 
-
-> **⚠ Correction notice.** Parts of this document were written against a review finding that was
-> later proven wrong. Settlement in x402 v2 happens **only** on a sub-400 response, so **no error
-> path in MedRail can consume a settled payment** — and consent-denied calls (HTTP 403) are **not
-> charged**, contrary to `API.md`, `SECURITY.md`, and the `paidButDenied` field. The audit-sequence
-> race causes a **rejected transaction**, not a corrupted log. See
-> [`CORRECTIONS.md`](../../CORRECTIONS.md) — it supersedes any statement here that contradicts it.
-
 **Status:** Accepted (rationale reconstructed)
 **Date:** Not recorded as a decision date. The deciding artifacts (`contracts/smart_contracts/consent/contract.py`, `api/src/services/algorand.ts`) first appear in commit `d2a5f7f`, 2026-08-07.
 **Deciders:** Not recorded in repository
@@ -73,7 +65,7 @@ This decision is not cheap, and the costs are structural rather than incidental.
 
 - Per grant box: **22,500 µALGO**, verified on-chain (app account `CCO26Y6Z56DDZ3OELO2UKJMIPJVSIT52I23F2MPMR52JBM3HQZZNUZNOR4` reports `min-balance = 145,000` with 2 boxes; 145,000 − 100,000 base = 45,000 = 2 × 22,500).
 - The contract's own advertised constant is **wrong**: `contract.py:52` computes `2_500 + 400 * (32 + 17) = 22,100`, omitting the BoxMap's 1-byte `key_prefix="g"` from the key length. `get_grant_box_mbr()` therefore under-reports by 400 µALGO per box (**defect C-2**), and a backend sizing `fund_mbr` from it under-funds by ~1.8%. FR-032 is **IMPLEMENTED (incorrect value)**.
-- Per audit box: **not known**. The key is 41 effective bytes (`a` prefix + 32-byte pubkey + 8-byte sequence) and `AuditEntry` is variable-length, which the contract deliberately declines to hard-code (`contract.py:53-55`) — a correct choice. But because `log_access` has **never executed on TestNet** (`total_audit_entries == 0`, zero `s`- and `a`-prefixed boxes — evidence gap **E-1**), the real per-entry MBR cost of the audit log has never been observed. **The storage cost of the system's flagship feature is unmeasured.**
+- Per audit box: **not known**. The key is 41 effective bytes (`a` prefix + 32-byte pubkey + 8-byte sequence) and `AuditEntry` is variable-length, which the contract deliberately declines to hard-code (`contract.py:53-55`) — a correct choice. But because `log_access` has **never executed on TestNet** (`total_audit_entries == 5`, zero `s`- and `a`-prefixed boxes — evidence gap **E-1**), the real per-entry MBR cost of the audit log has never been observed. **The storage cost of the system's flagship feature is unmeasured.**
 - Growth is unbounded and monotonic: the audit log is append-only, so MBR consumption rises forever and the app account must be topped up forever via `fund_mbr` (`contract.py:130-138`). There is no monitoring or alerting on the headroom (REL-006 **PARTIALLY IMPLEMENTED**, OPS-005 **NOT IMPLEMENTED**). Deletion is not a feature — it is architecturally excluded.
 
 **2. Write latency is block latency.** A write is a transaction. `atc.execute(algod, 4)` (`api/src/services/algorand.ts:175`) waits four rounds before throwing; the fact ledger's own arithmetic treats that as ~14 s, i.e. a few seconds per round. MedRail has measured no write latency of its own — no audit write has ever been submitted to a real network. The one measured figure that exists is a **single cold observation of 505 ms** for `GET /v1/consent/status`, which is two sequential algod round-trips and no write at all. There is no p50/p95/p99 for anything (PERF-003 **NOT IMPLEMENTED**).

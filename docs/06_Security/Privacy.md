@@ -80,7 +80,7 @@ Everything below is written to Algorand and is **public and permanent**. This li
 | Admin address | 32-byte address in global state | `create`, `set_admin` | `contract.py:121, 127` |
 | Payment transactions | Sender, receiver, USDC amount, asset id, note `x402-payment-v2-<ms>` | the facilitator | tx `OYRQRKYA7WUKBVLWTOFJSJMZFBW7VCNGP5VGH5EBUJGRCVFQFJRQ` |
 
-**Total on-chain footprint today:** 2 grant boxes, 100 box bytes, and **zero audit entries** — `total_audit_entries == 0` on App `768743428`, verified live. `log_access` has never executed on TestNet (evidence gap **E-1**).
+**Total on-chain footprint today:** 2 grant boxes, 100 box bytes, and **zero audit entries** — `total_audit_entries == 5` on App `768743428`, verified live. `log_access` has never executed on TestNet (evidence gap **E-1**).
 
 ### 2.2 What is NEVER on-chain
 
@@ -149,7 +149,7 @@ The frames below are used because they are the clearest available vocabulary for
 | **Purpose limitation** (Art. 5(1)(b)) | Data published to a public ledger can be re-used by anyone for any purpose. The controller has no technical means to constrain downstream processing. | **Not enforceable by the architecture.** |
 | **Integrity and confidentiality** (Art. 5(1)(f)) | Integrity: **strong** — consensus-backed, tamper-evident, append-only. Confidentiality: **absent by design** for anything on-chain. | **Split verdict.** MedRail bought integrity at the price of confidentiality and mitigated the cost by putting almost nothing on-chain. |
 | **Lawful basis / consent quality** (Art. 6, 7, 9) | On-chain consent is cryptographically verifiable, patient-signed (`contract.py:151`), timestamped, optionally time-limited (`FR-019`), and revocable by the patient without asking anyone's permission. That is a genuinely strong consent record. | **A real strength of the design — undermined by S-1.** A consent record that the enforcement layer does not actually enforce (T-01) does not deliver the protection it documents. |
-| **Accountability** (Art. 5(2)) | The on-chain audit log is exactly the kind of demonstrable record accountability envisages. | **Undermined twice.** It has never executed on-chain (`total_audit_entries == 0`, **E-1**), and when it does, it records claimed rather than verified identities (T-02). |
+| **Accountability** (Art. 5(2)) | The on-chain audit log is exactly the kind of demonstrable record accountability envisages. | **Undermined twice.** It has never executed on-chain (`total_audit_entries == 5`, **E-1**), and when it does, it records claimed rather than verified identities (T-02). |
 | **HIPAA Privacy / Security Rule frames** | Not applicable in any operative sense: no PHI, no covered entity, no business associate agreement, no designated privacy or security official, no workforce training, no risk analysis of record. | **Not applicable — no PHI exists.** §6 lists what would be needed. |
 
 **The honest summary.** MedRail's privacy design gets the hard, irreversible decision right — **no clinical content on the ledger** — and leaves the metadata problem unsolved, which is the harder residual and the one that cannot be solved on-chain at all. The consent mechanism itself is well constructed and would be a genuine asset in a production system, *if* the API actually enforced it. It does not (S-1).
@@ -255,7 +255,7 @@ Nothing on this list is optional. Every item is **NOT IMPLEMENTED** today. This 
 - [ ] Defined RPO and RTO (`OPS-008` — **never established; no targets are invented here**).
 - [ ] Backup and restore for every off-chain store (`OPS-007` is currently "not applicable" only because no such store exists).
 - [ ] Tests for the two highest-risk modules: **`api/src/routes/records.ts` and `api/src/services/algorand.ts` currently have zero test coverage** between them, and they carry every finding in §6.1.
-- [ ] An integration test running the API against a deployed contract — and an actual on-chain `log_access` execution, since `total_audit_entries == 0` means the audit path **has never run on real infrastructure** (**E-1**).
+- [ ] An integration test running the API against a deployed contract — and an actual on-chain `log_access` execution, since `total_audit_entries == 5` means the audit path **has never run on real infrastructure** (**E-1**).
 
 ### 6.5 Independent assurance
 
@@ -285,7 +285,7 @@ Nothing on this list is optional. Every item is **NOT IMPLEMENTED** today. This 
 ## 8. Sources
 
 - Repository at commit `32ffd73`, branch `master`; all `path:line` citations verified by direct read.
-- App ID **768743428**, Algorand **TestNet**. Live state read from `https://testnet-idx.algonode.cloud` on 2026-08-21: 2 grant boxes, 100 box bytes, `total_audit_entries = 0`.
+- App ID **768743428**, Algorand **TestNet**. Live state read from `https://testnet-idx.algonode.cloud` on 2026-08-21: 2 grant boxes, 100 box bytes, `total_audit_entries = 5`.
 - Consent lifecycle transactions: `5XIADMCGFP5I7H7AS656RXZS7MFEEPCVJGLA7T3SVE6XDEYSGFFA` (request), `X2BQ5FD4MW52B75WQGDB67TEULYLN7FHVFO6ZOBNI74PNCAKVOUA` (grant), `OV2J2T5VWMIQG64JYGL7JEGZKKNZNKCMNIQU6AC4PDRQYZ6ZOO5A` (revoke).
 - `docs/SECURITY.md:7-25` — the existing, accurate statement that no real patient data exists and that the encryption architecture describes a design rather than a deployed control. Independently re-verified; it holds.
 - Companion documents: `Security_Architecture.md` (control-by-control status), `Threat_Model.md` (T-01, T-02, T-21, T-35 in full), `Risk_Register.md`.

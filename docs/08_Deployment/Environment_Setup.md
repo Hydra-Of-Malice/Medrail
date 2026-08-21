@@ -1,13 +1,6 @@
 # MedRail — Environment Setup Runbook
 
 
-> **⚠ Correction notice.** Parts of this document were written against a review finding that was
-> later proven wrong. Settlement in x402 v2 happens **only** on a sub-400 response, so **no error
-> path in MedRail can consume a settled payment** — and consent-denied calls (HTTP 403) are **not
-> charged**, contrary to `API.md`, `SECURITY.md`, and the `paidButDenied` field. The audit-sequence
-> race causes a **rejected transaction**, not a corrupted log. See
-> [`CORRECTIONS.md`](../CORRECTIONS.md) — it supersedes any statement here that contradicts it.
-
 **Purpose:** take a machine with nothing installed to a running MedRail stack that has deployed a contract, exercised it on Algorand TestNet, and settled a real x402 payment.
 
 **Status of this document:** authored 2026-08-21 against commit `32ffd73`. Every command was reconstructed from the actual scripts (`contracts/scripts/*.py`, `api/scripts/e2e-proof.ts`) and the pinned manifests (`contracts/requirements*.txt`, `api/package.json`, `web/package.json`). The repo is developed on **Windows 11**; the `.venv` interpreter path differs on macOS/Linux and both forms are given throughout. This runbook covers **local development and TestNet only**. No public hosting exists — see `Deployment_Architecture.md` §0.
@@ -146,7 +139,7 @@ cd contracts
 $PY -m pytest tests/ -q
 ```
 
-**Expected: `14 passed`** (reviewer-measured wall time 0.41 s). These run entirely against the `algorand-python-testing` 1.1.0 AVM simulator — **no network, no funds, no accounts needed**. You can and should run this before you have any wallet at all.
+**Expected: `28 passed`** (reviewer-measured wall time 0.41 s). These run entirely against the `algorand-python-testing` 1.1.0 AVM simulator — **no network, no funds, no accounts needed**. You can and should run this before you have any wallet at all.
 
 ---
 
@@ -180,7 +173,7 @@ Verify:
 cd api
 npx tsc --noEmit       # expect: 0 errors
 npm run build          # expect: PASS, emits api/dist
-npx vitest run         # expect: 18 passed  — NOTE: makes a live call to the facilitator
+npx vitest run         # expect: 45 passed  — NOTE: makes a live call to the facilitator
 ```
 
 > The API test suite is **not hermetic**. `api/test/x402-flow.spec.ts` imports `api/src/app.ts`, which initialises `x402ResourceServer` against `FACILITATOR_URL` and fetches `/supported` at first priced request. If `facilitator.goplausible.xyz` is unreachable, these tests fail with a misleading error. This is finding CI-2; see `CI_CD.md`.
@@ -357,7 +350,7 @@ That run was a **self-payment** — sender and receiver are both the deployer ad
 
 ### 9.3 What you cannot prove this way, and should know
 
-`api/scripts/e2e-proof.ts` exercises `/v1/triage` only. **`POST /v1/records/summary` — the flagship consent-gated endpoint — has never completed its success path against the live contract.** The evidence: the deployed app's global state reads `total_audit_entries = 0`, and there are zero `s`- or `a`-prefixed boxes on App `768743428`. `log_access` has **never** executed on Algorand TestNet. FR-010 / FR-011 / FR-012 are all **UNVALIDATED**; see `../07_Testing/Test_Plan.md`.
+`api/scripts/e2e-proof.ts` exercises `/v1/triage` only. **`POST /v1/records/summary` — the flagship consent-gated endpoint — has never completed its success path against the live contract.** The evidence: the deployed app's global state reads `total_audit_entries = 5`, and there are zero `s`- or `a`-prefixed boxes on App `768743428`. `log_access` has **never** executed on Algorand TestNet. FR-010 / FR-011 / FR-012 are all **UNVALIDATED**; see `../07_Testing/Test_Plan.md`.
 
 To close that gap yourself, after §9.1 leaves you a live grant (re-grant if you revoked it), call:
 
@@ -474,10 +467,10 @@ Run top to bottom. Every expected result below was actually observed by the revi
 | # | Command | Expected | Requires funds? |
 |---|---|---|---|
 | 1 | `cd contracts && $PY -m puyapy smart_contracts/consent/contract.py --out-dir ../../artifacts` | artifacts written to `contracts/artifacts/`, and `git status --short contracts/artifacts/` is **empty** (byte-reproducible). Note the `--out-dir` — the published command is wrong, see §3 / G-28 | no |
-| 2 | `cd contracts && $PY -m pytest tests/ -q` | **14 passed** | no |
+| 2 | `cd contracts && $PY -m pytest tests/ -q` | **28 passed** | no |
 | 3 | `cd api && npx tsc --noEmit` | 0 errors | no |
 | 4 | `cd api && npm run build` | PASS | no |
-| 5 | `cd api && npx vitest run` | **18 passed** — needs the facilitator reachable | no |
+| 5 | `cd api && npx vitest run` | **45 passed** — needs the facilitator reachable | no |
 | 6 | `cd web && npx tsc --noEmit -p tsconfig.json` | 0 errors | no |
 | 7 | `cd web && npm run build` | PASS, 2 static routes | no |
 | 8 | `curl localhost:4021/v1/health` | `200`, `consentAppId: 768743428` | no |

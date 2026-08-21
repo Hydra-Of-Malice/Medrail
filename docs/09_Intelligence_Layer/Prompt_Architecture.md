@@ -1,16 +1,8 @@
 # MedRail — Prompt Architecture
 
-
-> **⚠ Correction notice.** Parts of this document were written against a review finding that was
-> later proven wrong. Settlement in x402 v2 happens **only** on a sub-400 response, so **no error
-> path in MedRail can consume a settled payment** — and consent-denied calls (HTTP 403) are **not
-> charged**, contrary to `API.md`, `SECURITY.md`, and the `paidButDenied` field. The audit-sequence
-> race causes a **rejected transaction**, not a corrupted log. See
-> [`CORRECTIONS.md`](../CORRECTIONS.md) — it supersedes any statement here that contradicts it.
-
 **Purpose:** answer, definitively, the question a reviewer arrives at this directory asking — "where are the prompts?" — and document what plays their structural role in a system that has none.
 
-**Status of this document:** Descriptive of commit `32ffd73` on branch `master`. §1–§3 describe what exists. §4 is **RECOMMENDED / NOT IMPLEMENTED** and describes nothing that has been built, started, or committed to.
+**Status of this document:** Descriptive of commit `3b387df` on branch `main`. §1–§3 describe what exists. §4 is **RECOMMENDED / NOT IMPLEMENTED** and describes nothing that has been built, started, or committed to.
 
 **Cross-references:** [`Intelligence_Architecture.md`](./Intelligence_Architecture.md) · [`Algorithm_Inventory.md`](./Algorithm_Inventory.md) · [`Evaluation.md`](./Evaluation.md) · [`Limitations.md`](./Limitations.md) · [`../06_Security/Threat_Model.md`](../06_Security/Threat_Model.md)
 
@@ -53,7 +45,7 @@ These are consequences of the architecture, not security controls that were desi
 | **No prompt-leak / system-prompt-extraction risk** | There is nothing confidential in the decision path. The complete logic is in a public repository by design (AI-001 **VALIDATED**). |
 | **No supply-chain exposure to a model vendor** | No vendor availability, pricing change, deprecation, or silent model swap can affect these endpoints. |
 
-**What this does not mean.** It does not mean the endpoints are secure — the repository's **CRITICAL** finding (S-1: the requester identity on `/v1/records/summary` is caller-asserted and never bound to the payer) and its **HIGH** reliability findings (R-1, R-2) all live elsewhere in the system and are unaffected by the absence of a model. It does not mean the input handling is beyond criticism — AI-006 is a real input-handling defect (see [`Evaluation.md`](./Evaluation.md) §5.5). And it emphatically does not mean the *output* is safe to act on; it means the output is limited, predictable, and auditable. Full treatment in [`../06_Security/Threat_Model.md`](../06_Security/Threat_Model.md) and [`Limitations.md`](./Limitations.md).
+**What this does not mean.** It does not mean the endpoints are secure — security and reliability are properties of the system around these functions, not of the absence of a model, and every one of them lives elsewhere in the repository. The finding that used to be cited here (S-1 / G-01: the requester identity on `/v1/records/summary` was caller-asserted and never bound to the payer) is now **CLOSED** — `api/src/x402Payer.ts` recovers the address that signed the settled payment and `routes/records.ts` returns 403 unless it equals the asserted `requesterAddress`, demonstrated live against TestNet by `api/scripts/verify-g01-fix.ts`. It does not mean the input handling is beyond criticism — AI-006 is a real input-handling defect (see [`Evaluation.md`](./Evaluation.md) §5.5), and the two defects that belong to *this* directory (G-21, unanchored substring matching in the interaction checker; G-26, no negation handling in the triage scorer) are still open. And it emphatically does not mean the *output* is safe to act on; it means the output is limited, predictable, and auditable. Full treatment in [`../06_Security/Threat_Model.md`](../06_Security/Threat_Model.md) and [`Limitations.md`](./Limitations.md).
 
 ## 3. The functional equivalent: the rule tables *are* the prompt
 
@@ -109,9 +101,9 @@ None of this exists. None is in progress. None is a commitment. It is recorded s
 | **Provenance for generated content** | AI-004 / DATA-005 require a `source` on every interaction response. A generative implementation must cite a real retrieved record or must not populate the field at all — an ungrounded model cannot honestly satisfy this requirement, which is a hard constraint on the design, not a nice-to-have. |
 | **Prompt-injection defences** | Currently the surface is zero (§2). Introducing a model introduces it: caller-supplied symptom text becomes model input, and instructions embedded in it become a live concern. Required: strict separation of instruction and data channels, input length and content constraints, output validation that assumes the model may have been subverted, and injection test cases in the regression suite. |
 | **Jailbreak and misuse testing** | Adversarial prompts aimed at extracting dosing advice, a diagnosis, or a suppression of the disclaimer. Must be a standing suite, re-run on every prompt or model change. |
-| **Non-determinism disclosure** | NFR-009 is currently **VALIDATED**. A sampling model breaks it. The 402 challenge description at `api/src/app.ts:41` (*"Rule-based clinical red-flag triage score. Not medical advice."*) and the endpoint documentation would have to change in the same commit, because a paying integrator may have built a cache or a regression test on the current guarantee. |
+| **Non-determinism disclosure** | NFR-009 is currently **VALIDATED**. A sampling model breaks it. The 402 challenge description at `api/src/app.ts:52` (*"Rule-based clinical red-flag triage score. Not medical advice."*) and the endpoint documentation would have to change in the same commit, because a paying integrator may have built a cache or a regression test on the current guarantee. |
 | **Data-processing posture** | AI-007 currently holds as a code property: nothing leaves the process. Third-party inference makes retention a vendor-policy question requiring a data-processing agreement, a stated retention position, and a re-run of the threat model — even with synthetic data, and unavoidably with anything else. |
-| **Cost model** | Per-call inference cost against a $0.02 price point (`api/src/app.ts:41`) is a business-model constraint, not an implementation detail. Zero marginal cost is currently a load-bearing property of the pricing. |
+| **Cost model** | Per-call inference cost against a $0.02 price point (`api/src/app.ts:52`) is a business-model constraint, not an implementation detail. Zero marginal cost is currently a load-bearing property of the pricing. |
 | **Latency budget** | No latency budget exists for any endpoint today (PERF-002, PERF-003 **NOT IMPLEMENTED**). A network round-trip to a model provider on the paid path would make defining one a prerequisite rather than a deferred task. |
 
 The summary that matters: the *call site* is one line (`routes/triage.ts:16`), and swapping it is genuinely easy. The *guarantees around it* — determinism, bounded output, unconditional disclaimers, grounded provenance, no data egress, zero marginal cost, no injection surface — are what a replacement has to earn back, and that is the work.

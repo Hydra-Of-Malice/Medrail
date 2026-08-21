@@ -56,7 +56,7 @@ compute" and "prove you were allowed to see this."
 - A real browser-side payment flow: the Next.js demo constructs, signs, and submits an actual
   Algorand transaction group client-side using the SDK's `ClientAvmSigner` interface — verified
   working end-to-end through to a facilitator settlement attempt (see `docs/PROOF.md`).
-- 32 automated tests total across contract and API, all passing, all runnable with a single
+- 73 automated tests total across contract and API, all passing, all runnable with a single
   command (see `docs/DEPLOYMENT.md` "Verify everything").
 
 **Long-term potential.** The consent layer is deliberately generic (scope is a free-form

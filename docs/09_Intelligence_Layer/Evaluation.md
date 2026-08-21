@@ -2,7 +2,7 @@
 
 **Purpose:** state exactly what has and has not been verified about MedRail's two rule engines, what the 13 automated tests actually establish, what a genuine clinical evaluation would require, and which failure modes follow from reading and executing the code.
 
-**Status of this document:** Descriptive of commit `32ffd73` on branch `master`. §3 records tests that exist and pass. §4 is a **plan** for work that has **not been done**. §5 records findings obtained by executing the shipped code, and labels each as analysis or observation rather than measurement.
+**Status of this document:** Descriptive of commit `3b387df` on branch `main`. §3 records tests that exist and pass. §4 is a **plan** for work that has **not been done**. §5 records findings obtained by executing the shipped code, and labels each as analysis or observation rather than measurement.
 
 **Cross-references:** [`Algorithm_Inventory.md`](./Algorithm_Inventory.md) · [`Limitations.md`](./Limitations.md) · [`../07_Testing/Test_Cases.md`](../07_Testing/Test_Cases.md) · [`../07_Testing/Test_Strategy.md`](../07_Testing/Test_Strategy.md) · [`../06_Security/Threat_Model.md`](../06_Security/Threat_Model.md)
 
@@ -41,7 +41,7 @@ Passing all 13 tests establishes that the engines faithfully implement their rul
 
 ## 3. What IS verified — the 13 automated tests
 
-Executed by the project reviewer on 2026-08-21: `cd api && npx vitest run` ⇒ **18 passed** across 3 files in 4.08 s. Thirteen of those 18 target the intelligence layer; the remaining 5 are x402 payment-flow tests in `api/test/x402-flow.spec.ts`.
+Executed by the project reviewer on 2026-08-21: `cd api && npx vitest run` ⇒ **45 passed** across 6 files. Thirteen of those 45 target the intelligence layer; the remaining 32 cover the payment and consent machinery — the 402 shape against the live facilitator (`x402-flow.spec.ts`), payer recovery from the payment signature (`x402Payer.spec.ts`), the advertised-vs-mounted route set (`app.spec.ts`), and cross-language box-key parity (`boxKeyParity.spec.ts`). The repository total is **73** tests: 45 here and 28 in `contracts/tests/`.
 
 Both suites are pure-function tests: no network, no mocks, no fixtures, no fake timers, no seeded randomness. They run offline and complete in milliseconds.
 
@@ -72,14 +72,16 @@ Both suites are pure-function tests: no network, no mocks, no fixtures, no fake 
 
 - **Nothing about clinical correctness.** Every assertion is checked against the rule table, which is also the thing under test. The tests cannot detect a wrong weight, a missing red flag, or a wrong severity tier, because the table is the oracle.
 - **Nothing about coverage.** No test asks what fraction of real emergency presentations the 11 groups would catch. See §6.
-- **Nothing about false positives.** Test 13 is the closest, and it is where the gap is sharpest: it calls `checkInteractions(["a", "b"])` at `interactionChecker.spec.ts:34` and then asserts **only** `source.length > 0` and a `disclaimer` substring. It never inspects `flagged` or `matches`. Executing that exact input at commit `32ffd73` returns **`flagged: true` with 5 matches**, including a `major` bleeding-risk description — for an input containing no medication at all. The suite drives straight through the AI-006 defect on every run and reports green. This is the single most instructive fact about the current test coverage, and it is exactly the kind of thing a hostile reviewer should find documented rather than discover.
+- **Nothing about false positives.** Test 13 is the closest, and it is where the gap is sharpest: it calls `checkInteractions(["a", "b"])` at `interactionChecker.spec.ts:34` and then asserts **only** `source.length > 0` and a `disclaimer` substring. It never inspects `flagged` or `matches`. Executing that exact input at commit `3b387df` returns **`flagged: true` with 5 matches**, including a `major` bleeding-risk description — for an input containing no medication at all. The suite drives straight through the AI-006 defect on every run and reports green. This is the single most instructive fact about the current test coverage, and it is exactly the kind of thing a hostile reviewer should find documented rather than discover.
 - **Nothing about negation, synonyms, spelling, or language.** No test exercises any of them. §5 does, and the results are poor.
 - **Nothing about the routes.** These are service-level tests. `api/test/x402-flow.spec.ts` asserts the 402 shape but does not exercise a paid 200 through either engine. The only end-to-end evidence for `/v1/triage` is the manual proof run recorded in `contracts/artifacts/e2e-proof.json`; `api/scripts/e2e-proof.ts` is not run by CI. `/v1/interaction-check` has **no** end-to-end evidence at all.
 - **Nothing measured under load.** No latency, throughput, or concurrency figure exists for these endpoints. PERF-003 **NOT IMPLEMENTED**.
 
 ### 3.4 One further caveat about the green badge
 
-`.github/workflows/ci.yml` triggers on `push: branches: [main]`, but this repository's only branch is `master` (finding CI-1). These 13 tests pass — verified locally on 2026-08-21 — but **no push to this repository has ever triggered CI**. The tests are real and green; the automation around them has never actually run. This belongs in an evaluation document because "our tests pass in CI" would be an overclaim.
+`.github/workflows/ci.yml` now triggers on `push: branches: [main, master]`, on pull requests, and on `workflow_dispatch`. An earlier revision listed `main` only, while the repository's branch was `master`, so for a period **no push ever triggered CI** — the jobs were correct and green locally and the gate simply never fired (finding CI-1 / G-06, now **CLOSED**). These 13 tests pass, verified locally on 2026-08-21, and the automation that runs them now actually runs.
+
+What the badge still does not cover, and this is the part that belongs in an evaluation document: the end-to-end proof scripts (`api/scripts/e2e-proof.ts`, `api/scripts/e2e-consent-proof.ts`, `api/scripts/verify-g01-fix.ts`) need funded TestNet keys and are executed by hand, so no CI run produces end-to-end evidence for either engine. And a green badge over 13 oracle-bound tests still establishes nothing clinical — §3.3 is the caveat that matters.
 
 ---
 
@@ -134,7 +136,7 @@ Stated as an expectation from code reading, not as a measurement, and not as a s
 
 ## 5. Known failure modes derived from the code
 
-**Method and status:** each finding below was derived by reading the implementation, then confirmed by executing the shipped code (`api/src/services/triageScorer.ts`, `api/src/services/interactionChecker.ts`) at commit `32ffd73` on 2026-08-21 with hand-chosen inputs. These are **analytical findings confirmed by observation on selected inputs** — they demonstrate that a failure mode exists. They are **not** measurements: no rate, frequency, or population-level figure is implied by any of them, because no representative sample was used and none exists.
+**Method and status:** each finding below was derived by reading the implementation, then confirmed by executing the shipped code (`api/src/services/triageScorer.ts`, `api/src/services/interactionChecker.ts`) at commit `3b387df` on 2026-08-21 with hand-chosen inputs. These are **analytical findings confirmed by observation on selected inputs** — they demonstrate that a failure mode exists. They are **not** measurements: no rate, frequency, or population-level figure is implied by any of them, because no representative sample was used and none exists.
 
 ### 5.1 The matcher is a literal, whole-phrase substring test
 

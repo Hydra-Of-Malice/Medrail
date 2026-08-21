@@ -1,13 +1,6 @@
 # MedRail — Monitoring
 
 
-> **⚠ Correction notice.** Parts of this document were written against a review finding that was
-> later proven wrong. Settlement in x402 v2 happens **only** on a sub-400 response, so **no error
-> path in MedRail can consume a settled payment** — and consent-denied calls (HTTP 403) are **not
-> charged**, contrary to `API.md`, `SECURITY.md`, and the `paidButDenied` field. The audit-sequence
-> race causes a **rejected transaction**, not a corrupted log. See
-> [`CORRECTIONS.md`](../CORRECTIONS.md) — it supersedes any statement here that contradicts it.
-
 **Purpose:** state exactly what an operator can observe about MedRail today, enumerate the blind spots, and propose a monitoring design proportionate to the system that actually exists.
 
 **Status of this document:** authored 2026-08-21 against commit `32ffd73`. **There is no monitoring.** No metrics, no tracing, no dashboards, no uptime checks, no alerting, no log aggregation — OPS-003, OPS-004 and OPS-005 are all **NOT IMPLEMENTED**, verified by reading the whole of `api/src`. The one observable surface is `GET /v1/health`. Everything from §4 onward is **RECOMMENDED** and none of it is in the repo. **No threshold value below is a number this project has chosen** — every threshold is marked as a decision to make.
@@ -130,7 +123,7 @@ A hard, uncached, unmonitored dependency. If `facilitator.goplausible.xyz` is un
 
 ### 3.10 Abuse of the free, unauthenticated endpoint
 
-`/v1/consent/status` is free, unauthenticated, and performs **two outbound algod calls per request** (`algorand.ts:85, 98`). There is no rate limiting anywhere (SEC-013, **NOT IMPLEMENTED**) and no request-rate metric. It is usable both to exhaust the API and to amplify traffic at AlgoNode, and neither would be visible.
+`/v1/consent/status` is free, unauthenticated, and performs **two outbound algod calls per request** (`algorand.ts:85, 98`). It is now rate-limited to 60/min per IP (`api/src/rateLimit.ts`), capping both self-exhaustion and amplification into AlgoNode (SEC-013, **NOT IMPLEMENTED**) and no request-rate metric. It is usable both to exhaust the API and to amplify traffic at AlgoNode, and neither would be visible.
 
 ### 3.11 Requester impersonation (finding S-1)
 

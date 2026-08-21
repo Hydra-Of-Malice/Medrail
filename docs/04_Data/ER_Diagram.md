@@ -17,7 +17,7 @@
 | 3 | `audit_seq` BoxMap (prefix `s` / `0x73`) | App `768743428` box storage | `log_access` |
 | 4 | `audit_log` BoxMap (prefix `a` / `0x61`) | App `768743428` box storage | `log_access` (append-only) |
 | 5 | `api/src/data/interactions.json` — 14 pairs | file shipped in the image | nobody at runtime (read once at module load, `interactionChecker.ts:18`) |
-| 6 | `SYNTHETIC_RECORD` constant | `api/src/routes/records.ts:15-21` | nobody — it is a TypeScript `const` |
+| 6 | `SYNTHETIC_RECORD` constant | `api/src/routes/records.ts:17-23` | nobody — it is a TypeScript `const` |
 
 Stores 1–4 are one Algorand application. Stores 5–6 are read-only build artefacts. That is the entire data layer.
 
@@ -93,7 +93,7 @@ erDiagram
         bytes32 patient FK "recoverable verbatim from the key"
         uint64 seq FK "recoverable verbatim from the key"
         uint64 ts "unix seconds"
-        bytes32 requester "claimed actor, NOT authenticated, see S-1"
+        bytes32 requester "actor, authenticated against the payment signer"
         string scope "records:summary in every call the API makes"
         string endpoint "/v1/records/summary in every call the API makes"
         string action "consent_checked or consent_denied"
@@ -121,20 +121,20 @@ erDiagram
 - **`PATIENT` and `REQUESTER` are the same kind of thing** — an ordinary Algorand account. They are drawn as two entities because they occupy two distinct *roles* in every relationship, not because two record types exist. Nothing in the contract stores an account "row"; an account exists in this model only as 32 bytes that are hashed into a key or written into a value.
 - **`GRANT` is a box, not a row.** `contract.py:114` declares `BoxMap(Bytes, GrantRecord, key_prefix="g")`; `contract.py:96-98` derives the key.
 - **`GRANT }o..o| AUDIT_ENTRY : "no link exists on chain"`** is drawn as a dashed (non-identifying) relationship deliberately: an audit entry records a `(requester, scope, endpoint, action)` tuple but stores **no reference to the grant box that was consulted**, and the grant record stores no back-reference to its accesses. Joining the two requires re-deriving `sha256(patient ‖ requester ‖ scope)` off-chain from the audit entry's own fields. See [`Indexing_And_Query_Strategy.md`](Indexing_And_Query_Strategy.md) §4.
-- **`SYNTHETIC_RECORD }o..o{ PATIENT`** is drawn as a non-identifying many-to-many with intent: `api/src/routes/records.ts:55` returns the same constant for every `patientId`. There is no patient-to-record relationship in this system, and the diagram must not imply one (DATA-004).
+- **`SYNTHETIC_RECORD }o..o{ PATIENT`** is drawn as a non-identifying many-to-many with intent: `api/src/routes/records.ts:105` returns the same constant for every `patientId`. There is no patient-to-record relationship in this system, and the diagram must not imply one (DATA-004).
 
 ### 1.2 Live cardinality on App `768743428` (read 2026-08-21)
 
 | Entity | Instances live on TestNet | Evidence |
 |---|---|---|
 | `APPLICATION` | 1 | `/v2/applications/768743428`, `deleted: false` |
-| `GRANT` | **2** — both `status = 2` (`STATUS_REVOKED`), both `expires_at = 0` | `/v2/applications/768743428/boxes` returns exactly 2 names, both 33 bytes with leading `0x67` |
-| `AUDIT_SEQUENCE` | **0** | no `s`-prefixed box exists |
-| `AUDIT_ENTRY` | **0** | no `a`-prefixed box exists; `total_audit_entries = 0` |
+| `GRANT` | **6** — four `status = 1` (`STATUS_GRANTED`), two `status = 2` (`STATUS_REVOKED`), all `expires_at = 0` | `/v2/applications/768743428/boxes` returns 6 names with leading `0x67`, each 33 bytes |
+| `AUDIT_SEQUENCE` | **1** | one `s`-prefixed box exists |
+| `AUDIT_ENTRY` | **5** | five `a`-prefixed boxes exist; `total_audit_entries = 5` |
 | `INTERACTION_PAIR` | 14 | `api/src/data/interactions.json` |
-| `SYNTHETIC_RECORD` | 1 (singleton constant) | `api/src/routes/records.ts:15-21` |
+| `SYNTHETIC_RECORD` | 1 (singleton constant) | `api/src/routes/records.ts:17-23` |
 
-> **Evidence gap E-1.** `AUDIT_SEQUENCE` and `AUDIT_ENTRY` have **never been instantiated on Algorand TestNet.** `log_access` is **UNVALIDATED on real infrastructure** — it is covered only by AVM-simulator unit tests (`contracts/tests/test_consent.py`, 2 cases). Every statement in this document about audit-entry encoding, size and MBR is derived from the contract source and the ARC-4 specification, not from an observed box. Statements about `GRANT` encoding, by contrast, are read directly from the live chain (§3.1).
+> **Evidence gap E-1 is closed.** `AUDIT_SEQUENCE` and `AUDIT_ENTRY` have now been instantiated on Algorand TestNet: five audit boxes and one sequence box exist on App `768743428`, and `total_audit_entries = 5`. `log_access` is therefore **VALIDATED on real infrastructure**, not only against the AVM simulator, and `api/scripts/e2e-consent-proof.ts` reproduces the grant → check → paid call → audit append sequence on demand. Statements in this document about audit-entry encoding and size remain derived from `contract.py` and the ARC-4 rules; what the chain now confirms is that the write path works end to end.
 
 ---
 
@@ -149,8 +149,8 @@ This is the part a reviewer should read carefully. In a relational schema, a for
 | R3 | `GRANT.scope → (anything)` | **None.** `scope` is a free-form `String` by design (DATA-003, `contract.py:149`). There is no enumeration, no lookup table, no length bound. | Any UTF-8 string produces a distinct grant. `"records:summary"` and `"records:summary "` are different grants. |
 | R4 | `PATIENT → AUDIT_SEQUENCE` | **Key derivation.** `BoxMap(Account, UInt64, key_prefix="s")` uses the patient's 32-byte public key verbatim as the key body (`contract.py:115`), so the patient is *recoverable* from the key, not merely hashed into it. | No. Bijective. |
 | R5 | `AUDIT_SEQUENCE → AUDIT_ENTRY` | **Key derivation + contract invariant.** `log_access` reads `audit_seq[patient]`, increments, writes the counter, then writes `audit_log[patient ‖ itob(next_seq)]` in the same atomic call (`contract.py:224-235`). | Not by the contract. **Yes by an operator race** — see R6. |
-| R6 | `AUDIT_ENTRY.seq` uniqueness | **Contract-side: atomic.** The counter write and the entry write are in one transaction, so the AVM cannot interleave them. **Backend-side: `withPatientLock`**, an in-process promise chain (`api/src/services/algorand.ts:129-138`). | The *contract* is safe. The *backend* predicts the box name before submitting (`algorand.ts:158-171`), and that prediction is only serialised within one Node process. Two API machines sharing the operator key would predict the same `seq` and one call's box reference would be wrong. REL-004; contradicted by `api/fly.toml` permitting >1 machine (defect D-7). |
-| R7 | `AUDIT_ENTRY.requester → REQUESTER` | **Nothing. Caller-asserted.** `records.ts:7` accepts `requesterAddress` from the request body with only a `z.string().length(58)` check, and passes it straight to `logAccess` (`records.ts:49`). | **Yes, trivially.** This is finding **S-1**. A paying stranger can write any address into any patient's immutable audit trail. SEC-007 / SEC-008 are **NOT IMPLEMENTED**. See [`../06_Security/Threat_Model.md`](../06_Security/Threat_Model.md). |
+| R6 | `AUDIT_ENTRY.seq` uniqueness | **Contract-side: atomic.** The counter write and the entry write are in one transaction, so the AVM cannot interleave them. **Backend-side: `withPatientLock`**, an in-process promise chain (`api/src/services/algorand.ts:129-138`). | The *contract* is safe. The *backend* predicts the box name before submitting (`algorand.ts:158-171`), and that prediction is only serialised within one Node process. Two API machines sharing the operator key would predict the same `seq` and one call's box reference would be wrong — the AVM then **rejects that transaction**; it does not corrupt the log. `api/fly.toml` now pins `max_machines_running = 1` for exactly this reason, which makes the constraint sound at the cost of horizontal scale (G-11, open). |
+| R7 | `AUDIT_ENTRY.requester → REQUESTER` | **Off-chain, at the API boundary: the payment is the credential.** `records.ts:41-51` recovers the address that signed the payment transaction (`api/src/x402Payer.ts`, decoding the verified `PAYMENT-SIGNATURE` header) and returns `403` unless it equals the body's `requesterAddress`. Only then is that value passed to `logAccess` (`records.ts:84`). | **Not by an outsider.** Asserting an address you do not hold the key for would require signing the payment with it. The constraint is enforced by the API, not by the contract — the contract still trusts its admin — so it holds exactly as far as the admin key is trusted (R9, SEC-012). SEC-007 / SEC-008 **IMPLEMENTED**; verified live by `api/scripts/verify-g01-fix.ts`. |
 | R8 | `AUDIT_ENTRY → GRANT` | **Does not exist.** No field links them. | N/A — there is nothing to violate, only something missing. |
 | R9 | `ADMIN_ACCOUNT → AUDIT_ENTRY` | **`assert Txn.sender == self.admin.value`** (`contract.py:222`). | No. SEC-001, **VALIDATED** by `test_consent.py::test_log_access_rejects_non_admin`. |
 | R10 | `APPLICATION → all boxes` | **Algorand protocol.** Boxes belong to the application account and are charged to its minimum balance. Only this app's program can read or write them. | No. Protocol-enforced. |
@@ -222,7 +222,7 @@ flowchart LR
 
 Because the patient key is stored verbatim rather than hashed, **this box map is enumerable** — any indexer listing `s`-prefixed boxes recovers the full set of patients that have ever been audited. That is a deliberate asymmetry with `grants`, and it has a privacy consequence documented in [`Data_Flow.md`](Data_Flow.md) §5.
 
-**Zero instances currently exist** (evidence gap E-1).
+**One instance currently exists** on App `768743428` — the audited patient's sequence box.
 
 ### 3.3 `audit_log` — prefix `a` (`0x61`)
 
@@ -254,7 +254,7 @@ Head layout, exactly:
 | 42..43 | 2 | offset of `endpoint` | `uint16` BE | tail pointer |
 | 44..45 | 2 | offset of `action` | `uint16` BE | tail pointer |
 
-Tail layout for the **only** string triple the MedRail API ever writes (`records.ts:10-11`, `records.ts:37`/`records.ts:49`):
+Tail layout for the **only** string triple the MedRail API ever writes (`records.ts:12-13`, `records.ts:58`/`records.ts:84`):
 
 | Byte range | Length | Content |
 |---|---|---|
@@ -314,7 +314,7 @@ So MedRail's integrity model is not enforcement — it is **determinism**:
 | **`scope` normalisation is a correctness hazard, not a UX detail.** | `"records:summary"` vs `"Records:Summary"` vs `"records:summary "` are three unrelated boxes. Nothing in the contract, the API or the frontend trims or case-folds. A grant issued with a trailing space is invisible to `check_access` and there is no diagnostic that would say so. |
 | **There is no `ON DELETE CASCADE`, because nothing deletes.** | No contract method calls `box_del`. A revoked grant keeps its box (`revoke_access` overwrites the value with `status = 2`, `contract.py:186-190`) and keeps its 22,500 µALGO of locked minimum balance forever. |
 | **You cannot enumerate a patient's grants.** | The only way to list what a patient has authorised is to already know every `(requester, scope)` pair — i.e. to know the answer. See [`Indexing_And_Query_Strategy.md`](Indexing_And_Query_Strategy.md) §3. |
-| **Integrity of the `requester` field is *asserted*, not *derived*.** | R7 above. Because the audit entry's `requester` is a *value* rather than part of a *key*, no amount of key-derivation rigour constrains it. S-1 lives exactly in this gap. |
+| **Integrity of the `requester` field is *checked off-chain*, not *derived on-chain*.** | R7 above. Because the audit entry's `requester` is a *value* rather than part of a *key*, no amount of key-derivation rigour constrains it; the guarantee comes from the API proving the payment signer matches before it writes. That is a real control, but it lives in `records.ts`, not in the AVM — a compromised admin key still writes whatever it likes (SEC-012). |
 
 ### 4.3 The honest framing for a reviewer
 
@@ -330,5 +330,5 @@ The hash-key design is the right choice for this problem and it is well executed
 | Every field, type, encoding, sentinel and constraint | [`Data_Dictionary.md`](Data_Dictionary.md) |
 | Origin, transformation, retention and public visibility of every value | [`Data_Flow.md`](Data_Flow.md) |
 | Query patterns the code performs vs. the ones the product needs | [`Indexing_And_Query_Strategy.md`](Indexing_And_Query_Strategy.md) |
-| S-1, the grant-enumeration attack, and the false-attribution consequence | [`../06_Security/Threat_Model.md`](../06_Security/Threat_Model.md) |
+| Payer binding, the grant-enumeration exposure, and false attribution | [`../06_Security/Threat_Model.md`](../06_Security/Threat_Model.md) |
 | The HTTP surface that reads and writes this model | [`../05_API/API_Documentation.md`](../05_API/API_Documentation.md) |

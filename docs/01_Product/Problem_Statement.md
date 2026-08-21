@@ -1,16 +1,8 @@
 # MedRail — Problem Statement
 
-
-> **⚠ Correction notice.** Parts of this document were written against a review finding that was
-> later proven wrong. Settlement in x402 v2 happens **only** on a sub-400 response, so **no error
-> path in MedRail can consume a settled payment** — and consent-denied calls (HTTP 403) are **not
-> charged**, contrary to `API.md`, `SECURITY.md`, and the `paidButDenied` field. The audit-sequence
-> race causes a **rejected transaction**, not a corrupted log. See
-> [`CORRECTIONS.md`](../CORRECTIONS.md) — it supersedes any statement here that contradicts it.
-
 **Purpose:** State precisely which two problems MedRail addresses, why the existing mechanisms for each are insufficient for machine-to-machine use, and — equally precisely — what this repository does *not* solve.
 
-**Status of this document:** Authored 2026-08-21 against the verified fact ledger and the source at commit `32ffd73`. Every claim about MedRail is either citation-backed (`path:line`, transaction ID) or carries a status label from the ledger's vocabulary. Claims about external standards are marked `[external — no repo evidence]` and were not re-verified as part of this work.
+**Status of this document:** Authored 2026-08-21 against the verified fact ledger and the source at commit `3b387df`. Every claim about MedRail is either citation-backed (`path:line`, transaction ID) or carries a status label from the ledger's vocabulary. Claims about external standards are marked `[external — no repo evidence]` and were not re-verified as part of this work.
 
 **Notation used in this document**
 
@@ -90,12 +82,12 @@ Consequences, each of which follows directly from the diagram rather than from a
 | A-1 | Consent state is not readable by an uninvolved third party | **Yes** | FR-013, FR-023 | `contract.py:197-209`; `api/src/routes/consent.ts:19-31` |
 | A-2 | Revocation is mediated by the custodian | **Yes** | FR-020, SEC-003 | `contract.py:178-195`; tx `OV2J2T5VWMIQG64JYGL7JEGZKKNZNKCMNIQU6AC4PDRQYZ6ZOO5A` |
 | A-3 | The patient must trust the custodian to hold their key | **Yes** | NFR-008, FR-035 | `web/lib/consent.ts:44-89` signs client-side; no key-ingress path exists in `api/src` |
-| A-4 | The audit trail is mutable by its owner | **Partially — mechanism exists, never exercised on-chain** | FR-025, DATA-002 | `contract.py:217-236`; **UNVALIDATED on-chain**: `total_audit_entries == 0` on App `768743428` (ledger §3, E-1) |
+| A-4 | The audit trail is mutable by its owner | **Yes — mechanism proven on-chain** | FR-025, DATA-002 | `contract.py:217-236`; **VALIDATED on-chain**: first entry at tx `4YLKLQKKWXXFW3UT5APJVYKXI7T7A6OACTAWCC5YBAN3XGOGHRVQ` sequence 1, `total_audit_entries = 5` on App `768743428` ([`../PROOF.md`](../PROOF.md) §9) |
 | A-5 | Each new requester requires the patient's counterparty to opt in first | **Yes** | DATA-001 | Box-keyed by `sha256(patient‖requester‖scope)` — `contract.py:95-98`; rationale at `contract.py:11-17` |
-| A-6 | The access decision must attribute the *actual* accessor | **No — defeated** | SEC-007, SEC-008, FR-039 **NOT IMPLEMENTED** | `api/src/routes/records.ts:5-8` takes `requesterAddress` from the request body, unauthenticated (finding S-1) |
-| A-7 | Records themselves need protection, not just the permission over them | **No** | DATA-006 **PLANNED** | No encryption pipeline exists; the payload is a constant (`records.ts:15-21`) |
+| A-6 | The access decision must attribute the *actual* accessor | **Yes** | SEC-007, SEC-008, FR-039 **VALIDATED** | `api/src/x402Payer.ts` recovers the address that signed the payment; `api/src/routes/records.ts:41-51` returns 403 unless it equals the asserted `requesterAddress`. Verified live by `api/scripts/verify-g01-fix.ts` |
+| A-7 | Records themselves need protection, not just the permission over them | **No** | DATA-006 **PLANNED** | No encryption pipeline exists; the payload is a constant (`records.ts:17-23`) |
 
-**A-6 is the load-bearing failure.** MedRail checks a real on-chain grant, but checks it against an identity the caller asserts about itself. Any paying stranger can name an authorised requester and be admitted. See [`./Use_Cases.md`](./Use_Cases.md) UC-011 for the full abuse case. The consent layer in this build is a *correctly implemented registry* wired to an *incorrectly implemented gate*.
+**A-6 was the load-bearing failure, and it is the one worth understanding.** MedRail checked a real on-chain grant against an identity the caller asserted about itself, so any paying stranger could name an authorised requester and be admitted — and the resulting audit entry would have recorded a *false attribution* in a log whose entire value is that it cannot be rewritten. The fix is available only because of the shape of the problem: a system with no accounts and no API keys nonetheless receives a **signed Algorand transaction** with every paid request, and a signature is an identity assertion. Recovering the payer from the `PAYMENT-SIGNATURE` header turns the paywall into an authorisation check without introducing any account system at all. See [`./Use_Cases.md`](./Use_Cases.md) UC-011 for the abuse case and the live verification that rejects it.
 
 ---
 
@@ -134,7 +126,7 @@ Two endpoints — `POST /v1/triage` and `POST /v1/interaction-check`, `$0.02` ea
 
 - **VALIDATED** — the 402 challenge (FR-001, FR-002), asserted by `api/test/x402-flow.spec.ts`; live capture in ledger §4.
 - **VALIDATED** — a real settlement (FR-003): tx `OYRQRKYA7WUKBVLWTOFJSJMZFBW7VCNGP5VGH5EBUJGRCVFQFJRQ`, `axfer` of **20000** base units of ASA `10458941` (TestNet USDC), round 66091768, `fee: 0` (facilitator-sponsored).
-- **Honest qualification:** exactly **one** such settled payment exists, and its sender and receiver are the same account (`2WDV2J2FTWF535SMSUVEBOF5IGXF2OTV7ZZTLTCRBXPVS32UMLOPTI64GE`), disclosed in [`../PROOF.md`](../PROOF.md) §6. This is a proof that the *mechanism* settles. It is not payment volume and must never be described as such.
+- **Honest qualification:** every settled payment on record is a self-payment — sender and receiver are the same account (`2WDV2J2FTWF535SMSUVEBOF5IGXF2OTV7ZZTLTCRBXPVS32UMLOPTI64GE`), disclosed in [`../PROOF.md`](../PROOF.md) §6. This is a proof that the *mechanism* settles. It is not payment volume and must never be described as such.
 
 Because the facilitator supplies `extra.feePayer`, a caller needs USDC but not ALGO — the network fee is sponsored (ledger §4). That materially lowers what a first-time agent caller must hold, and it is the facilitator's feature, not MedRail's.
 
@@ -152,7 +144,7 @@ Full comparison with capability/limitation/deployment columns is in [`./Competit
 | **API key + monthly invoice clinical APIs** `[external — no repo evidence]` | Predictable for a human-operated integration with steady volume; simple to implement; supports rich entitlement models. | Fails B-1 through B-6 above. The fundamental mismatch: the unit of commerce is an *account*, but the unit of demand for an agent is a *call*. |
 | **Blockchain health-record projects, as a category** `[external — no repo evidence]` | Establish shared, tamper-evident state across organisational boundaries without a central custodian. | As a category they address the consent/audit half but not the settlement half — access remains free-at-the-point-of-use, so there is no metering, no abuse cost, and no revenue mechanism attached to the same act. Whether any specific project also settles payment in the same call is `[unverified]` here. |
 
-**The gap none of them closes:** a single HTTP interaction in which payment settlement, authorisation evaluation, and audit inscription are the *same event*, requiring no pre-registration from either side. That is the composition MedRail is a demonstration of — and the honest statement of its current standing is in [`./USP_Novelty.md`](./USP_Novelty.md), which also records that the third leg has never executed on-chain.
+**The gap none of them closes:** a single HTTP interaction in which payment settlement, authorisation evaluation, and audit inscription are the *same event*, requiring no pre-registration from either side. That is the composition MedRail is a demonstration of — and the honest statement of its current standing is in [`./USP_Novelty.md`](./USP_Novelty.md), which records all three legs as proven on TestNet and the adoption as entirely unproven.
 
 ---
 
@@ -164,11 +156,11 @@ MedRail's answer, stated with its current status:
 
 | Leg of the composition | Mechanism | Status |
 |---|---|---|
-| 1. Settled payment | x402 v2, scheme `exact`, GoPlausible facilitator, USDC ASA `10458941` | **VALIDATED** — one settled tx on TestNet (FR-003) |
-| 2. Authorisation evaluation | `MedRailConsent.check_access` via `simulate()` — zero fee, nothing submitted | **PARTIALLY IMPLEMENTED — DEFEATED BY S-1** (SEC-006); the read itself is **IMPLEMENTED** (FR-013, SEC-009) |
-| 3. Audit inscription | `MedRailConsent.log_access`, admin-gated, per-patient append-only sequence | **UNVALIDATED on-chain** (FR-025) — `total_audit_entries == 0`; never executed on TestNet |
+| 1. Settled payment | x402 v2, scheme `exact`, GoPlausible facilitator, USDC ASA `10458941` | **VALIDATED** — settled transactions on TestNet, all self-payments (FR-003) |
+| 2. Authorisation evaluation | `MedRailConsent.check_access` via `simulate()` — zero fee, nothing submitted — behind a payer-identity binding | **VALIDATED** (SEC-006, SEC-007, SEC-008, FR-039); the read itself is **IMPLEMENTED** (FR-013, SEC-009) |
+| 3. Audit inscription | `MedRailConsent.log_access`, admin-gated, per-patient append-only sequence | **VALIDATED on-chain** (FR-025) — `total_audit_entries = 5`, first entry at tx `4YLKLQKK…` |
 
-Two of three legs have been exercised on live infrastructure. The third has not. Any evaluation of this submission should start there.
+All three legs have been exercised on live infrastructure, in a single repeatable call (`api/scripts/e2e-consent-proof.ts`). What has *not* been exercised is anything resembling adoption: every payment is a self-payment, nothing is publicly hosted, and there is no MainNet deployment or Bazaar listing. Any evaluation of this submission should start by separating those two facts.
 
 ---
 
@@ -188,16 +180,16 @@ Stated plainly, because a hostile reviewer will find each of these anyway and it
 
 | # | Not solved | Why not / current state |
 |---|---|---|
-| N-1 | **Binding the payer to the requester.** | `requesterAddress` is read from the request body and never authenticated (`api/src/routes/records.ts:5-8`, `:32`). Any paying party can name any address the patient has granted. FR-039 / SEC-007 **NOT IMPLEMENTED**. Consequence: the consent gate is not an access control, and the audit trail would record a *false attribution*. |
-| N-2 | **Proving the audit mechanism works on real infrastructure.** | `log_access` has **never** run on Algorand TestNet. `total_audit_entries == 0`; there are zero `s`- or `a`-prefixed boxes on App `768743428`. Coverage is AVM-simulator unit tests only (`contracts/tests/test_consent.py`, 2 cases). FR-025 **UNVALIDATED on-chain**. |
+| N-1 | **Real-world identity behind an address.** | The payer *is* now authenticated — `api/src/x402Payer.ts` recovers the address that signed the payment and `records.ts:41-51` rejects any mismatch with the asserted `requesterAddress` (FR-039 / SEC-007 / SEC-008 **VALIDATED**). What that proves is control of a keypair, nothing more. Nothing verifies that the holder of an address is a licensed clinician, an authorised care application, or the person the record concerns. See also N-9. |
+| N-2 | **Adoption of the proven mechanism.** | The audit mechanism itself now works on real infrastructure: `total_audit_entries = 5` on App `768743428`, first entry at tx `4YLKLQKK…`, with `s`- and `a`-prefixed boxes present and the MBR arithmetic reconciling exactly (FR-025 **VALIDATED on-chain**). But every one of those entries, and every settled payment, was generated by this project's own scripts against its own accounts. Nothing is publicly hosted, there is no MainNet deployment, and there is no Bazaar listing. |
 | N-3 | **Storing, encrypting, or transmitting real health records.** | One synthetic constant, patient-independent. No datastore of any kind exists in this repository. DATA-006 **PLANNED**. |
 | N-4 | **Clinical validity of the intelligence endpoints.** | Two deterministic rule engines: 11 hard-coded keyword groups (`api/src/services/triageScorer.ts:32-44`) and 14 curated interaction pairs (`api/src/data/interactions.json`). **There is no LLM, no ML model, no embeddings, and no vector store anywhere in this repository.** No sensitivity, specificity, or coverage has been measured against any labelled dataset — AI-005 **NOT IMPLEMENTED**, and no such claim is made. Matching is unanchored bidirectional substring containment (`interactionChecker.ts:42-43`), so short or malformed medication names can produce false positives — AI-006 **NOT IMPLEMENTED**. |
 | N-5 | **Regulatory compliance of any kind.** | No HIPAA, GDPR, SOC 2, or ISO work has been done, claimed, or certified. There is no PHI to protect, so the question has not arisen. Any privacy design in [`../SECURITY.md`](../SECURITY.md) describes what a production version *would* require and is **RECOMMENDED**, not implemented. |
-| N-6 | **Production operability.** | No structured logging, no request IDs, no metrics, no tracing, no alerting, no rate limiting (OPS-002…OPS-005, SEC-013 all **NOT IMPLEMENTED**). No RPO/RTO has been defined (OPS-008). |
-| N-7 | **Availability under dependency failure.** | With the facilitator unreachable, all three priced routes return **HTTP 500 with no `PAYMENT-REQUIRED` header** — not a 402, not a 503, no `Retry-After` (finding R-1; REL-001 **NOT IMPLEMENTED**). Free routes stay up (REL-005 **VALIDATED**). There is no timeout, retry, or circuit breaker on any outbound call (REL-003 **NOT IMPLEMENTED**). |
-| N-8 | **Not losing a settled payment.** | On the `/v1/records/summary` success path, `logAccess` is awaited without a catch (`api/src/routes/records.ts:49`). If the on-chain write throws, the caller has paid `$0.05`, receives HTTP 500, and has no refund path and no retry token. The *denied* path is defensive (`:37`); the *success* path is not. REL-002 **NOT IMPLEMENTED**. |
-| N-9 | **Identity, in any sense.** | There is no notion of a real-world patient, clinician, organisation, credential, or licence. An Algorand address is the only identity primitive. Nothing verifies that the holder of an address is the person the record concerns. |
-| N-10 | **Cross-organisation adoption.** | Nothing here is deployed publicly, listed on Bazaar, or integrated with any external system. The single-writer audit design (`withPatientLock`, `api/src/services/algorand.ts:129-138`) is in-process only and does not survive horizontal scaling — which `api/fly.toml` nonetheless permits (finding D-7; REL-004 **PARTIALLY IMPLEMENTED**). |
+| N-6 | **Production operability.** | Structured JSON error logs with generated request IDs now exist (`api/src/app.ts:113-139`), and the free and refundable surface is rate-limited (`api/src/rateLimit.ts`; SEC-013 **IMPLEMENTED**). Everything above that is still absent: **no metrics, no tracing, no alerting, no dashboards** — nothing consumes the logs (OPS-003…OPS-005 **NOT IMPLEMENTED**). No RPO/RTO has been defined (OPS-008). |
+| N-7 | **Availability under dependency failure.** | A facilitator outage is now classified rather than opaque: priced routes return **503 with `Retry-After: 30`** and `{"error":{"code":"PAYMENT_FACILITATOR_UNAVAILABLE","retryable":true}}` (`api/src/app.ts:73-105`; REL-001 **IMPLEMENTED**), and free routes stay up (REL-005 **VALIDATED**). The dependency itself is unchanged — the 402 cannot be constructed without the facilitator's `/supported` — and there is still no timeout, retry, or circuit breaker on any outbound call (REL-003 **NOT IMPLEMENTED**). |
+| N-8 | *(Withdrawn — the finding was wrong.)* | An earlier review recorded a lost-settled-payment defect on the `/v1/records/summary` success path. It does not exist and never did: `@x402/hono` reaches `processSettlement` only when the handler returns a status below 400, and cancels the payment on any throw or any 4xx/5xx. **No error path in MedRail can consume a settled payment.** REL-002 **VALIDATED — satisfied structurally by the SDK**, and credited to x402 v2 rather than to MedRail. The real exposure was the *sale*, not the caller's money, and `logAccess` is now wrapped in `try/catch` (`records.ts:83-99`) so a chain failure returns 200 with `auditStatus: "pending"` instead of an error. |
+| N-9 | **Identity, in any sense beyond a keypair.** | An Algorand address is the only identity primitive. The payer binding proves the caller controls the address the patient granted (N-1) — it says nothing about who or what that address belongs to. There is no notion of a real-world patient, clinician, organisation, credential, or licence. |
+| N-10 | **Cross-organisation adoption.** | Nothing here is deployed publicly, listed on Bazaar, or integrated with any external system. The single-writer audit design (`withPatientLock`, `api/src/services/algorand.ts:129-138`) is in-process only and does not survive horizontal scaling; `api/fly.toml` now sets `max_machines_running = 1` to match, which makes the constraint explicit rather than removing it (G-11; REL-004 **PARTIALLY IMPLEMENTED**). |
 | N-11 | **The "Sentinel Exchange" pharma supply-chain system.** | `docs/SENTINEL_ARCHITECTURE.md` (647 lines, untracked) describes a **different, entirely unbuilt product**. No `engine/`, no `sim/`, no SQLite, no forecasting model, no second contract, no additional frontend routes exist. It is a **PLANNED** proposal for a different project and must not be read as part of this submission. |
 | N-12 | **Market sizing, adoption, or unit economics.** | `[REQUIRES EXTERNAL VALIDATION — no source in repo]`. No market, adoption, cost, or willingness-to-pay figure exists in this repository, and none is asserted anywhere in this document set. |
 
