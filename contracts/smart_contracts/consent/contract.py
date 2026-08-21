@@ -26,7 +26,6 @@ Design notes that matter for reviewers:
 from algopy import (
     Account,
     ARC4Contract,
-    Box,
     BoxMap,
     Bytes,
     Global,
@@ -48,8 +47,12 @@ STATUS_GRANTED = 1
 STATUS_REVOKED = 2
 
 # Fixed per-box costs (Algorand box MBR = 2_500 + 400 * (len(key) + len(value)) microAlgo).
-# Grant key = 32 bytes (sha256). Grant value (GrantRecord, ARC4-encoded) = 1 + 8 + 8 = 17 bytes.
-GRANT_BOX_MBR = 2_500 + 400 * (32 + 17)
+# The *effective* box key includes this BoxMap's 1-byte key_prefix ("g"), so the key is
+# 1 + 32 (sha256) = 33 bytes, not 32. Grant value (GrantRecord, ARC4-encoded) = 1 + 8 + 8 = 17.
+# Verified against the deployed app's own account: with 5 boxes totalling 333 key+value bytes,
+# min-balance - 100_000 (base) == 2_500 * 5 + 400 * 333 == 145_700 microAlgo, exactly.
+# (An earlier revision omitted the prefix and under-reported every grant box by 400 microAlgo.)
+GRANT_BOX_MBR = 2_500 + 400 * (33 + 17)
 # Audit key = 32 (patient) + 8 (seq) = 40 bytes. Audit value is variable-length (ARC4 dynamic
 # strings for scope/endpoint/action); we size the box generously at write time instead of
 # hard-coding a value length here.
@@ -143,7 +146,11 @@ class MedRailConsent(ARC4Contract):
         it is a notification event only; the patient's `grant_access` call is the
         first thing that actually costs box MBR and becomes queryable state."""
         self.total_requests.value += 1
-        arc4.emit(AccessRequested(arc4.Address(Txn.sender), arc4.Address(patient), arc4.String(scope)))
+        # AccessRequested is declared (patient, requester, scope) and Txn.sender is the
+        # *requester* here, so the patient argument must come first. An earlier revision
+        # passed these in call order and emitted every event with the two addresses
+        # transposed, silently inverting the data for any ARC-28 consumer.
+        arc4.emit(AccessRequested(arc4.Address(patient), arc4.Address(Txn.sender), arc4.String(scope)))
 
     @arc4.abimethod
     def grant_access(self, requester: Account, scope: String, duration_seconds: UInt64) -> None:

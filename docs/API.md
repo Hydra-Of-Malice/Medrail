@@ -1,5 +1,13 @@
 # MedRail — API Reference
 
+
+> **⚠ Correction notice.** This document states that a consent-denied call to
+> `/v1/records/summary` is still charged. **That is not what the code does.** The denial returns
+> HTTP 403, and `@x402/hono` cancels settlement on any status ≥ 400, so the caller pays nothing —
+> while MedRail's operator account pays an Algorand fee to write the denial audit entry. The
+> `paidButDenied` field is misleading. See [`CORRECTIONS.md`](CORRECTIONS.md) §C-2, which supersedes
+> any billing statement below.
+
 Base URL: `http://localhost:4021` (local dev) or the deployed URL from `docs/DEPLOYMENT.md`.
 
 All paid endpoints speak x402 protocol v2 (`PAYMENT-SIGNATURE` request header, `PAYMENT-REQUIRED`
@@ -52,10 +60,14 @@ interaction pairs (`api/src/data/interactions.json`).
 
 ## `POST /v1/records/summary` — $0.05, x402 + on-chain consent
 
-Requires both payment **and** a currently-valid consent grant from `patientId` to
-`requesterAddress` for scope `records:summary` on the deployed `MedRailConsent` contract. The fee
-covers the on-chain verification regardless of outcome — a denied request is still a real,
-answered lookup, the same way a paid "does this record exist" API charges for a miss.
+Requires payment **and** a currently-valid consent grant from `patientId` to `requesterAddress`
+for scope `records:summary` on the deployed `MedRailConsent` contract — **and `requesterAddress`
+must equal the address that signed the payment.** That last condition is what makes this an
+authorisation check rather than a paywall; without it, any payer could assert an authorised
+requester's address (see `docs/CORRECTIONS.md` §C-1).
+
+**A denied request is not charged.** The 403 cancels x402 settlement. Use the free
+`GET /v1/consent/status` to check before paying.
 
 **Request**
 ```json
@@ -70,6 +82,7 @@ answered lookup, the same way a paid "does this record exist" API charges for a 
   "scope": "records:summary",
   "summary": { "bloodType": "O+", "allergies": ["penicillin"], "...": "..." },
   "consentVerifiedOnChain": true,
+  "auditStatus": "recorded",
   "auditTxId": "...",
   "auditSequence": "3",
   "disclaimer": "Synthetic demo data ... no real patient information exists in this system."
@@ -78,7 +91,17 @@ answered lookup, the same way a paid "does this record exist" API charges for a 
 
 **Response `403`** (paid, but no valid consent grant)
 ```json
-{ "error": "no valid consent grant from this patient for this requester and scope", "paidButDenied": true }
+{
+  "error": "no valid consent grant from this patient for this requester and scope",
+  "patientId": "...", "requesterAddress": "...",
+  "charged": false,
+  "hint": "GET /v1/consent/status?patient=&requester=&scope=records:summary is free"
+}
+```
+
+**Response `403`** (payer does not match the asserted requester)
+```json
+{ "error": "requesterAddress must match the address that signed the payment", "requesterAddress": "...", "payer": "..." }
 ```
 
 ## `GET /v1/consent/status` — free

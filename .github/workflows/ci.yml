@@ -1,9 +1,13 @@
 name: CI
 
 on:
+  # The repository's default branch is `master`. An earlier revision listed only
+  # `main`, so no push ever triggered this workflow — the jobs were correct and
+  # green locally, but the gate never fired. Both are listed now.
   push:
-    branches: [main]
+    branches: [main, master]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   contract:
@@ -14,12 +18,24 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: contracts/requirements-dev.txt
       - name: Install toolchain
         working-directory: contracts
         run: pip install -r requirements-dev.txt
       - name: Compile
         working-directory: contracts
-        run: python -m puyapy smart_contracts/consent/contract.py --out-dir artifacts
+        # puyapy resolves --out-dir relative to the SOURCE file, so this writes to
+        # contracts/smart_contracts/consent/artifacts/. The committed artifacts live
+        # in contracts/artifacts/, so the output is copied across before comparison.
+        run: |
+          python -m puyapy smart_contracts/consent/contract.py --out-dir artifacts
+          cp smart_contracts/consent/artifacts/* artifacts/
+      - name: Committed artifacts match the source
+        # The build is byte-reproducible, so any drift between contract.py and the
+        # ARC-56 spec the deploy script actually uses is a build failure, not a
+        # silent divergence.
+        run: git diff --exit-code -- contracts/artifacts/
       - name: Unit test (AVM simulator, no network)
         working-directory: contracts
         run: pytest tests/ -v
@@ -32,9 +48,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
+          cache: npm
+          cache-dependency-path: api/package-lock.json
       - name: Install
         working-directory: api
         run: npm ci
+      - name: Audit dependencies
+        working-directory: api
+        run: npm audit --audit-level=high
       - name: Typecheck
         working-directory: api
         run: npx tsc --noEmit
@@ -53,9 +74,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
       - name: Install
         working-directory: web
         run: npm ci
+      - name: Audit dependencies
+        working-directory: web
+        run: npm audit --audit-level=high
       - name: Typecheck
         working-directory: web
         run: npx tsc --noEmit -p tsconfig.json

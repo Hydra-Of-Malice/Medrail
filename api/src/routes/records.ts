@@ -1,10 +1,12 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { checkAccess, logAccess } from "../services/algorand.js";
+import { payerFromRequest } from "../x402Payer.js";
+import { algorandAddress } from "../validation.js";
 
 const bodySchema = z.object({
-  patientId: z.string().length(58),
-  requesterAddress: z.string().length(58),
+  patientId: algorandAddress,
+  requesterAddress: algorandAddress,
 });
 
 const SCOPE = "records:summary";
@@ -29,6 +31,25 @@ recordsRoute.post(ENDPOINT, async (c) => {
   }
   const { patientId, requesterAddress } = parsed.data;
 
+  // The x402 middleware proves *a* payment settled; it does not tell us whose.
+  // Without this check `requesterAddress` is caller-asserted, and since
+  // grant_access transactions publicly expose valid (patient, requester) pairs
+  // to any indexer, anyone could pay the fee and impersonate an authorised
+  // requester — and that forged identity would then be written into the
+  // patient's immutable on-chain audit trail. Binding the two is what makes the
+  // consent check an authorisation decision rather than a paywall.
+  const payer = payerFromRequest(c);
+  if (!payer || payer !== requesterAddress) {
+    return c.json(
+      {
+        error: "requesterAddress must match the address that signed the payment",
+        requesterAddress,
+        payer: payer ?? null,
+      },
+      403,
+    );
+  }
+
   const allowed = await checkAccess(patientId, requesterAddress, SCOPE);
   if (!allowed) {
     // Logged as a denied attempt on the patient's own on-chain audit trail —
@@ -40,13 +61,42 @@ recordsRoute.post(ENDPOINT, async (c) => {
         error: "no valid consent grant from this patient for this requester and scope",
         patientId,
         requesterAddress,
-        paidButDenied: true,
+        // A 403 cancels x402 settlement, so this call costs the caller nothing.
+        // Check GET /v1/consent/status (free) before paying to avoid the round trip.
+        charged: false,
+        hint: "GET /v1/consent/status?patient=&requester=&scope=records:summary is free",
       },
       403,
     );
   }
 
-  const logResult = await logAccess(patientId, requesterAddress, SCOPE, ENDPOINT, "consent_checked");
+  // The audit write must not be able to turn a legitimate, authorised, paid
+  // request into an error. A transient chain failure here — operator out of
+  // ALGO, app account short of box MBR, algod 5xx, validity-window expiry, or a
+  // box-reference rejection under concurrency — would otherwise surface as a 500
+  // and throw away a sale the caller is entitled to. (Settlement is cancelled on
+  // any status >= 400, so the caller is never wrongly charged; what is lost is
+  // the sale. See docs/CORRECTIONS.md C-1.)
+  let auditTxId: string | null = null;
+  let auditSequence: string | null = null;
+  let auditStatus: "recorded" | "pending" = "recorded";
+  try {
+    const logResult = await logAccess(patientId, requesterAddress, SCOPE, ENDPOINT, "consent_checked");
+    auditTxId = logResult.txId;
+    auditSequence = logResult.sequence.toString();
+  } catch (err) {
+    auditStatus = "pending";
+    console.error(
+      JSON.stringify({
+        level: "error",
+        event: "audit_write_failed",
+        endpoint: ENDPOINT,
+        patientId,
+        requesterAddress,
+        message: err instanceof Error ? err.message : String(err),
+      }),
+    );
+  }
 
   return c.json({
     patientId,
@@ -54,8 +104,9 @@ recordsRoute.post(ENDPOINT, async (c) => {
     scope: SCOPE,
     summary: SYNTHETIC_RECORD,
     consentVerifiedOnChain: true,
-    auditTxId: logResult.txId,
-    auditSequence: logResult.sequence.toString(),
+    auditStatus,
+    auditTxId,
+    auditSequence,
     disclaimer: "Synthetic demo data for the Global x402 Challenge — no real patient information exists in this system.",
   });
 });

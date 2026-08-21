@@ -4,8 +4,10 @@ import { readFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { config } from "./config.js";
 import { resourceServer, priced } from "./x402.js";
 import { paymentMiddleware } from "@x402/hono";
+import { rateLimit } from "./rateLimit.js";
 
 import { healthRoute } from "./routes/health.js";
 import { triageRoute } from "./routes/triage.js";
@@ -32,22 +34,75 @@ app.use(
   }),
 );
 
+// Rate limits, before the payment middleware.
+//
+// Scoped to the surface that is free to the caller: `/v1/consent/status` makes
+// two algod calls per unauthenticated request, and `/v1/records/summary` returns
+// 403 without consent — which cancels settlement, so a denied call costs the
+// caller nothing while costing MedRail a chain fee for the denial audit write.
+// The priced happy paths are economically self-limiting and are not throttled.
+app.use("/v1/consent/status", rateLimit({ limit: 60, windowMs: 60_000, scope: "consent-status" }));
+app.use("/v1/consent/arc56", rateLimit({ limit: 30, windowMs: 60_000, scope: "arc56" }));
+app.use("/v1/records/summary", rateLimit({ limit: 30, windowMs: 60_000, scope: "records" }));
+
 // Every x402-priced route in one place, so pricing is easy for a judge (or a
 // caller writing an integration) to audit at a glance.
-app.use(
-  "*",
-  paymentMiddleware(
-    {
-      "POST /v1/triage": priced("$0.02", "Rule-based clinical red-flag triage score. Not medical advice."),
-      "POST /v1/interaction-check": priced("$0.02", "Check a medication list against known severe interaction pairs."),
-      "POST /v1/records/summary": priced(
-        "$0.05",
-        "Consent-gated synthetic patient record summary — requires an active on-chain grant.",
-      ),
-    },
-    resourceServer,
-  ),
+const payment = paymentMiddleware(
+  {
+    "POST /v1/triage": priced("$0.02", "Rule-based clinical red-flag triage score. Not medical advice."),
+    "POST /v1/interaction-check": priced("$0.02", "Check a medication list against known severe interaction pairs."),
+    "POST /v1/records/summary": priced(
+      "$0.05",
+      "Consent-gated synthetic patient record summary — requires an active on-chain grant.",
+    ),
+  },
+  resourceServer,
 );
+
+/**
+ * The 402 challenge cannot be constructed offline: `accepts[].asset` and
+ * `extra.feePayer` come from the facilitator's own `/supported`, not from
+ * MedRail config. So when the facilitator is unreachable the SDK fails to
+ * initialise and every priced route would otherwise return an opaque 500 with
+ * no PAYMENT-REQUIRED header — telling a calling agent "this is broken" when
+ * the truth is "try again shortly".
+ *
+ * Convert exactly that condition into a 503 with Retry-After, and leave every
+ * other error alone. Free routes are unaffected either way.
+ */
+app.use("*", async (c, next) => {
+  try {
+    return await payment(c, next);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const facilitatorDown =
+      /no supported payment kinds/i.test(message) || /Failed to initialize/i.test(message);
+    if (!facilitatorDown) throw err;
+
+    console.error(
+      JSON.stringify({
+        level: "error",
+        event: "facilitator_unavailable",
+        facilitator: config.facilitatorUrl,
+        path: new URL(c.req.url).pathname,
+        message,
+      }),
+    );
+    c.header("Retry-After", "30");
+    return c.json(
+      {
+        error: {
+          code: "PAYMENT_FACILITATOR_UNAVAILABLE",
+          message:
+            "The payment facilitator is temporarily unreachable, so a payment challenge cannot be issued. Retry shortly.",
+          retryable: true,
+          facilitator: config.facilitatorUrl,
+        },
+      },
+      503,
+    );
+  }
+});
 
 app.route("/", healthRoute);
 app.route("/", triageRoute);
@@ -56,8 +111,31 @@ app.route("/", consentRoute);
 app.route("/", recordsRoute);
 
 app.onError((err, c) => {
-  console.error(err);
-  return c.json({ error: err.message || "internal error" }, 500);
+  // Log the detail server-side; return a generic body. Echoing err.message to an
+  // unauthenticated caller disclosed internal exception text (SEC-011) and
+  // reported client input errors as server errors (SEC-010).
+  const requestId = crypto.randomUUID();
+  console.error(
+    JSON.stringify({
+      level: "error",
+      requestId,
+      method: c.req.method,
+      path: new URL(c.req.url).pathname,
+      message: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack : undefined,
+    }),
+  );
+  return c.json(
+    {
+      error: {
+        code: "INTERNAL_ERROR",
+        message: "An internal error occurred. Quote the requestId when reporting this.",
+        retryable: true,
+        requestId,
+      },
+    },
+    500,
+  );
 });
 
 app.get("/v1/consent/arc56", (c) => {
@@ -72,13 +150,28 @@ app.get("/", (c) =>
   c.json({
     service: "MedRail",
     description: "Patient-consented health data layer under x402-paid AI intelligence endpoints, on Algorand.",
+    // Derived by hand but kept complete deliberately: an integrator's first
+    // fetch is this index, and `app-info` + `arc56` are precisely the pair
+    // needed to build an ABI client against the contract without cloning this
+    // repository. An earlier revision omitted both. api/test/app.spec.ts
+    // asserts this list matches the mounted routes so it cannot drift again.
     endpoints: [
-      "POST /v1/triage",
-      "POST /v1/interaction-check",
-      "POST /v1/records/summary",
-      "GET /v1/consent/status",
-      "GET /v1/health",
+      { method: "POST", path: "/v1/triage", price: "$0.02", gate: "x402" },
+      { method: "POST", path: "/v1/interaction-check", price: "$0.02", gate: "x402" },
+      { method: "POST", path: "/v1/records/summary", price: "$0.05", gate: "x402 + on-chain consent" },
+      { method: "GET", path: "/v1/consent/status", price: "free", gate: "none" },
+      { method: "GET", path: "/v1/consent/app-info", price: "free", gate: "none" },
+      { method: "GET", path: "/v1/consent/arc56", price: "free", gate: "none" },
+      { method: "GET", path: "/v1/health", price: "free", gate: "none" },
+      { method: "GET", path: "/", price: "free", gate: "none" },
     ],
+    contract: {
+      appId: config.consentAppId || null,
+      network: config.network,
+      networkCaip2: config.networkCaip2,
+      arc56SpecUrl: "/v1/consent/arc56",
+    },
+    x402: { version: 2, scheme: "exact", facilitator: config.facilitatorUrl },
     docs: "see repo docs/API.md",
   }),
 );

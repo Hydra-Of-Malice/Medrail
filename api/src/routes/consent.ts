@@ -2,11 +2,12 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { checkAccess } from "../services/algorand.js";
 import { config } from "../config.js";
+import { algorandAddress } from "../validation.js";
 
 const querySchema = z.object({
-  patient: z.string().length(58),
-  requester: z.string().length(58),
-  scope: z.string().min(1),
+  patient: algorandAddress,
+  requester: algorandAddress,
+  scope: z.string().min(1).max(128),
 });
 
 export const consentRoute = new Hono();

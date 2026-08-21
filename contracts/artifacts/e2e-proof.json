@@ -3,8 +3,8 @@
   "payerAddress": "2WDV2J2FTWF535SMSUVEBOF5IGXF2OTV7ZZTLTCRBXPVS32UMLOPTI64GE",
   "endpoint": "/v1/triage",
   "httpStatus": 200,
-  "settledTransaction": "OYRQRKYA7WUKBVLWTOFJSJMZFBW7VCNGP5VGH5EBUJGRCVFQFJRQ",
-  "explorerUrl": "https://lora.algokit.io/testnet/transaction/OYRQRKYA7WUKBVLWTOFJSJMZFBW7VCNGP5VGH5EBUJGRCVFQFJRQ",
+  "settledTransaction": "2VRBXOMHWMHRNOM54V4FN5Q4T2TK4JBMOZFMH7ZMITBQHDIREVLQ",
+  "explorerUrl": "https://lora.algokit.io/testnet/transaction/2VRBXOMHWMHRNOM54V4FN5Q4T2TK4JBMOZFMH7ZMITBQHDIREVLQ",
   "responseBody": {
     "score": 70,
     "band": "emergency",

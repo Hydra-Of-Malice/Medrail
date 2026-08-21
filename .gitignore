@@ -16,6 +16,15 @@ node_modules/
 dist/
 build/
 
+# local editor / tooling state
+.claude/
+.vscode/
+.idea/
+AGENTS.md
+CLAUDE.md
+**/AGENTS.md
+**/CLAUDE.md
+
 # misc
 .DS_Store
 *.log

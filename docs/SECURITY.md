@@ -1,5 +1,13 @@
 # MedRail — Security Notes
 
+
+> **⚠ Correction notice.** This document states that a consent-denied call to
+> `/v1/records/summary` is still charged. **That is not what the code does.** The denial returns
+> HTTP 403, and `@x402/hono` cancels settlement on any status ≥ 400, so the caller pays nothing —
+> while MedRail's operator account pays an Algorand fee to write the denial audit entry. The
+> `paidButDenied` field is misleading. See [`CORRECTIONS.md`](CORRECTIONS.md) §C-2, which supersedes
+> any billing statement below.
+
 Written plainly: what's protected, what's not real (because there's no real PHI in this system),
 and known limitations stated rather than hidden. A hackathon-grade honest threat model is worth
 more to judges than a polished one that overclaims.
@@ -48,8 +56,14 @@ hardware-backed key, not a single hot mnemonic in an environment variable.
 
 ## Known limitation: audit-log write ordering
 
-`log_access` predicts its own box key from the current sequence count (`get_audit_count`, then
-writes at `count + 1`). `api/src/services/algorand.ts` serializes calls per-patient in-process
+**Corrected framing:** the contract self-assigns the sequence — `log_access` reads its own
+`audit_seq` box and computes `next_seq` itself, so a race cannot corrupt or misorder the log. The
+client-side prediction exists only to populate the AVM box-reference array, and a losing racer's
+transaction is simply **rejected**. The risk is availability, not integrity. `api/fly.toml` now
+pins `max_machines_running = 1` accordingly.
+
+Original note follows. `log_access` predicts its own box key from the current sequence count
+(`get_audit_count`, then writes at `count + 1`). `api/src/services/algorand.ts` serializes calls per-patient in-process
 (`withPatientLock`) to prevent two concurrent requests for the same patient from racing and
 colliding on the same predicted box — but this only protects a *single* running backend process.
 Running two independent backend instances against the same operator account and contract without
@@ -59,12 +73,33 @@ audit log; a production version would either move the sequencing fully on-chain 
 contract self-assign the next sequence number rather than trusting the caller's prediction) or
 run a single-writer queue in front of the operator account.
 
-## Known, deliberate design choice: consent-denied calls are still charged
+## Corrected: consent-denied calls are NOT charged
 
-`/v1/records/summary` charges the x402 fee whether or not the consent check ultimately succeeds
-— see `docs/API.md`. This is a considered choice (the fee pays for a real on-chain lookup either
-way, the same way a paid "record not found" API response is still billable), not an oversight,
-and it's stated plainly in the endpoint's own response body (`"paidButDenied": true"`).
+An earlier revision of this document claimed the x402 fee was charged whether or not the consent
+check succeeded. **That was never what the code did.** The denial returns HTTP 403, and
+`@x402/hono` cancels settlement on any status ≥ 400 — so the caller pays nothing.
+
+The economics ran the other way: before returning 403 the handler submits a real `logAccess`
+transaction recording the denied attempt, and **MedRail's operator account pays that fee**. With no
+rate limiting, that was an unauthenticated fee-drain vector — and an empty operator account stops
+`log_access` working for every patient.
+
+Both halves are now fixed. The response carries `charged: false` and points at the free
+`GET /v1/consent/status` pre-flight; the misleading `paidButDenied` field is gone; and the free and
+refundable surface is rate-limited (`api/src/rateLimit.ts`). See `docs/CORRECTIONS.md` §C-2.
+
+## Requester identity is now bound to the payer
+
+`/v1/records/summary` previously took `requesterAddress` from the request body and never checked it
+against whoever paid. Because `grant_access` transactions publicly expose valid
+`(patient, requester)` pairs to any indexer, any stranger could pay the ordinary fee, assert an
+authorised requester's address, and be handed the record — writing a forged identity into the
+patient's immutable audit trail.
+
+`api/src/x402Payer.ts` now recovers the address that signed the payment from the verified
+`PAYMENT-SIGNATURE` header, and the route rejects with 403 unless it equals `requesterAddress`.
+Covered by `api/test/x402Payer.spec.ts` and demonstrated live against TestNet by
+`api/scripts/verify-g01-fix.ts`, which performs the impersonation and asserts it is blocked.
 
 ## Non-diagnostic disclaimers are load-bearing, not decorative
 

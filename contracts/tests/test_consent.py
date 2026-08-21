@@ -4,7 +4,13 @@ import algopy
 import pytest
 from algopy_testing import AlgopyTestContext, algopy_testing_context
 
-from smart_contracts.consent.contract import STATUS_GRANTED, STATUS_REVOKED, MedRailConsent
+from smart_contracts.consent.contract import (
+    GRANT_BOX_MBR,
+    STATUS_GRANTED,
+    STATUS_REVOKED,
+    AccessRequested,
+    MedRailConsent,
+)
 
 
 @pytest.fixture()
@@ -181,3 +187,65 @@ def test_withdraw_excess_admin_only(context: AlgopyTestContext, contract: MedRai
     with pytest.raises(AssertionError):
         with as_sender(context, contract, intruder):
             contract.withdraw_excess(algopy.UInt64(1000))
+
+
+def test_request_access_event_field_order(context: AlgopyTestContext, contract: MedRailConsent) -> None:
+    """Regression test for defect C-1.
+
+    `AccessRequested` is declared (patient, requester, scope). `request_access` is called
+    BY the requester, so `Txn.sender` is the requester and `patient` is the ABI argument.
+    An earlier revision emitted these transposed, inverting the data for every ARC-28
+    consumer. `test_request_access_emits_event_and_counts` asserts only the counter and
+    would not have caught it.
+    """
+    patient = context.any.account()
+    requester = context.default_sender  # request_access is sent by the requester
+    assert patient != requester, "fixture must use distinct accounts to be meaningful"
+
+    contract.request_access(patient, algopy.String("records:summary"))
+
+    txn = context.txn.last_active
+    assert int(txn.num_logs) >= 1, "request_access must emit an ARC-28 event"
+
+    # ARC-28 log layout: <4-byte event selector><ARC-4 encoded struct>.
+    # AccessRequested = (address patient, address requester, string scope), so the two
+    # 32-byte addresses are at offsets 4..36 and 36..68 of the payload.
+    payload = bytes(txn.logs(int(txn.num_logs) - 1))
+    assert len(payload) >= 4 + 32 + 32, "event payload shorter than two addresses"
+
+    assert payload[4:36] == patient.bytes.value, (
+        "first address in AccessRequested must be the PATIENT (defect C-1)"
+    )
+    assert payload[36:68] == requester.bytes.value, (
+        "second address in AccessRequested must be the REQUESTER (defect C-1)"
+    )
+
+
+def test_grant_box_mbr_matches_the_protocol_formula() -> None:
+    """Regression test for defect C-2.
+
+    Algorand box MBR is 2_500 + 400 * (len(key) + len(value)). The effective key for the
+    `grants` BoxMap includes its 1-byte key_prefix, so the key is 33 bytes (1 + sha256),
+    not 32. An earlier revision omitted the prefix and under-reported every grant box by
+    400 microAlgo through a public ABI method advertised as a sizing constant.
+
+    Confirmed against the deployed app account on TestNet: 5 boxes / 333 key+value bytes
+    -> min-balance - 100_000 == 2_500 * 5 + 400 * 333 == 145_700 microAlgo.
+    """
+    key_len = 1 + 32   # "g" prefix + sha256(patient || requester || scope)
+    value_len = 1 + 8 + 8  # GrantRecord: uint8 status, uint64 granted_at, uint64 expires_at
+
+    assert GRANT_BOX_MBR == 2_500 + 400 * (key_len + value_len)
+    assert GRANT_BOX_MBR == 22_500
+
+    # The specific bug: forgetting the prefix byte costs exactly 400 microAlgo per box.
+    without_prefix = 2_500 + 400 * (32 + value_len)
+    assert GRANT_BOX_MBR - without_prefix == 400
+
+
+def test_get_grant_box_mbr_returns_the_corrected_constant(
+    context: AlgopyTestContext, contract: MedRailConsent
+) -> None:
+    """The public ABI method exists to be quoted by a backend sizing fund_mbr calls,
+    so it must return the true cost, not an approximation."""
+    assert contract.get_grant_box_mbr() == algopy.UInt64(22_500)

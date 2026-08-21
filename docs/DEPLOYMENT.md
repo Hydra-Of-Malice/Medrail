@@ -79,6 +79,15 @@ npm run build
    ```
    Produces `contracts/artifacts/e2e-proof.json` with a real settled transaction ID — see the
    real result in `docs/PROOF.md` §6.
+6. **Prove the consent-gated composition** (the flagship path — payment *and* on-chain consent
+   *and* an on-chain audit append, in one call).
+   ```bash
+   API_BASE=http://localhost:4021 npx tsx scripts/e2e-consent-proof.ts
+   ```
+   Grants consent on-chain from the payer to itself for scope `records:summary`, then makes the
+   paid `$0.05` call. Produces `contracts/artifacts/e2e-consent-proof.json` with the grant,
+   payment, and audit transaction IDs — see `docs/PROOF.md` §9. Requires the app account to hold
+   enough ALGO for box MBR (it is funded with 5 ALGO at deploy).
 
 ## Stage 2 — Public hosting (your accounts, not performed for you)
 

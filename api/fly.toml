@@ -7,9 +7,20 @@ primary_region = "iad"
   dockerfile = "api/Dockerfile"
 
 [env]
-  NETWORK = "mainnet"
+  # TestNet is the deployed, proven configuration (App 768743428). An earlier
+  # revision defaulted to "mainnet", where no MedRailConsent app exists and no
+  # deploy_mainnet.json has ever been written — so the App-ID fallback in
+  # config.ts could not help either, and the service 500'd on every consent call.
+  # For MainNet: deploy the contract first, then override NETWORK and
+  # CONSENT_APP_ID (see docs/08_Deployment/Environment_Setup.md, Stage 3).
+  NETWORK = "testnet"
   PORT = "4021"
+  CONSENT_APP_ID = "768743428"
   FACILITATOR_URL = "https://facilitator.goplausible.xyz"
+
+  # PAY_TO_ADDRESS and OPERATOR_MNEMONIC are secrets, never committed:
+  #   fly secrets set PAY_TO_ADDRESS=... OPERATOR_MNEMONIC="..." -c api/fly.toml
+  # The service refuses to boot without a valid PAY_TO_ADDRESS (config.ts).
 
 [http_service]
   internal_port = 4021
@@ -17,6 +28,18 @@ primary_region = "iad"
   auto_stop_machines = false
   auto_start_machines = true
   min_machines_running = 1
+  # Pinned to a single machine on purpose. The audit-write lock (withPatientLock,
+  # api/src/services/algorand.ts) is in-process, and the AVM box-reference array
+  # is predicted client-side — so concurrent log_access calls for one patient
+  # across two machines get rejected by the AVM. See docs/ENGINEERING_GAP_REPORT.md G-11.
+  max_machines_running = 1
+
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval = "30s"
+    method = "GET"
+    timeout = "5s"
+    path = "/v1/health"
 
 [[vm]]
   cpu_kind = "shared"

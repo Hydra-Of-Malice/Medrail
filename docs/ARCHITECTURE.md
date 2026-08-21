@@ -41,9 +41,16 @@ splits into two categories that share one on-chain trust layer:
 | Purpose | broad, repeatable leaderboard volume | the patient-ownership proof |
 | State touched | none (stateless compute) | `MedRailConsent.check_access` + `log_access` |
 
-Both categories write to the same audit log, so even the open endpoints leave a verifiable
-on-chain trail when they touch a specific patient's data (they currently don't — they're pure
-compute — but the plumbing is shared and ready for `/v1/health-score` or similar in a v2).
+Both categories are wired to the same audit log, so the open endpoints could leave a verifiable
+on-chain trail if they ever touched a specific patient's data — they currently don't, being pure
+compute, but the plumbing is shared and ready for `/v1/health-score` or similar in a v2.
+
+> **Verification note (2026-08-21 review).** The audit log has **not yet been written on TestNet by
+> any endpoint.** The deployed contract reports `total_audit_entries = 0` and holds no audit boxes,
+> so `log_access` — including the `/v1/records/summary` path that does call it — is proven only in
+> the AVM simulator (14/14 unit tests), not on live infrastructure. See
+> [`ENGINEERING_GAP_REPORT.md`](ENGINEERING_GAP_REPORT.md) finding **G-02**. Closing this needs one
+> successful paid call against a self-granted consent.
 
 ## Repository layout
 

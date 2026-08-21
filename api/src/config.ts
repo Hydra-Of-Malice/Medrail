@@ -1,4 +1,5 @@
 import "dotenv/config";
+import algosdk from "algosdk";
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -57,6 +58,29 @@ export const config = {
   // Operator (admin) account that calls log_access after a verified payment.
   operatorMnemonic: process.env.OPERATOR_MNEMONIC ?? "",
 } as const;
+
+/**
+ * Refuses to serve payment challenges with an unusable `payTo`.
+ *
+ * `payToAddress` falls back to `""` when neither PAY_TO_ADDRESS nor
+ * OPERATOR_ADDRESS is set. Without this check the service starts happily and
+ * advertises a 402 with an empty payee — every caller's SDK then builds a
+ * payment to nowhere, and the failure is silent on the one field that decides
+ * whether the service earns anything at all.
+ */
+export function assertPayToConfigured(): void {
+  if (!config.payToAddress) {
+    throw new Error(
+      "PAY_TO_ADDRESS is not set (and OPERATOR_ADDRESS is not set as a fallback). " +
+        "Priced endpoints would advertise an empty payee. See docs/08_Deployment/Environment_Setup.md",
+    );
+  }
+  if (!algosdk.isValidAddress(config.payToAddress)) {
+    throw new Error(
+      `PAY_TO_ADDRESS is not a valid Algorand address: ${config.payToAddress.slice(0, 12)}...`,
+    );
+  }
+}
 
 export function requireConsentAppId(): number {
   if (!config.consentAppId) {

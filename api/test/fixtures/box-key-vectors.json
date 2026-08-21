@@ -1,0 +1,37 @@
+{
+  "note": "Golden vectors pinning the consent box-key derivation across the Python contract, the Node backend, and the browser client. Asserted by api/test/boxKeyParity.spec.ts and contracts/tests/test_box_keys.py. See docs/ENGINEERING_GAP_REPORT.md G-08.",
+  "derivation": {
+    "grant": "\"g\" || sha256(pubkey(patient) || pubkey(requester) || utf8(scope))",
+    "auditSeq": "\"s\" || pubkey(patient)"
+  },
+  "vectors": [
+    {
+      "patient": "2WDV2J2FTWF535SMSUVEBOF5IGXF2OTV7ZZTLTCRBXPVS32UMLOPTI64GE",
+      "requester": "CCO26Y6Z56DDZ3OELO2UKJMIPJVSIT52I23F2MPMR52JBM3HQZZNUZNOR4",
+      "scope": "records:summary",
+      "expectedGrantBoxKeyHex": "67dfa904c7c66df8dda33815bd1cd5f5b095178889898876c79de6c0f6cd03a22b",
+      "expectedAuditSeqBoxKeyHex": "73d5875d27459d8bddf64c952a40b8bd41ae5d3a75fe7335cc510ddf596f5462dc"
+    },
+    {
+      "patient": "CCO26Y6Z56DDZ3OELO2UKJMIPJVSIT52I23F2MPMR52JBM3HQZZNUZNOR4",
+      "requester": "S56WIB3XLUOXSUGAI6MDJ3GN3RV2NSE7RVV7DGNZJKDCJR4OJLLA6H7HEE",
+      "scope": "records:summary",
+      "expectedGrantBoxKeyHex": "67471078ff6479f18484dc54807a3241e06fe3d8e9b5cb484ab4b21d25eabc716f",
+      "expectedAuditSeqBoxKeyHex": "73109daf63d9ef863cedc45bb54525887a6b244fba46b65d31ec8f7490b3678672"
+    },
+    {
+      "patient": "S56WIB3XLUOXSUGAI6MDJ3GN3RV2NSE7RVV7DGNZJKDCJR4OJLLA6H7HEE",
+      "requester": "2WDV2J2FTWF535SMSUVEBOF5IGXF2OTV7ZZTLTCRBXPVS32UMLOPTI64GE",
+      "scope": "open:triage",
+      "expectedGrantBoxKeyHex": "6755fe1dd0dfdcad498d70ab83a6a38b0ef48e97733452a253e0faf35ed661c9a7",
+      "expectedAuditSeqBoxKeyHex": "73977d6407775d1d7950c0479834eccddc6ba6c89f8d6bf199b94a8624c78e4ad6"
+    },
+    {
+      "patient": "2WDV2J2FTWF535SMSUVEBOF5IGXF2OTV7ZZTLTCRBXPVS32UMLOPTI64GE",
+      "requester": "2WDV2J2FTWF535SMSUVEBOF5IGXF2OTV7ZZTLTCRBXPVS32UMLOPTI64GE",
+      "scope": "",
+      "expectedGrantBoxKeyHex": "67750eedc02e56594b44f6ecc22b8eba987823f10ee779bd307dfbc01bbecaeae7",
+      "expectedAuditSeqBoxKeyHex": "73d5875d27459d8bddf64c952a40b8bd41ae5d3a75fe7335cc510ddf596f5462dc"
+    }
+  ]
+}

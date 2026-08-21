@@ -1,0 +1,38 @@
+# Secrets — must never enter a build context.
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.local
+*.mnemonic
+
+# Dependencies and build output — reinstalled/rebuilt inside the image.
+node_modules
+**/node_modules
+.next
+**/.next
+dist
+**/dist
+build
+**/build
+
+# Python toolchain — only the compiled artifacts are needed, and those are
+# copied explicitly by api/Dockerfile.
+.venv
+**/.venv
+__pycache__
+**/__pycache__
+*.pyc
+.pytest_cache
+**/.pytest_cache
+
+# Repo metadata and docs — not needed at runtime.
+.git
+.github
+../docs
+*.md
+!api/README.md
+
+# Local noise
+.DS_Store
+*.log

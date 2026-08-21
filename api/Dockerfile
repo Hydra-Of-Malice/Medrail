@@ -5,7 +5,7 @@
 FROM node:20-slim AS build
 WORKDIR /app/api
 COPY api/package.json api/package-lock.json* ./
-RUN npm install
+RUN npm ci
 COPY api/tsconfig.json ./
 COPY api/src ./src
 RUN npm run build
@@ -14,7 +14,7 @@ FROM node:20-slim
 WORKDIR /app
 ENV NODE_ENV=production
 COPY api/package.json api/package-lock.json* ./api/
-RUN cd api && npm install --omit=dev
+RUN cd api && npm ci --omit=dev
 COPY --from=build /app/api/dist ./api/dist
 COPY api/src/data ./api/dist/data
 COPY contracts/artifacts/MedRailConsent.arc56.json ./contracts/artifacts/MedRailConsent.arc56.json

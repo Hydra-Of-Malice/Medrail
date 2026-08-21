@@ -10,7 +10,7 @@ Deployed: **App ID `768743428`** — https://lora.algokit.io/testnet/application
 ## What's next: MainNet, when you're ready
 
 Not blocked on anything from me — this is deliberately a set of manual steps for your own
-funded MainNet wallet, spelled out in **[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)` (Stage 3)**
+funded MainNet wallet, spelled out in **[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) (Stage 3)**
 and tracked in **[`docs/GO_LIVE_CHECKLIST.md`](docs/GO_LIVE_CHECKLIST.md)**. Same reasoning as
 before: real funds and the actual act of entering the competition should be your action, not
 mine.
