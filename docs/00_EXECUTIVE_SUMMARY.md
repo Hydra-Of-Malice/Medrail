@@ -11,23 +11,54 @@ public Algorand TestNet indexer.
 
 ## The problem
 
-Two gaps meet in the same place.
+**An AI agent triaging a patient case needs three services and cannot buy any of them.** It needs
+symptom triage, a drug-interaction check, and the patient's actual record. Today that is three vendor
+signups, three API keys and three billing relationships — accounts, keys and monthly invoices all
+assume a human signs up — and even after all of it the agent still cannot legally touch the record,
+because nobody can prove the patient allowed it. An agent that needs one drug-interaction check does
+not want a commercial relationship. It wants to pay two cents and get an answer.
 
-**Patients cannot grant verifiable consent over their own clinical data.** Consent today lives
-inside whichever organisation holds the record. The patient cannot independently see who accessed
-what, and cannot revoke access without asking the record-holder to do it on their behalf. Existing
-mechanisms — FHIR Consent resources, SMART-on-FHIR scopes, per-organisation portals — put the
-custodian in charge of enforcing the patient's wishes against the custodian's own interests.
+The second gap is why that last part is hard. **Patients cannot grant verifiable consent over their
+own clinical data.** Consent today lives inside whichever organisation holds the record. The patient
+cannot independently see who accessed what, and cannot revoke access without asking the record-holder
+to do it on their behalf. Existing mechanisms — FHIR Consent resources, SMART-on-FHIR scopes,
+per-organisation portals — put the custodian in charge of enforcing the patient's wishes against the
+custodian's own interests. So there is no permission an agent could present, and no permission a
+record-holder could check, that does not route through some incumbent's database.
 
-**Autonomous agents cannot buy a single clinical API call.** Accounts, API keys, and monthly
-invoices assume a human signs up. An agent that needs one drug-interaction check does not want a
-commercial relationship — it wants to pay two cents and get an answer.
+The two gaps meet in the same place: the agent needs to *buy* the call, and it needs to *prove* it
+was allowed to make it.
 
 ## The solution
 
 MedRail makes one HTTP call do three things at once: **settle a stablecoin payment**, **check an
 on-chain authorisation the patient signed with their own key**, and **append to an immutable audit
 record**. That composition — not any one of its parts — is the contribution.
+
+It is a machine-to-machine service, and that is demonstrated rather than asserted.
+`api/scripts/agent-demo.ts` runs a clinical triage agent with no MedRail account, no API key and no
+prior relationship: it **discovers** the catalogue from `GET /` (8 endpoints, prices, gates, the
+contract's App ID and its ARC-56 spec URL — nothing hardcoded but the base URL), pays $0.02 for
+triage (`band=EMERGENCY score=70`), pays $0.02 for the interaction check (`MAJOR: warfarin +
+aspirin`), **checks the free consent oracle before spending on the gated endpoint** — refusing to pay
+to be told no — then pays $0.05 for the consent-gated record and reports one assessment.
+**$0.09 across three settled Algorand transactions, no human in the loop:**
+[triage](https://lora.algokit.io/testnet/transaction/DOSKCNKJRXIMY2UDSDZ377LKPZQIZJW5JHCGUAGKOYV6KUCFYKIA) ·
+[interaction](https://lora.algokit.io/testnet/transaction/PLBFDDADW576IUCH62HGGYI4AJQNO3QXSENNDIBKAORWVMP7NVHQ) ·
+[record](https://lora.algokit.io/testnet/transaction/COMJ3TQOGTKP6LXDJS7HZY7B45QZJQWXXJ23HQ3IDDQYD7GRK36A).
+
+**Three parties, not one account rehearsing three roles.** Three separate accounts with three
+separate keypairs: the patient `56LFG5EE…`, the agent `UYBTLPHS…`, and the service `2WDV2J2F…`. The
+agent holds its own keypair, which the service does not control, and the indexer confirms
+sender ≠ receiver on those payments (`UYBTLPHS…` → the `payTo` address `2WDV2J2F…`). The patient —
+an account that is neither the payer nor the payee — granted *that specific agent* scope
+`records:summary` in
+[`IG4XEBTM…`](https://lora.algokit.io/testnet/transaction/IG4XEBTMRCKI724ZVHSYUN4ECTYBXAGZM5N35NP4Y3ZVWECG7WUQ),
+signed with the patient's own key, with the backend not in the path, and the audit entry the gated
+call wrote names the agent rather than the service. The first run of the same script was self-paid
+(`POAQNSOP…`, `W3Z55BZY…`, `5CO5XV7M…`, audit entry `5HYV5B2L…`); two runs after it paid from the
+agent's own key while the service still stood in as the patient. See
+[`PROOF.md`](PROOF.md) §10 — including what this does **not** establish.
 
 Three priced endpoints share one `payTo` address and one Algorand smart contract:
 
@@ -103,8 +134,11 @@ from the repository's own documentation.
 | Contract live on TestNet | App **768743428**, created round 66088624, `deleted: false` |
 | Consent lifecycle exercised on-chain | request → grant → revoke, three confirmed transactions with matching ARC-4 selectors |
 | A real x402 payment settled | Tx `OYRQRKYA…` — `axfer`, asset `10458941`, **20000** base units (exactly $0.02 at 6 decimals), `fee: 0`, round 66091768 |
-| **Deployed bytecode = this repository's source** | `contract.py` compiles reproducibly to the committed TEAL, which assembles to bytecode **byte-identical** to the deployed program — 1404 base64 chars, exact match ([`PROOF.md`](PROOF.md) §7) |
+| **Deployed bytecode = this repository's source** | `contract.py` **as of `3012e2d`** compiles reproducibly to the committed TEAL, which assembles to bytecode **byte-identical** to the deployed program — 1404 base64 chars, exact match. Today's source is that revision plus the two disclosed defect fixes (C-1, C-2), which are tested and not yet deployed ([`PROOF.md`](PROOF.md) §7) |
 | **Consent-gated composition proven on-chain** | grant `M26NPR32…` → check `true` → paid $0.05 `5DKFUULW…` → audit `4YLKLQKK…` seq 1; `total_audit_entries` 0 → **1** ([`PROOF.md`](PROOF.md) §9) |
+| **An autonomous agent bought all three services** | `api/scripts/agent-demo.ts`, one run: discovery from `GET /`, then `DOSKCNKJ…` ($0.02, round 66563930), `PLBFDDAD…` ($0.02), `COMJ3TQO…` ($0.05, round 66563944). No account, no API key, no human ([`PROOF.md`](PROOF.md) §10) |
+| **Payer and payee are different accounts** | Indexer confirms sender `UYBTLPHS…` ≠ receiver `2WDV2J2F…` on those payments; the agent's keypair is not held by the service, and it opted itself in to USDC in `KOALP5W2…`. **Its TestNet float was seeded from the project's own wallet** — see the disclosure below |
+| **The consent grant runs patient → a different party** | The patient (`56LFG5EE…`) granted the agent (`UYBTLPHS…`) scope `records:summary` in `IG4XEBTM…`, round 66563915, signed with the patient's own key — an account that is neither the payer nor the payee — backend not in the path. The audit entry the gated call wrote (`E6ZTGEAO…`, round 66563942) names that same agent |
 | Automated tests | **28** contract (AVM simulator) + **45** API = **73**, all passing (was 32) |
 | Builds | API typecheck + build, web typecheck + build — all clean |
 
@@ -149,9 +183,16 @@ cancels the payment before money moves. A consent denial therefore costs the cal
 transient chain failure on the audit write returns the record with `auditStatus: "pending"` rather
 than discarding a paid request.
 
-Two facts a reviewer should still weigh: payments to date are **self-payments** from the project's
-own account (the mechanism is proven; third-party volume is not), and **nothing is publicly hosted
-yet**, so the challenge's public-HTTPS-endpoint requirement remains open.
+Two facts a reviewer should still weigh. **No external or unrelated party has paid for this
+service.** Payments now settle between genuinely independent accounts — the agent pays from a keypair
+this service does not control, and the indexer confirms sender ≠ receiver — but **the agent's TestNet
+USDC float was seeded from the project's own wallet**, and the patient wallet was funded the same
+way, because TestNet ALGO and USDC have no other practical source. That removes an objection without
+adding a claim: the payment mechanics are proven between distinct parties; demand is not. Earlier
+settlements, including the headline `OYRQRKYA…`, were self-payments and are labelled as such
+throughout. And **nothing is publicly hosted yet**, so the
+challenge's public-HTTPS-endpoint requirement remains open, there is no MainNet deployment, and
+there is no Bazaar listing.
 
 *(Three earlier concerns were closed during this review: the audit write had never executed — it
 now has, five times; the consent gate did not authenticate — it now does, proven by a live attack
@@ -170,6 +211,13 @@ directions — determinism, inspectability, testability, zero inference cost and
 bought at the price of no generalisation, no synonym or negation handling, and no clinical
 validation. Every response carries a non-diagnostic disclaimer, and that disclaimer is asserted by
 the test suite as a correctness property.
+
+Stated precisely, because it is easy to blur: **the AI in this picture is the caller, not the
+endpoint.** MedRail is built to be *consumed* by an autonomous agent — machine-readable discovery at
+`GET /`, retryable error codes an agent can act on, a free permission oracle it can consult before
+spending, and off-the-shelf x402 client compatibility as a defended design constraint — and
+`agent-demo.ts` proves that end to end. None of that makes the rule engines behind the two open
+endpoints anything other than what they are.
 
 ## Roadmap
 
@@ -197,7 +245,10 @@ Full detail: [`WINNING_ROADMAP.md`](WINNING_ROADMAP.md).
 
 | If you want… | Read |
 |---|---|
+| To watch an agent discover, use and pay for the service | `api/scripts/agent-demo.ts` — one command, ~220 lines |
 | The pitch and a 2-minute demo | [`JUDGES.md`](JUDGES.md) |
+| The demo, beat by beat, with expected output | [`11_Hackathon/Demo_Script.md`](11_Hackathon/Demo_Script.md) |
+| The 3-minute submission video shot list | [`11_Hackathon/Demo_Video_Script.md`](11_Hackathon/Demo_Video_Script.md) |
 | Every claim with a transaction ID and a reproduction command | [`PROOF.md`](PROOF.md) |
 | Every weakness, with severities and fixes | [`ENGINEERING_GAP_REPORT.md`](ENGINEERING_GAP_REPORT.md) |
 | The technical design and why each decision was made | [`03_Architecture/`](03_Architecture/) |

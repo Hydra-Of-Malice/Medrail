@@ -174,12 +174,42 @@ cd contracts
 # contracts/smart_contracts/consent/artifacts/ — see ENGINEERING_GAP_REPORT.md G-28
 cmp smart_contracts/consent/artifacts/MedRailConsent.approval.teal artifacts/MedRailConsent.approval.teal
 cmp smart_contracts/consent/artifacts/MedRailConsent.clear.teal    artifacts/MedRailConsent.clear.teal
-cmp smart_contracts/consent/artifacts/MedRailConsent.arc56.json    artifacts/MedRailConsent.arc56.json
 ```
 
-Result: **byte-identical** for the approval TEAL, the clear TEAL, the ARC-56 spec, and both source
-maps. `puyapy` 5.9.0 is deterministic here, so the committed artifacts are provably the compilation
-of the committed `contract.py`.
+`puyapy` 5.9.0 is deterministic here, so the committed artifacts are provably the compilation of a
+particular revision of `contract.py`.
+
+**Which revision — and this is the part to read carefully.** As of 2026-08-22 the two commands above
+**no longer match**, and that is deliberate. `contract.py` was moved ahead of the deployed program by
+the two contract defects found in the engineering review (C-1, the transposed `AccessRequested`
+arguments; C-2, the under-reported `GRANT_BOX_MBR`), with the redeploy held back so App `768743428`
+keeps its App ID, its grants and its audit history. A fresh compile of today's source is 927 lines of
+approval TEAL against the committed 922.
+
+The link is still checkable, precisely:
+
+```bash
+# compile the revision that was actually deployed
+git show 3012e2d:contracts/smart_contracts/consent/contract.py > /tmp/deployed_contract.py
+# …compile it, then compare against the committed artifacts
+```
+
+Verified 2026-08-22: the deployed-era source compiles **byte-identical** to
+`contracts/artifacts/MedRailConsent.approval.teal` and `MedRailConsent.clear.teal`. (Compile it from
+a differently-named directory and the only differences are the module path echoed in TEAL comments;
+normalise that string and the files are identical. The ARC-56 spec embeds the base64 of the TEAL, so
+it inherits the same path string and nothing else.)
+
+And the delta between the deployed revision and today's source is exactly three hunks — the two
+disclosed fixes and one import that became unused:
+
+```bash
+git diff 3012e2d -- contracts/smart_contracts/consent/contract.py
+```
+
+So the honest form of the claim is: **the program running on TestNet is this repository's contract
+source as of `3012e2d`, and today's source differs from it only by the two documented defect fixes,
+which are covered by tests and awaiting a redeploy that has been deliberately deferred.**
 
 **Step 2 — the committed TEAL assembles to exactly the bytecode deployed on TestNet.**
 
@@ -205,13 +235,16 @@ returns the **same 1404 characters, byte for byte.**
 **Therefore:**
 
 ```
-contract.py  --puyapy 5.9.0-->  committed TEAL  --algod assemble-->  bytecode deployed at App 768743428
-     (reproducible)                                (identical)
+contract.py @ 3012e2d  --puyapy 5.9.0-->  committed TEAL  --algod assemble-->  bytecode at App 768743428
+      (reproducible)                          (identical)
+                │
+                └── + C-1, C-2 fixes ──> contract.py today (tested, not yet deployed)
 ```
 
-The ~250 lines of Algorand Python in this repository are the program executing on Algorand TestNet.
-No trust in the deploy script, the build machine, or this document is required to establish that —
-the two commands above are independently runnable by anyone.
+The ~250 lines of Algorand Python in this repository are the program executing on Algorand TestNet,
+and where the source has since moved on, the diff is one command away. No trust in the deploy script,
+the build machine, or this document is required to establish that — every command above is
+independently runnable by anyone.
 
 This matters more than it may appear. Every other on-chain claim in this log — the consent
 lifecycle, the admin gating, the box layout — is only meaningful if the deployed program is the one

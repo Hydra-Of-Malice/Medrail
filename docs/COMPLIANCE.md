@@ -143,9 +143,12 @@ payer whose key the service does not hold. Full evidence: [`PROOF.md`](PROOF.md)
   as App `768743428`, with a **full consent lifecycle proven on-chain** — request → grant →
   `check_access=true` → revoke → `check_access=false`, every step a confirmed transaction
   ([`PROOF.md`](PROOF.md) §5).
-- **Source-to-chain verification**: `contract.py` → reproducible compile → committed TEAL → algod
-  assemble → **byte-identical** to the bytecode running at App `768743428` ([`PROOF.md`](PROOF.md) §7).
-  The deployed program *is* this repository's source, provably.
+- **Source-to-chain verification**: `contract.py` at commit `3012e2d` → reproducible compile →
+  committed TEAL → algod assemble → **byte-identical** to the bytecode running at App `768743428`
+  ([`PROOF.md`](PROOF.md) §7). The deployed program *is* this repository's contract source, provably
+  — at that revision. Today's `contract.py` is ahead of it by exactly the C-1 and C-2 fixes, held
+  back from deployment deliberately; `git diff 3012e2d -- contracts/smart_contracts/consent/contract.py`
+  shows the whole difference.
 - A backend verified against the *live* GoPlausible facilitator, not a mock — the decoded
   `PAYMENT-REQUIRED` header carries the real TestNet USDC asset id, the real fee-sponsorship address,
   and an SDK-computed `$0.02 → 20000` conversion, all matching the facilitator's `/supported`.
