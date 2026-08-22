@@ -1,20 +1,59 @@
 # MedRail
 
-**A patient-consent layer on Algorand, underneath a family of x402-paid clinical-intelligence
-endpoints.**
+**Clinical services an AI agent can discover, use, and pay for — without an account, an API key, or
+permission from anyone except the patient.**
 
 Built for the [Algorand Foundation Global x402 Challenge](https://algorand.co/global-x402-challenge).
-
-Live on Algorand TestNet — App ID [`768743428`](https://lora.algokit.io/testnet/application/768743428),
-with a real settled x402 payment you can check on a public indexer.
+Live on Algorand TestNet — App ID [`768743428`](https://lora.algokit.io/testnet/application/768743428).
 
 ---
 
-## What this is
+## The agent problem this solves
 
-A single HTTP call to MedRail can be three things at once: **a settled stablecoin payment**, **an
-on-chain authorisation check against a consent grant the patient signed themselves**, and **an
-immutable audit-log append**. That composition is the project.
+An AI agent triaging a patient case needs three things: **symptom triage**, a **drug-interaction
+check**, and the **patient's record**.
+
+Today that means three vendor signups, three API keys, three billing relationships — and even then
+the agent cannot legally touch the record, because nobody can prove the patient allowed it.
+
+MedRail sells all three **per call, over x402**, settled in USDC on Algorand. The record endpoint
+adds the part no API key can give you: it is gated by a consent grant **the patient signed with
+their own key on-chain**, and every access writes an immutable entry to that patient's audit trail.
+
+So a single paid call is three things at once: **a settled stablecoin payment**, **an on-chain
+authorisation check**, and **an audit-log append**. That composition is the project.
+
+### Watch an agent actually do it
+
+```bash
+cd api && npx tsx scripts/agent-demo.ts
+```
+
+An autonomous agent with no prior knowledge of MedRail reads `GET /`, learns the catalogue and
+prices, decides which services the case needs, checks the **free** consent oracle before spending on
+the gated endpoint, and pays for what it uses:
+
+```
+[1] DISCOVER — reading the service index at GET /
+      MedRail: 8 endpoints advertised · x402 v2 · scheme "exact"
+      consent contract: App 768743428 on testnet
+
+[2] POST /v1/triage             paid $0.02   band=EMERGENCY score=70
+[3] POST /v1/interaction-check  paid $0.02   MAJOR: warfarin + aspirin
+[4] GET  /v1/consent/status     cost $0.00   granted=true
+[5] POST /v1/records/summary    paid $0.05   consent verified on-chain, access audited
+
+  $0.09  total, across 3 settled Algorand transactions
+  Zero accounts created. Zero API keys issued. Zero invoices.
+```
+
+Every one of those payments is a real transaction on a public ledger.
+[$0.02 triage](https://lora.algokit.io/testnet/transaction/POAQNSOPPW6TB5DU76VHYZTS7X2SJQRUNVCNR55GRO7TYXOKUF4Q) ·
+[$0.02 interaction](https://lora.algokit.io/testnet/transaction/W3Z55BZYCALOFZFSXI75MR22OVVEX7JRSK7T2NRATKBDU7Y4OL5A) ·
+[$0.05 record](https://lora.algokit.io/testnet/transaction/5CO5XV7M5H6WLFI2D5M7UODUOF2IUQNM3FOSKH5VA66SVQTLBBDQ) ·
+[the on-chain audit entry it produced](https://lora.algokit.io/testnet/transaction/5HYV5B2LO5DVHTTAOZMQKJNEYK6VICRVAINAZ5YBVW3QUR64TBKA)
+
+## What this is
 
 Concretely, three priced endpoints share one `payTo` address and one smart contract:
 
@@ -123,6 +162,47 @@ validation. All of it is enumerated in
 Every response carries a non-diagnostic disclaimer, and that disclaimer is asserted by the test
 suite as a correctness property rather than written in prose.
 
+## USP — what makes this different
+
+Most x402 entries price an existing API per call. That is a payment rail bolted onto a product.
+MedRail's differentiator is that **the payment and the authorisation are the same act**.
+
+**1. The payment is the authentication.**
+`/v1/records/summary` recovers the address that signed the x402 payment and refuses the request
+unless it matches the requester whose consent it checks. No API key, no session, no bearer token —
+the money proves who is asking. `api/scripts/verify-g01-fix.ts` runs the impersonation attack
+against live TestNet and shows it rejected with a 403.
+
+**2. The patient is the authoriser, and the backend cannot override them.**
+`grant_access` and `revoke_access` are signed client-side by the patient's own key and submitted
+straight to Algorand. MedRail's server never holds, sees, or proxies that key — so "the patient
+controls access" is structural, not a policy promise. Revocation is one transaction and takes effect
+on the next call.
+
+**3. Every paid access writes an audit entry the operator cannot delete.**
+Not a log file MedRail could edit — an append-only per-patient sequence in Algorand box storage.
+The patient can read who accessed their record, when, and under what scope, without asking MedRail
+for it.
+
+**4. Off-the-shelf agents work with zero MedRail-specific code.**
+This drove a real architectural decision: the audit write is a *follow-up* transaction rather than a
+leg in the client's signed payment group, because requiring clients to know our App ID and method
+signatures would break every generic `@x402/fetch` caller
+([ADR-005](docs/03_Architecture/ADRs/ADR-005-audit-write-as-follow-up-transaction.md)). We gave up
+atomicity to keep the door open to any agent.
+
+**5. Self-describing for machines.**
+`GET /` returns the catalogue with prices and gates; `/v1/consent/arc56` serves the compiled ABI spec
+so an agent can build its own on-chain client without cloning this repository.
+
+### What is *not* novel, stated plainly
+
+x402 is a protocol we consume, not one we invented. Algorand box storage is standard. On-chain
+consent registries are a known pattern. The two intelligence endpoints are deterministic rule
+engines, not models — a deliberate safety choice, argued in
+[ADR-007](docs/03_Architecture/ADRs/ADR-007-deterministic-rule-engines-instead-of-an-ml-model.md).
+The novelty is the composition, not the parts.
+
 ## Technology
 
 | Layer | Stack |
@@ -167,6 +247,22 @@ npm run dev                                          # http://localhost:3000
 
 Full setup including TestNet funding, the USDC opt-in step, and deployment:
 [`docs/08_Deployment/Environment_Setup.md`](docs/08_Deployment/Environment_Setup.md).
+
+### Watch an autonomous agent use the service
+
+```bash
+cd api && npx tsx src/index.ts &          # start the API
+npx tsx scripts/agent-demo.ts             # the agent discovers, decides, and pays
+```
+
+Needs a TestNet account holding ALGO and USDC (see `docs/08_Deployment/Environment_Setup.md`).
+Two more scripts prove specific properties:
+
+| Script | Proves |
+|---|---|
+| `scripts/agent-demo.ts` | An agent completes a clinical task across 3 paid services for $0.09 |
+| `scripts/e2e-consent-proof.ts` | grant → consent check → payment → on-chain audit entry, in one call |
+| `scripts/verify-g01-fix.ts` | An impersonation attack against the consent gate is rejected with 403 |
 
 ### See the payment flow without any setup
 
@@ -432,6 +528,7 @@ Deliberately **not** named `09_AI_ML`, because there is no AI or ML in this syst
 | [Judge Evaluation](docs/11_Hackathon/Judge_Evaluation.md) | Adversarial scoring; why this could win and why it could lose |
 | [Winning Strategy](docs/11_Hackathon/Winning_Strategy.md) | Ranked actions by judge-perception impact |
 | [Demo Script](docs/11_Hackathon/Demo_Script.md) | 2-minute and 5-minute runs of show |
+| [**Demo Video Script**](docs/11_Hackathon/Demo_Video_Script.md) | **Shot-by-shot script for the 3-minute submission video** |
 | [Demo Runbook](docs/11_Hackathon/Demo_Runbook.md) | Pre-flight checklist and failure fallbacks |
 | [Pitch Architecture](docs/11_Hackathon/Pitch_Architecture.md) | How to present the design, plus a hard-question Q&A bank |
 

@@ -185,6 +185,7 @@ Deliberately **not** named `09_AI_ML`, because there is no AI or ML in this syst
 | [Judge Evaluation](11_Hackathon/Judge_Evaluation.md) | Adversarial scoring; why this could win and why it could lose |
 | [Winning Strategy](11_Hackathon/Winning_Strategy.md) | Ranked actions by judge-perception impact |
 | [Demo Script](11_Hackathon/Demo_Script.md) | 2-minute and 5-minute runs of show |
+| [**Demo Video Script**](11_Hackathon/Demo_Video_Script.md) | **Shot-by-shot script for the 3-minute submission video** |
 | [Demo Runbook](11_Hackathon/Demo_Runbook.md) | Pre-flight checklist and failure fallbacks |
 | [Pitch Architecture](11_Hackathon/Pitch_Architecture.md) | How to present the design, plus a hard-question Q&A bank |
 
