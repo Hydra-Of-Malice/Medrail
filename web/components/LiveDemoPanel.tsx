@@ -58,7 +58,9 @@ export default function LiveDemoPanel() {
         <DemoWalletCard onWallet={setWallet} />
 
         <div className="rounded-lg border border-neutral-800 bg-neutral-950 p-5">
-          <h3 className="font-mono text-xs uppercase tracking-wide text-amber-500">Choose an endpoint</h3>
+          <h3 className="font-mono text-xs uppercase tracking-wide text-amber-500">
+            Pick the call to stand in for
+          </h3>
           <div className="mt-3 space-y-2">
             {(Object.keys(ENDPOINTS) as EndpointKey[]).map((key) => (
               <button
@@ -122,7 +124,7 @@ export default function LiveDemoPanel() {
           disabled={!wallet || loading}
           className="mt-4 rounded-md bg-amber-600 px-4 py-2 text-sm font-semibold text-neutral-950 transition hover:bg-amber-500 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {loading ? "Paying via x402…" : `Pay ${ENDPOINTS[endpoint].price} and call live`}
+          {loading ? "Signing & settling…" : `Run this call as the agent — ${ENDPOINTS[endpoint].price}`}
         </button>
 
         {error && (

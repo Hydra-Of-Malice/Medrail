@@ -47,13 +47,128 @@ app.use("/v1/records/summary", rateLimit({ limit: 30, windowMs: 60_000, scope: "
 
 // Every x402-priced route in one place, so pricing is easy for a judge (or a
 // caller writing an integration) to audit at a glance.
+//
+// The third argument to `priced()` is the route's Bazaar discovery declaration
+// (@x402/extensions/bazaar). Every `input` / `output.example` below is the real
+// request and response shape — the input schemas mirror the zod schemas in the
+// route handlers, and the output examples were produced by running the actual
+// services. A discovery declaration that lied would be worse than none: it is
+// published verbatim into the facilitator's public catalogue, where an agent
+// reads it to decide how to call this API.
 const payment = paymentMiddleware(
   {
-    "POST /v1/triage": priced("$0.02", "Rule-based clinical red-flag triage score. Not medical advice."),
-    "POST /v1/interaction-check": priced("$0.02", "Check a medication list against known severe interaction pairs."),
+    "POST /v1/triage": priced(
+      "$0.02",
+      "Rule-based clinical red-flag triage score. Not medical advice.",
+      {
+        bodyType: "json",
+        input: { symptoms: "crushing chest pain radiating to left arm" },
+        inputSchema: {
+          properties: {
+            symptoms: {
+              type: "string",
+              minLength: 1,
+              maxLength: 2000,
+              description: "Free-text symptom description.",
+            },
+          },
+          required: ["symptoms"],
+        },
+        output: {
+          example: {
+            score: 35,
+            band: "urgent",
+            matchedFlags: ["possible cardiac chest pain"],
+            disclaimer:
+              "MedRail triage is a transparent keyword heuristic for hackathon demonstration only. It is not a diagnosis.",
+          },
+        },
+      },
+    ),
+    "POST /v1/interaction-check": priced(
+      "$0.02",
+      "Check a medication list against known severe interaction pairs.",
+      {
+        bodyType: "json",
+        input: { medications: ["warfarin", "aspirin"] },
+        inputSchema: {
+          properties: {
+            medications: {
+              type: "array",
+              items: { type: "string", minLength: 1 },
+              minItems: 2,
+              maxItems: 20,
+              description: "Two to twenty medication names.",
+            },
+          },
+          required: ["medications"],
+        },
+        output: {
+          example: {
+            flagged: true,
+            matches: [
+              {
+                drugs: ["warfarin", "aspirin"],
+                severity: "major",
+                description:
+                  "Combined anticoagulant/antiplatelet effect substantially increases bleeding risk.",
+              },
+            ],
+            source: "Widely-taught, textbook-level severe drug-interaction pairs.",
+            disclaimer:
+              "Not a comprehensive clinical database and must never replace a pharmacist or prescriber review.",
+          },
+        },
+      },
+    ),
     "POST /v1/records/summary": priced(
       "$0.05",
       "Consent-gated synthetic patient record summary — requires an active on-chain grant.",
+      {
+        bodyType: "json",
+        input: {
+          patientId: "2WDV2J2FTWF535SMSUVEBOF5IGXF2OTV7ZZTLTCRBXPVS32UMLOPTI64GE",
+          requesterAddress: "CCO26Y6Z56DDZ3OELO2UKJMIPJVSIT52I23F2MPMR52JBM3HQZZNUZNOR4",
+        },
+        inputSchema: {
+          properties: {
+            patientId: {
+              type: "string",
+              minLength: 58,
+              maxLength: 58,
+              description: "Algorand address of the patient who granted consent.",
+            },
+            requesterAddress: {
+              type: "string",
+              minLength: 58,
+              maxLength: 58,
+              description:
+                "Algorand address of the requester. Must match the address that signed the x402 payment, or the call is refused with 403 and settlement is cancelled.",
+            },
+          },
+          required: ["patientId", "requesterAddress"],
+        },
+        output: {
+          example: {
+            patientId: "2WDV2J2FTWF535SMSUVEBOF5IGXF2OTV7ZZTLTCRBXPVS32UMLOPTI64GE",
+            requesterAddress: "CCO26Y6Z56DDZ3OELO2UKJMIPJVSIT52I23F2MPMR52JBM3HQZZNUZNOR4",
+            scope: "records:summary",
+            summary: {
+              bloodType: "O+",
+              allergies: ["penicillin"],
+              chronicConditions: ["type 2 diabetes (controlled)"],
+              currentMedications: ["metformin 500mg", "lisinopril 10mg"],
+              lastUpdated: "2026-01-15",
+            },
+            consentVerifiedOnChain: true,
+            auditStatus: "recorded",
+            auditTxId: "PLACEHOLDER_ALGORAND_TX_ID",
+            auditSequence: "1",
+            disclaimer:
+              "Synthetic demo data for the Global x402 Challenge — no real patient information exists in this system.",
+          },
+        },
+      },
     ),
   },
   resourceServer,

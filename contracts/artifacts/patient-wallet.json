@@ -1,0 +1,7 @@
+{
+  "note": "Independent TestNet patient wallet, so the consent grant comes from an account that is neither the payer nor the payee. TestNet play money only.",
+  "address": "56LFG5EEHIJ4ZVMPHUMJH6BST2O3D4DMG3AWRZ2SN7Y3LLUDVUDILO66YM",
+  "fundedMicroAlgo": 150000,
+  "fundingTxId": "GCYA23PHR2J43WBOXOXZ7IWCCI2VFSCTUXV7ZQHBLIA54TSTFWLA",
+  "explorer": "https://lora.algokit.io/testnet/account/56LFG5EEHIJ4ZVMPHUMJH6BST2O3D4DMG3AWRZ2SN7Y3LLUDVUDILO66YM"
+}

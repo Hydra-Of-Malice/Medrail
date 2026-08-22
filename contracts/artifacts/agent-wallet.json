@@ -1,0 +1,7 @@
+{
+  "note": "Independent TestNet agent wallet, so agent-demo.ts settles a genuine third-party payment. TestNet play money only.",
+  "address": "UYBTLPHS6APCXVBDPASQMUIQCEORDIR6EMTVMNSDPSVRSR5HEPKQ5GO4YQ",
+  "fundedMicroAlgo": 260000,
+  "fundedUsdcBaseUnits": 1000000,
+  "explorer": "https://lora.algokit.io/testnet/account/UYBTLPHS6APCXVBDPASQMUIQCEORDIR6EMTVMNSDPSVRSR5HEPKQ5GO4YQ"
+}

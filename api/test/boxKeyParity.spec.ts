@@ -109,7 +109,11 @@ describe("box-key derivation parity (G-08 / NFR-011)", () => {
       new TextEncoder().encode(v.scope),
     );
     // This is exactly what web/lib/consent.ts does.
-    const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", inner));
+    // `inner` is Uint8Array<ArrayBufferLike>; SubtleCrypto wants a view over a
+    // plain ArrayBuffer, so narrow it rather than casting the mismatch away.
+    const digest = new Uint8Array(
+      await crypto.subtle.digest("SHA-256", inner.slice().buffer as ArrayBuffer),
+    );
     const key = concatBytes(new TextEncoder().encode("g"), digest);
     expect(hex(key)).toBe(v.expectedGrantBoxKeyHex);
   });

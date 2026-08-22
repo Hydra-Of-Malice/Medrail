@@ -138,6 +138,109 @@ function withPatientLock<T>(patient: string, fn: () => Promise<T>): Promise<T> {
 }
 
 /**
+ * Liveness of the two accounts that keep the audit trail working.
+ *
+ * `log_access` is signed by the operator, so the operator pays the fee; the
+ * audit box is stored under the application account, so *that* account pays the
+ * box MBR. Either running dry stops audit writes, and the failure is silent
+ * from the caller's side — the paid call still returns 200 and degrades to
+ * `auditStatus: "pending"`. Reporting both balances turns that into something
+ * you notice before a demo rather than after one.
+ *
+ * Read stale-while-revalidate: the reader never waits on algod. A liveness
+ * endpoint that blocks on a third-party network call is not a liveness
+ * endpoint, and Fly polls this one on a timer. `primeChainAccountHealth()` is
+ * called once at boot so the first real request already has a value.
+ */
+export interface ChainAccountHealth {
+  operatorAddress: string;
+  operatorSpendableMicroAlgo: number;
+  appAccountAddress: string | null;
+  appAccountSpendableMicroAlgo: number | null;
+  /** Fee per log_access call. Box MBR is charged to the app account, not this one. */
+  microAlgoPerAuditWrite: number;
+  /** Conservative estimate — the smaller of what each account can still fund. */
+  estimatedAuditWritesRemaining: number;
+  warning: string | null;
+  sampledAt: string;
+}
+
+const AUDIT_WRITE_FEE = 1_000;
+/** One grant box costs 22,500 µALGO; an audit box is smaller. Use the larger figure. */
+const APP_MICROALGO_PER_BOX = 22_500;
+const HEALTH_TTL_MS = 30_000;
+
+let healthValue: ChainAccountHealth | undefined;
+let healthError: string | undefined;
+let healthSampledAt = 0;
+let healthInFlight: Promise<void> | undefined;
+
+async function spendable(address: string): Promise<number> {
+  const info = await algod.accountInformation(address).do();
+  return Math.max(0, Number(info.amount) - Number(info.minBalance ?? 0));
+}
+
+async function sampleChainAccountHealth(): Promise<void> {
+  const operator = getOperator();
+  const operatorAddress = operator.addr.toString();
+  const operatorSpendable = await spendable(operatorAddress);
+
+  let appAccountAddress: string | null = null;
+  let appSpendable: number | null = null;
+  if (config.consentAppId) {
+    appAccountAddress = algosdk.getApplicationAddress(config.consentAppId).toString();
+    appSpendable = await spendable(appAccountAddress);
+  }
+
+  const byOperator = Math.floor(operatorSpendable / AUDIT_WRITE_FEE);
+  const byApp = appSpendable === null ? byOperator : Math.floor(appSpendable / APP_MICROALGO_PER_BOX);
+  const remaining = Math.min(byOperator, byApp);
+
+  let warning: string | null = null;
+  if (remaining === 0) {
+    warning = "Audit writes will fail. Fund the operator and/or the application account.";
+  } else if (remaining < 20) {
+    warning = `Only about ${remaining} more audit writes are affordable. Top up before a demo.`;
+  }
+
+  healthValue = {
+    operatorAddress,
+    operatorSpendableMicroAlgo: operatorSpendable,
+    appAccountAddress,
+    appAccountSpendableMicroAlgo: appSpendable,
+    microAlgoPerAuditWrite: AUDIT_WRITE_FEE,
+    estimatedAuditWritesRemaining: remaining,
+    warning,
+    sampledAt: new Date().toISOString(),
+  };
+  healthError = undefined;
+}
+
+/** Refreshes in the background. Never throws, never awaited by a request. */
+export function primeChainAccountHealth(): void {
+  if (healthInFlight) return;
+  healthSampledAt = Date.now();
+  healthInFlight = sampleChainAccountHealth()
+    .catch((e: unknown) => {
+      healthError = e instanceof Error ? e.message : String(e);
+    })
+    .finally(() => {
+      healthInFlight = undefined;
+    });
+}
+
+/**
+ * Returns whatever the last successful sample said, triggering a refresh if it
+ * has gone stale. Exactly one of the two fields is populated: either we have a
+ * reading, or we say why we do not.
+ */
+export function chainAccountHealth(): { chain: ChainAccountHealth | null; chainError: string | null } {
+  if (Date.now() - healthSampledAt >= HEALTH_TTL_MS) primeChainAccountHealth();
+  if (healthValue) return { chain: healthValue, chainError: null };
+  return { chain: null, chainError: healthError ?? "not sampled yet" };
+}
+
+/**
  * Admin-only, real on-chain transaction. Called by our own operator account
  * immediately after the x402 facilitator confirms settlement — see
  * docs/IMPLEMENTATION_PLAN.md section 3 for why this is a follow-up call

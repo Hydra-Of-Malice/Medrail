@@ -56,15 +56,15 @@ jobs:
       - name: Audit dependencies
         working-directory: api
         run: npm audit --audit-level=high
-      - name: Typecheck
+      - name: Typecheck (src, scripts and tests)
         working-directory: api
-        run: npx tsc --noEmit
+        run: npm run typecheck
       - name: Build
         working-directory: api
         run: npm run build
-      - name: Test
+      - name: Test with coverage
         working-directory: api
-        run: npx vitest run
+        run: npm run coverage
 
   web:
     name: Frontend — typecheck + build

@@ -139,7 +139,16 @@ async function main() {
 
   // --- Control: the legitimate call must still work.
   console.log("\nStep 3 — CONTROL: the same payer asserting their OWN address (legitimate)");
-  const control = await paidCall({ patientId: patient, requesterAddress: patient });
+  // A 402 here is retryable: it means the payment was not accepted, not that
+  // the caller was refused the record. It has been seen once (G-37, cause not
+  // established), and reporting a closed finding as re-opened on one sample
+  // would be worse than retrying. A 403 is NOT retried — that would be the
+  // control genuinely failing, which is the thing this step exists to detect.
+  let control = await paidCall({ patientId: patient, requesterAddress: patient });
+  if (control.status === 402) {
+    console.log("  HTTP 402 — payment not accepted. Retrying once (see G-37).");
+    control = await paidCall({ patientId: patient, requesterAddress: patient });
+  }
   console.log(`  HTTP ${control.status}`);
   const ok = control.status === 200 && Boolean((control.body as { summary?: unknown }).summary);
   console.log(`  record released: ${ok}`);

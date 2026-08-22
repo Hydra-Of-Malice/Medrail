@@ -7,7 +7,9 @@
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
     "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.all.json",
     "test": "vitest run",
+    "coverage": "vitest run --coverage --coverage.reporter=text --coverage.include=src/**",
     "test:watch": "vitest"
   },
   "dependencies": {
@@ -24,6 +26,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "@vitest/coverage-v8": "^4.1.11",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^4.1.10"

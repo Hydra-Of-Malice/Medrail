@@ -9,6 +9,36 @@ describe("x402 payment gate", () => {
     expect(body.ok).toBe(true);
   });
 
+  // The health endpoint reports the two balances that keep the audit trail
+  // alive. Reading them needs algod, so the read is stale-while-revalidate:
+  // the response is served from the last sample and never waits on the
+  // network. That is what makes this test fast and offline-safe, and it is
+  // the same property that stops a slow algod from failing Fly's health check.
+  it("reports chain-account health without ever blocking on the network", async () => {
+    const started = Date.now();
+    await app.request("/v1/health");
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
+
+  it("populates exactly one of chain / chainError", async () => {
+    const res = await app.request("/v1/health");
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+
+    expect(body).toHaveProperty("chain");
+    expect(body).toHaveProperty("chainError");
+    // Exactly one of the two is populated: either we read the chain or we say why not.
+    expect((body.chain === null) !== (body.chainError === null)).toBe(true);
+
+    if (body.chain) {
+      expect(typeof body.chain.operatorAddress).toBe("string");
+      expect(body.chain.operatorSpendableMicroAlgo).toBeGreaterThanOrEqual(0);
+      expect(body.chain.estimatedAuditWritesRemaining).toBeGreaterThanOrEqual(0);
+      expect(body.chain.microAlgoPerAuditWrite).toBe(1000);
+    }
+  });
+
   it("returns a real 402 with priced accepts[] for /v1/triage when unpaid", async () => {
     const res = await app.request("/v1/triage", {
       method: "POST",

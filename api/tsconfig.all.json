@@ -1,0 +1,13 @@
+{
+  // The build config compiles only src/ (that is all that ships). But scripts/
+  // and test/ are real, executed TypeScript — scripts/ in particular produces
+  // the on-chain evidence this project is judged on — and `tsc -p tsconfig.json`
+  // never looked at them. A syntax error there stayed invisible until runtime.
+  // This config typechecks everything, emits nothing, and is what CI runs.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "."
+  },
+  "include": ["src", "scripts", "test"]
+}
