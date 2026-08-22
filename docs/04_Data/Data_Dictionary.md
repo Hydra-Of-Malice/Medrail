@@ -451,13 +451,20 @@ Fully specified in §4.3 (response fields) — it is a TypeScript `const` at `ap
 | `algodServer` | string | `NETWORK` | `config.ts:22-25, 51` | AlgoNode public endpoint, **no API key, no timeout, no retry** (`algorand.ts:5`; R-4, REL-003 **NOT IMPLEMENTED**). Still open. |
 | `indexerServer` | string | `NETWORK` | `config.ts:27-30, 52` | Declared but **not referenced anywhere in `api/src/`** — dead configuration (G-29, open). |
 
-### 6.3 Proof script — `api/scripts/e2e-proof.ts`
+### 6.3 Manual verification scripts — `api/scripts/`
+
+Seven scripts, plus the `dotenvLoad.ts` helper they share: `e2e-proof.ts`, `e2e-consent-proof.ts`, `verify-g01-fix.ts`, `provision-agent-wallet.ts`, `provision-patient-wallet.ts`, `grant-consent.ts` and `agent-demo.ts`. None runs in CI. They read `api/.env` from the process environment and `contracts/.env` by path.
 
 | Variable | Type | Nullable | Default | Semantic meaning | Where defined |
 |---|---|---|---|---|---|
-| `API_BASE` | string | yes | `http://localhost:4021` | Target API. | `e2e-proof.ts:24` |
-| `ALGOD_URL` | string | yes | `https://testnet-api.algonode.cloud` | algod for signing. | `e2e-proof.ts:25` |
-| `PROOF_MNEMONIC` | **secret** | yes | falls back to `DEPLOYER_MNEMONIC` from `contracts/.env` | Funded TestNet account that pays. | `e2e-proof.ts:26` |
+| `API_BASE` | string | yes | `http://localhost:4021` | Target API. | `e2e-proof.ts:24`, `agent-demo.ts:33`, `grant-consent.ts:20` |
+| `ALGOD_URL` | string | yes | `https://testnet-api.algonode.cloud` | algod for signing. | `e2e-proof.ts:25`, `agent-demo.ts:34`, `grant-consent.ts:21`, `provision-agent-wallet.ts:27` |
+| `PROOF_MNEMONIC` | **secret** | yes | falls back to `DEPLOYER_MNEMONIC` from `contracts/.env` | Funded TestNet account that pays. Also the funder in `provision-agent-wallet.ts`. | `e2e-proof.ts:26`, `provision-agent-wallet.ts:35` |
+| `AGENT_MNEMONIC` | **secret** | yes | falls back to `PROOF_MNEMONIC`, then `DEPLOYER_MNEMONIC` | The agent's own key. Set to the independently provisioned wallet `UYBTLPHS…` for the recorded run, which is why its payments have a sender distinct from `PAY_TO_ADDRESS`. Left unset, the fallback collapses payer and payee into one account. | `agent-demo.ts:37` |
+| `PATIENT_ADDRESS` | string | yes | falls back to the agent's own address | The patient whose grant the agent relies on. Set to `56LFG5EE…` for the recorded run — the wallet `provision-patient-wallet.ts` created, which is neither the payer nor the payee — so the grant runs patient → agent rather than an account granting itself. | `agent-demo.ts:50` |
+| `PATIENT_MNEMONIC` | **secret** | yes | falls back to `PROOF_MNEMONIC`, then `DEPLOYER_MNEMONIC` | The key that signs `grant_access` in `grant-consent.ts`. The backend is not in that path. | `grant-consent.ts:31` |
+
+> The two mnemonic fallbacks are the ones to watch when reading a transcript. A run with `AGENT_MNEMONIC` and `PATIENT_ADDRESS` set exercises three parties; a run without them exercises one account playing all of them. The recorded agent run set both.
 
 ### 6.4 Web client — `web/lib/config.ts`, `web/.env.example`
 

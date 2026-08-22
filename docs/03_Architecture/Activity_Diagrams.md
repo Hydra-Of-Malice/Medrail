@@ -19,7 +19,7 @@ flowchart TD
     PRE -->|"yes"| REFLECT["Reflect Access-Control-Request-Headers<br/>expose PAYMENT-REQUIRED, PAYMENT-RESPONSE"] --> DONE1(["204"])
     PRE -->|"no"| RLIM{"path rate-limited?<br/>consent/status 60/min · arc56 30/min<br/>records/summary 30/min · app.ts:44-46"}
     RLIM -->|"window exhausted"| C429(["HTTP 429 · Retry-After<br/>RATE_LIMITED · retryable true<br/>no facilitator call is made"])
-    RLIM --> PAYMW["paymentMiddleware inside the outage wrapper<br/>app.ts:50-60, wrapped at :73-105"]
+    RLIM --> PAYMW["paymentMiddleware inside the outage wrapper<br/>app.ts:58-175, wrapped at :73-105"]
 
     PAYMW --> ISPRICED{"method + path in the priced map?<br/>POST /v1/triage · POST /v1/interaction-check<br/>POST /v1/records/summary"}
     ISPRICED -->|"no — the 5 free routes"| HANDLER
@@ -101,7 +101,7 @@ stateDiagram-v2
     end note
 ```
 
-**Live state on application `768743428`:** `total_grants_active = 4` and `total_audit_entries = 5`. The grant boxes come from `contracts/scripts/exercise_contract.py` plus the repeatable proof scripts `api/scripts/e2e-consent-proof.ts` and `api/scripts/verify-g01-fix.ts`, each of which issues a real grant before making its paid call.
+**Live state on application `768743428`:** `total_grants_active = 4` and `total_audit_entries = 5`. The grant boxes come from `contracts/scripts/exercise_contract.py`; from the repeatable proof scripts `api/scripts/e2e-consent-proof.ts` and `api/scripts/verify-g01-fix.ts`, each of which issues a real grant before making its paid call; and from `api/scripts/grant-consent.ts`, which records a patient's grant to a named agent as a standalone transaction the patient signs itself — the path used for `IG4XEBTM…`, the grant that let the independent agent of [`./Sequence_Diagrams.md`](./Sequence_Diagrams.md) §10 read a record it does not own.
 
 **Counter semantics worth stating.** Nothing decrements `total_grants_active` on expiry, so it means "grant boxes not yet revoked", not "grants currently valid". Finding **G-32** is open on exactly that: the name promises more than the counter delivers, and anyone reading it as a dashboard would be wrong.
 
@@ -279,10 +279,10 @@ flowchart TD
     B8 --> END
     C6 --> END
     END{"pipeline ends here"}
-    END --> MISSING["ABSENT FROM THE PIPELINE — CI-3<br/>no npm audit / pip-audit / Dependabot / CodeQL — SEC-014<br/>no coverage measurement or gate<br/>no container image build — api/Dockerfile has NEVER been built<br/>no artifact publishing<br/>no deployment stage"]
+    END --> MISSING["ABSENT FROM THE PIPELINE — CI-3<br/>no pip-audit / Dependabot / CodeQL — SEC-014<br/>coverage measured, but no threshold gate<br/>no container image build in CI — both images built by hand, 2026-08-22<br/>no artifact publishing<br/>no deployment stage"]
 ```
 
-**The precise statement of CI-1, which matters because it is easy to overstate.** The workflow is correct in content and every job it defines passes locally: API typecheck **PASS**, API build **PASS**, API tests **45 passed**, contract tests **28 passed**, web typecheck **PASS**, web build **PASS**. The problem is the trigger, not the code. `on.push.branches` is `[main]` while the repository's only branch is `master`, so the workflow has never fired on a push, and the repository has no pull requests for the `pull_request` trigger to catch. **The green badge is not green — it has never run.** The fix is one line, either way round: rename the branch, or change the trigger.
+**The precise statement of CI-1, which matters because it is easy to overstate.** The workflow is correct in content and every job it defines passes locally: API typecheck **PASS**, API build **PASS**, API tests **93 passed**, contract tests **28 passed**, web typecheck **PASS**, web build **PASS**. The problem is the trigger, not the code. `on.push.branches` is `[main]` while the repository's only branch is `master`, so the workflow has never fired on a push, and the repository has no pull requests for the `pull_request` trigger to catch. **The green badge is not green — it has never run.** The fix is one line, either way round: rename the branch, or change the trigger.
 
 **CI-2 is a design consequence, not an accident.** `api/test/x402-flow.spec.ts` imports `api/src/app.ts`, whose payment middleware fetches `/supported` from the live facilitator — the same coupling that produces R-1 at runtime. Hermetic tests would need a stubbed facilitator client, which the SDK's `HTTPFacilitatorClient` seam makes straightforward. **RECOMMENDED**, not present.
 

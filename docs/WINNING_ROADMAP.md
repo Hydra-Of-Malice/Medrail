@@ -16,7 +16,7 @@ architecture that is correct and proven beats a more elaborate one that is neith
 
 ## Phase 1 — Must fix before submission — **COMPLETE**
 
-All items were implemented and verified on 2026-08-21. Test count went **32 → 73**.
+All items were implemented and verified on 2026-08-21. Test count went **32 → 121**.
 
 | # | Action | Gap | Status |
 |---|---|---|---|

@@ -11,7 +11,7 @@
 1. **No invented commercial facts.** No competitor pricing, funding, revenue, customer count, market share, or user number appears anywhere below. Where such a figure would strengthen the argument, the cell reads `[REQUIRES EXTERNAL VALIDATION — no source in repo]`.
 2. **No named-vendor claims.** Commercial clinical APIs are compared as a *model*, not as specific products, because specific product claims cannot be verified from this repository.
 3. **No claim that MedRail is better on an unverified axis.** Where MedRail's own capability is **UNVALIDATED** or **NOT IMPLEMENTED**, the comparison says so in the same cell.
-4. **The honest frame.** MedRail is a hackathon-scale TestNet demonstration with 73 tests, a handful of settled self-payments, five audit entries it wrote itself, and no users. The comparators below are, variously, ratified international standards and running commercial businesses. This document compares *mechanisms*, not maturity. Any reading of these tables as "MedRail wins" is a misreading.
+4. **The honest frame.** MedRail is a hackathon-scale TestNet demonstration with 121 tests, a handful of settled payments between wallets it provisioned and funded itself, five audit entries it wrote itself, and no users. The comparators below are, variously, ratified international standards and running commercial businesses. This document compares *mechanisms*, not maturity. Any reading of these tables as "MedRail wins" is a misreading.
 
 ---
 
@@ -62,7 +62,7 @@
 | **Onboarding** | Contract → credentials → key provisioning; human, organisational, business-day scale `[external]` | None `[external]` | **None.** No account, no key, no registration exists in the codebase to create one |
 | **Caller prerequisites** | An API key `[external]` | A funded wallet on the target chain `[external]` | An Algorand account opted in to USDC ASA `10458941` with ≥ the price. **No ALGO needed** — the facilitator supplies `extra.feePayer`, and the settled transaction carries `fee: 0` |
 | **Price discovery** | Sales, docs, or a pricing page `[external]` | The 402 response `[external]` | The 402 response: `amount`, `asset`, `network`, `payTo`, `maxTimeoutSeconds`, `extra.feePayer`. FR-002 **VALIDATED**; live capture in the fact ledger §4 |
-| **Price** | `[REQUIRES EXTERNAL VALIDATION — no source in repo]` | `[unverified]` | `$0.02` / `$0.02` / `$0.05` — 20000 / 20000 / 50000 µUSDC. `api/src/app.ts:50-60`, and advertised per-route with its gate at `GET /` |
+| **Price** | `[REQUIRES EXTERNAL VALIDATION — no source in repo]` | `[unverified]` | `$0.02` / `$0.02` / `$0.05` — 20000 / 20000 / 50000 µUSDC. `api/src/app.ts:58-175`, and advertised per-route with its gate at `GET /` |
 | **Settlement proof to the caller** | An invoice `[external]` | A settled on-chain transaction `[external]` | `PAYMENT-RESPONSE` header carrying a transaction confirmable on any public indexer. tx `OYRQRKYA7WUKBVLWTOFJSJMZFBW7VCNGP5VGH5EBUJGRCVFQFJRQ` |
 | **Payment ↔ authorisation coupling** | Decoupled — the key grants access, the invoice settles money `[external]` | Typically the payment **is** the authorisation `[external]` | **Both, deliberately, and in an unusually literal sense.** Two open endpoints where payment is the only gate; one endpoint where payment **and** an on-chain consent check are both required — and where the payment's *signature* supplies the identity the consent check is made against (`api/src/x402Payer.ts`). The split is the product thesis ([`../JUDGES.md`](../JUDGES.md); [`../ARCHITECTURE.md`](../ARCHITECTURE.md)); the identity recovery is what makes the gated half an access control without an account system |
 | **Refusal semantics** | 401/403 on a bad key, typically unbilled `[external]` | `[unverified]` | **403, unbilled.** `@x402/hono` reaches settlement only on a status below 400, so every refusal — bad payer binding, absent consent — cancels the payment. The body says so (`charged: false`) and points at the free pre-flight check (`api/src/routes/records.ts:59-70`). The residual cost falls on MedRail: a denial still submits a `logAccess` transaction the operator account pays for |
@@ -90,7 +90,7 @@
 | **Data-model coupling** | Tight to FHIR `[external]` | Vendor-specific `[external]` | `[unverified]` | **Loose.** `scope` is a free-form string, so a new endpoint needs no contract change (DATA-003). Cost: no scope vocabulary is published, and `SCOPE` is hard-coded to `"records:summary"` in the only consumer (`records.ts:12`) |
 | **Third-party integrability** | Register a client `[external]` | Obtain a key `[external]` | Read the chain `[external]` | **`GET /v1/consent/arc56` serves the compiled ARC-56 spec over HTTP**, so an integrator can build ABI calls against App `768743428` without cloning this repository (`api/src/app.ts:141-147`); `GET /` supplies the App ID, network, CAIP-2 id and spec URL alongside every route with its price and gate. FR-015, FR-017 **IMPLEMENTED** |
 | **Internal consistency risk** | `[unverified]` | `[unverified]` | `[unverified]` | **Bounded.** Box-key derivation is still implemented three times — `contract.py:95-98`, `api/src/services/algorand.ts:63-79`, `web/lib/consent.ts:26-34` — but all three are now asserted against one shared golden-vector fixture (`api/test/fixtures/box-key-vectors.json`) from both the TypeScript and Python sides. NFR-011 **VALIDATED** |
-| **Test posture** | `[unverified]` | `[unverified]` | `[unverified]` | **73 tests: 28 contract (AVM simulator) + 45 API.** `routes/records.ts` is covered by `x402Payer.spec.ts` and `app.spec.ts`; box-key parity is covered across three runtimes; the end-to-end composition and the impersonation defence are covered by two live scripts. **`services/algorand.ts` still has no dedicated unit-test file** (G-05), and there are **zero frontend tests**. No coverage measurement and no load test (G-24); `npm audit --audit-level=high` runs in CI and both packages report 0 vulnerabilities |
+| **Test posture** | `[unverified]` | `[unverified]` | `[unverified]` | **121 tests: 28 contract (AVM simulator) + 93 API.** `routes/records.ts` is covered by `x402Payer.spec.ts` and `app.spec.ts`; box-key parity is covered across three runtimes; the end-to-end composition and the impersonation defence are covered by two live scripts. **`services/algorand.ts` still has no dedicated unit-test file** (G-05), and there are **zero frontend tests**. No coverage measurement and no load test (G-24); `npm audit --audit-level=high` runs in CI and both packages report 0 vulnerabilities |
 
 ---
 
@@ -117,7 +117,7 @@
 
 | # | Advantage | Evidence | Status |
 |---|---|---|---|
-| 1 | **The patient is the authority, not an organisation.** Both mutating consent methods take `Txn.sender` as the patient. | `contract.py:148`, `:179`; tx `X2BQ5FD4…`, `OV2J2T5V…` | SEC-003 **VALIDATED** |
+| 1 | **The patient is the authority, not an organisation.** Both mutating consent methods take `Txn.sender` as the patient. | `contract.py:148`, `:179`; tx `X2BQ5FD4…`, `OV2J2T5V…`, and `IG4XEBTM…` — a grant signed by a patient account (`56LFG5EE…`) that is neither the payer nor the payee | SEC-003 **VALIDATED** |
 | 2 | **No key ever reaches the backend.** Grant/revoke are signed client-side against AlgoNode. | `web/lib/consent.ts:44-89`; no key-ingress path in `api/src` | NFR-008 **IMPLEMENTED** |
 | 3 | **Anyone can verify a permission, for free, without an integration.** | `contract.py:197-209`; `atc.simulate()` at `algorand.ts:98` | SEC-009 **IMPLEMENTED** |
 | 4 | **Neither party needs to onboard.** Box storage, not local state. | `contract.py:11-17`, `:114-116` | **IMPLEMENTED** |
@@ -132,7 +132,7 @@
 
 | # | Disadvantage | Against | Status |
 |---|---|---|---|
-| 1 | **Nobody but the author has ever used it.** Every settled payment is a self-payment; all five audit entries were written by this project's own scripts; nothing is publicly hosted, on MainNet, or listed on Bazaar. | C-3, C-4, C-6, decisively | The single largest gap |
+| 1 | **Nobody outside the project has ever used it.** Payments do settle between independent accounts — `UYBTLPHS…` → `2WDV2J2F…`, a payer keypair the service does not control — but that payer's TestNet float was seeded from the project's own wallet, so no external party has paid for anything; all five audit entries were written by this project's own scripts; nothing is publicly hosted, on MainNet, or listed on Bazaar. | C-3, C-4, C-6, decisively | The single largest gap — now a demand gap rather than a payment-mechanics one |
 | 2 | **No identity layer above the keypair.** The payer binding proves control of an address; nothing connects an address to a person, a clinician, or a licence. | C-2, C-3 | No mechanism exists, planned or otherwise |
 | 3 | **The consent model is minimal** — a status byte and two timestamps against FHIR's full provision model. | C-1 | By design; still a gap |
 | 4 | **The permission graph is public metadata.** Enumerable by anyone, forever. | C-1, C-2, C-3 | Inherent to the design. No longer exploitable for impersonation, but still a disclosure |
@@ -154,8 +154,8 @@ The competitive field is `[unverified]` — no entrant list was fetched and none
 | **Composition** | The plausible differentiator: payment, on-chain authorisation, and audit append in one call. **All three legs proven on TestNet, in a single repeatable run.** |
 | **Use of the payment as a credential** | Possibly a differentiator, `[unverified]` against the field: the requester's identity is recovered from the payment signature rather than asserted, so the gated endpoint authorises without an account system. Whether other entrants bind payer to a domain identity is unknown. |
 | **Volume strategy** | The open/gated split is a deliberate answer to a structural problem — a consent-gated-only design cannot generate leaderboard volume, since it requires a pre-existing patient–requester relationship. Whether other entrants reasoned this way is `[unverified]`. |
-| **Evidence discipline** | Likely a differentiator; every claim is transaction-linked, and the two live verification scripts (`e2e-consent-proof.ts`, `verify-g01-fix.ts`) write their raw output to `contracts/artifacts/`. Undercut by DOC-1, DOC-4, DOC-9. |
-| **Actual payment volume** | **Zero third-party payments.** Every settled payment has sender == receiver. Not volume, and must never be described as such. |
+| **Evidence discipline** | Likely a differentiator; every claim is transaction-linked, and seven live verification scripts in `api/scripts/` (`e2e-proof.ts`, `e2e-consent-proof.ts`, `verify-g01-fix.ts`, `agent-demo.ts`, `provision-agent-wallet.ts`, `provision-patient-wallet.ts`, `grant-consent.ts`) re-run the proofs on demand, most of them writing their raw output to `contracts/artifacts/`. Undercut by DOC-1, DOC-4, DOC-9. |
+| **Actual payment volume** | **Zero external payments.** The settlements are genuinely account-to-account — distinct payer and payee (`UYBTLPHS…` → `2WDV2J2F…`), an independent keypair — but the payer's float was seeded from the project's own wallet. Not volume, and must never be described as such. |
 | **Entry classification** | **Composite** — three priced endpoints, one `payTo` (FR-101). Orchestrator explicitly not claimed. |
 
 ---
@@ -164,7 +164,7 @@ The competitive field is `[unverified]` — no entrant list was fetched and none
 
 | Change | Effect |
 |---|---|
-| **A payment from an account that is not the project's own** | Removes disadvantage 1, the only one that matters commercially. Nothing in the codebase blocks it; it needs a public endpoint and a caller. |
+| **A payment from a party unconnected to the project** | The payer is already a separate account the service does not control; what is still missing is money the project did not put there. Removes disadvantage 1, the only one that matters commercially. Nothing in the codebase blocks it; it needs a public endpoint and a caller. |
 | **Publish the endpoint** | The Fly configuration is correct and unused. Until something is reachable, every other advantage in §6.1 is a property of a repository rather than of a service. |
 | **An identity layer above the address** — clinician credentialing, or a verifiable-credential attestation bound to the requester key | Removes disadvantage 2 and is the precondition for any real clinical deployment. No design exists. |
 | **Expose the audit trail** — an endpoint and a UI over `get_audit_count` / `get_audit_entry` | Five entries exist on-chain with no way for a patient to read them, which is the patient-facing half of the ownership story told but not shown. |

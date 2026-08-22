@@ -173,7 +173,7 @@ Verify:
 cd api
 npx tsc --noEmit       # expect: 0 errors
 npm run build          # expect: PASS, emits api/dist
-npx vitest run         # expect: 45 passed  — NOTE: makes a live call to the facilitator
+npx vitest run         # expect: 93 passed  — NOTE: makes a live call to the facilitator
 ```
 
 > The API test suite is **not hermetic**. `api/test/x402-flow.spec.ts` imports `api/src/app.ts`, which initialises `x402ResourceServer` against `FACILITATOR_URL` and fetches `/supported` at first priced request. If `facilitator.goplausible.xyz` is unreachable, these tests fail with a misleading error. This is finding CI-2; see `CI_CD.md`.
@@ -470,7 +470,7 @@ Run top to bottom. Every expected result below was actually observed by the revi
 | 2 | `cd contracts && $PY -m pytest tests/ -q` | **28 passed** | no |
 | 3 | `cd api && npx tsc --noEmit` | 0 errors | no |
 | 4 | `cd api && npm run build` | PASS | no |
-| 5 | `cd api && npx vitest run` | **45 passed** — needs the facilitator reachable | no |
+| 5 | `cd api && npx vitest run` | **93 passed** — needs the facilitator reachable | no |
 | 6 | `cd web && npx tsc --noEmit -p tsconfig.json` | 0 errors | no |
 | 7 | `cd web && npm run build` | PASS, 2 static routes | no |
 | 8 | `curl localhost:4021/v1/health` | `200`, `consentAppId: 768743428` | no |

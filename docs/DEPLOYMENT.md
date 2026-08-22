@@ -17,7 +17,7 @@ cd ../api
 npm install
 npx tsc --noEmit
 npm run build
-npx vitest run                                         # expect 45 passed
+npx vitest run                                         # expect 93 passed
 
 # Frontend: typecheck + production build
 cd ../web
@@ -88,6 +88,26 @@ npm run build
    paid `$0.05` call. Produces `contracts/artifacts/e2e-consent-proof.json` with the grant,
    payment, and audit transaction IDs — see `docs/PROOF.md` §9. Requires the app account to hold
    enough ALGO for box MBR (it is funded with 5 ALGO at deploy).
+7. **Prove it with a payer and a patient this service does not control** (three roles, three
+   accounts).
+   ```bash
+   npx tsx scripts/provision-agent-wallet.ts          # creates, funds and opts in an independent agent
+   # save the printed mnemonic to api/.env as AGENT_MNEMONIC
+   npx tsx scripts/provision-patient-wallet.ts        # a patient account that is neither payer nor payee
+   npx tsx scripts/grant-consent.ts <agent address>   # the patient signs; the backend is never in the path
+   npx tsx scripts/agent-demo.ts
+   ```
+   The agent pays from its own keypair — `UYBTLPHS6APCXVBDPASQMUIQCEORDIR6EMTVMNSDPSVRSR5HEPKQ5GO4YQ`,
+   which this service does not control — so sender ≠ receiver on all three settlements:
+   `DOSKCNKJRXIMY2UDSDZ377LKPZQIZJW5JHCGUAGKOYV6KUCFYKIA` ($0.02 triage),
+   `PLBFDDADW576IUCH62HGGYI4AJQNO3QXSENNDIBKAORWVMP7NVHQ` ($0.02 interaction) and
+   `COMJ3TQOGTKP6LXDJS7HZY7B45QZJQWXXJ23HQ3IDDQYD7GRK36A` ($0.05 record). The patient
+   (`56LFG5EEHIJ4ZVMPHUMJH6BST2O3D4DMG3AWRZ2SN7Y3LLUDVUDILO66YM`) signed its own grant to that
+   agent in `IG4XEBTMRCKI724ZVHSYUN4ECTYBXAGZM5N35NP4Y3ZVWECG7WUQ`. Full record in
+   `docs/PROOF.md` §10. Stated precisely: the
+   agent's TestNet USDC float was seeded from the project's own wallet, because TestNet USDC has no
+   other practical source — so these are genuine account-to-account settlements, but **no external
+   or unrelated party has paid for this service**.
 
 ## Stage 2 — Public hosting (your accounts, not performed for you)
 

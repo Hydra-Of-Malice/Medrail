@@ -1,6 +1,6 @@
 # MedRail — Sequence Diagrams
 
-**Purpose:** trace every interaction of consequence — the two payment flows, the consent lifecycle, the consent-gated read in both outcomes, one attack and its block, and two degradation paths — at message granularity.
+**Purpose:** trace every interaction of consequence — the two payment flows, the consent lifecycle, the consent-gated read in both outcomes, one attack and its block, two degradation paths, and one autonomous agent composing most of them into a single task — at message granularity.
 
 **Status of this document:** Descriptive of the working tree on branch `main`. Each diagram is annotated with the validation status of the path it shows. Every path here has now executed against live infrastructure or is asserted by test; diagram 7 is an attack that is **MITIGATED**, proven by a live TestNet simulation. Status labels per the project fact ledger.
 
@@ -13,8 +13,9 @@ Related: [`./LLD.md`](./LLD.md) · [`./HLD.md`](./HLD.md) · [`./Activity_Diagra
 | Alias | Real component |
 |---|---|
 | Client | Any x402 v2 client — `@x402/fetch`, `api/scripts/e2e-proof.ts`, or `web/lib/x402Client.ts` |
+| Ag | The autonomous agent of diagram 10 — `api/scripts/agent-demo.ts`, a stock `@x402/fetch` client with no MedRail-specific code |
 | API | `medrail-api`, Hono app at `api/src/app.ts` |
-| Pay | `paymentMiddleware` from `@x402/hono`, wired at `api/src/app.ts:50-60` and wrapped for outage handling at `:73-105` |
+| Pay | `paymentMiddleware` from `@x402/hono`, wired at `api/src/app.ts:58-175` and wrapped for outage handling at `:73-105` |
 | RS | `x402ResourceServer` + `ExactAvmScheme`, `api/src/x402.ts:11-14` |
 | Fac | GoPlausible facilitator, `https://facilitator.goplausible.xyz` |
 | Gw | `api/src/services/algorand.ts` |
@@ -58,7 +59,7 @@ sequenceDiagram
 
 **Walkthrough.** CORS runs first (`api/src/app.ts:22`), then the three path-scoped rate limiters (`:44-46`), then the payment middleware inside its outage wrapper (`:50`, `:73`), then — only on success — the route modules (`:107-111`). Because the gate precedes every handler, an unpaid request never reaches zod. The challenge body is empty; the entire payload is the base64 `PAYMENT-REQUIRED` header. Decoded, it carries `x402Version: 2`, the resource URL and description, and `accepts[0]` = `{scheme: "exact", network: "algorand:SGO1GKSzyE7IEPItTxCByw9x8FmnrCDexi9/cOUJOiI=", amount: "20000", asset: "10458941", payTo: "2WDV2J2FTWF535SMSUVEBOF5IGXF2OTV7ZZTLTCRBXPVS32UMLOPTI64GE", maxTimeoutSeconds: 300, extra: {feePayer: "ZMFK2OI7ZBD2U27ISERZC4S6LKM6WMFJPZQ4MYNJDZ2VNBNMBA67RA22AA"}}`.
 
-**Evidence:** `api/src/app.ts:50-60`; `api/src/x402.ts:11-32`; assertions at `api/test/x402-flow.spec.ts:24` (`amount === "20000"`) and `:45` (`"50000"`).
+**Evidence:** `api/src/app.ts:58-175`; `api/src/x402.ts:11-32`; assertions at `api/test/x402-flow.spec.ts:24` (`amount === "20000"`) and `:45` (`"50000"`).
 
 **Note on the initialise step.** `asset` and `extra.feePayer` are **not** MedRail configuration — `priced()` sets no `asset` field at all (`api/src/x402.ts:16-19`). They come from the facilitator's `/supported`. The 402 therefore cannot be constructed offline, which makes the priced surface dependent on a third party's availability. That dependency is now *handled* rather than merely suffered: a failed fetch produces a 503 with `Retry-After: 30` and a stable error code (diagram 8). It is not *removed* — there is still no cached `/supported` fallback and no second facilitator, so REL-001 is **PARTIALLY IMPLEMENTED**. PERF-001 **IMPLEMENTED**: the cache means no per-request outbound call.
 
@@ -104,14 +105,14 @@ sequenceDiagram
     Fac-->>Pay: settled — tx OYRQRKYA7WUKBVLWTOFJSJMZFBW7VCNGP5VGH5EBUJGRCVFQFJRQ
     Pay-->>Client: HTTP 200 + JSON + PAYMENT-RESPONSE header
 
-    Note over Chain: type axfer · asset 10458941 · amount 20000 = $0.02 at 6 decimals<br/>fee 0, fee-sponsored · group XQzhbjBAqt0AjC5AByQsCxGbMdEuca3ZZFMyFBTb7K4=<br/>note decodes to x402-payment-v2-1786140083822<br/>sender == receiver == 2WDV2J2FTWF535SMSUVEBOF5IGXF2OTV7ZZTLTCRBXPVS32UMLOPTI64GE
+    Note over Chain: type axfer · asset 10458941 · amount 20000 = $0.02 at 6 decimals<br/>fee 0, fee-sponsored · group XQzhbjBAqt0AjC5AByQsCxGbMdEuca3ZZFMyFBTb7K4=<br/>note decodes to x402-payment-v2-1786140083822<br/>in this early e2e-proof.ts run only: sender == receiver == 2WDV2J2FTWF535SMSUVEBOF5IGXF2OTV7ZZTLTCRBXPVS32UMLOPTI64GE<br/>the agent run of diagram 10 pays from an independent account
 ```
 
 **Walkthrough.** The two-attempt shape is the x402 protocol itself, not a MedRail retry: the client discovers the price from the 402 and re-issues with a signed payment. MedRail never inspects the signature for *validity* — it hands the header to the facilitator and acts on the verdict (TB-2). It does read the header for *identity* on the consent-gated route, which is a separate concern and the subject of diagram 7. No MedRail-specific knowledge is required of the client: stock `@x402/fetch` with `ExactAvmScheme` produced this transaction via `api/scripts/e2e-proof.ts`, and the result is committed at `contracts/artifacts/e2e-proof.json` with `httpStatus: 200`.
 
 **Note the verify/settle split.** Verification happens before the handler and settlement after it. That is not an implementation detail: it is the reason no failure inside MedRail can consume a caller's money, and it is what every "failure" diagram below depends on.
 
-**Honesty note.** Every settled payment to date is a **self-payment** — sender and receiver are the same address, disclosed in `docs/PROOF.md` §6. Each is a genuine facilitator-settled x402 transfer and together they prove the protocol path end to end; they are not third-party payment volume. Several now exist, each with a committed evidence file: `2VRBXOMH…` and `OYRQRKYA…` for `/v1/triage` (`e2e-proof.json`, which the repeatable script overwrites), `5DKFUULW…` for the consent-gated route (`e2e-consent-proof.json`), and `QZIQWHN5…` for the G-01 control call (`g01-verification.json`).
+**Honesty note.** The run diagrammed above is a **self-payment** — sender and receiver are the same address — as are all of the early proof-script runs, disclosed in `docs/PROOF.md` §6. That is no longer true of every payment: the agent run of diagram 10 settles from an **independent keypair** (`UYBTLPHS…`, which this service does not control) to the service address (`2WDV2J2F…`), with sender ≠ receiver confirmed against the public indexer (`docs/PROOF.md` §10). What has not changed is where the money came from — the agent's TestNet USDC float was seeded from the project's own wallet, because TestNet USDC has no other practical source — so none of this is third-party payment volume, and no external party has paid for the service. Each is a genuine facilitator-settled x402 transfer, and together they prove the protocol path end to end. The early runs each have a committed evidence file: `2VRBXOMH…` and `OYRQRKYA…` for `/v1/triage` (`e2e-proof.json`, which the repeatable script overwrites), `5DKFUULW…` for the consent-gated route (`e2e-consent-proof.json`), and `QZIQWHN5…` for the G-01 control call (`g01-verification.json`).
 
 **Evidence:** `contracts/artifacts/e2e-proof.json`; `api/scripts/e2e-proof.ts:52-76`; scoring logic at `api/src/services/triageScorer.ts:53-73` (35 + 35 = 70 → `emergency`).
 
@@ -537,3 +538,130 @@ sequenceDiagram
 | Bundle the audit call into the client's payment group | Fully atomic | Breaks off-the-shelf x402 client compatibility — explicitly rejected in `docs/ARCHITECTURE.md:95-108` |
 
 The trade-off between "no database" and "never lose an audit entry" is genuine and consciously unresolved in this build. See [`./HLD.md`](./HLD.md) §5 and [`./ADRs/ADR-005-audit-write-as-follow-up-transaction.md`](./ADRs/ADR-005-audit-write-as-follow-up-transaction.md).
+
+---
+
+## 10. An autonomous agent completes a clinical task — discover, decide, pay, verify
+
+> ### **STATUS: VALIDATED on TestNet.** Executed end to end, output captured, every payment settled.
+> Produced by `api/scripts/agent-demo.ts`. This is a **manual verification script, not an automated test**, and it does **not** run in CI. It is the only diagram in this document whose subject is a *caller* rather than the service: everything below is one client with no MedRail account, no API key and no prior relationship, driving diagrams 1, 2, 4 and 6 in sequence to finish a single piece of work. Three roles appear in it, held by three separate accounts — the agent that pays (`UYBTLPHS…`, its own keypair), the patient that granted consent (`56LFG5EE…`, its own keypair), and the service that is paid (`2WDV2J2F…`). No account holds two of those roles.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Ag as Agent — agent-demo.ts
+    participant API as MedRail API
+    participant Fac as GoPlausible facilitator
+    participant Gw as services/algorand.ts
+    participant Algod as AlgoNode algod
+    participant App as MedRailConsent 768743428
+
+    Note over Ag: Given ONE task and ONE base URL.<br/>No account · no API key · no MedRail constants in the source.<br/>Signs with its own keypair UYBTLPHS… — the service does not hold it.
+
+    rect rgb(235, 245, 255)
+    Note over Ag,API: 1 — DISCOVER · costs nothing · proves nothing · asks for nothing
+    Ag->>API: GET /
+    API-->>Ag: 8 endpoints as method · path · price · gate<br/>contract appId 768743428 · network · networkCaip2 · arc56SpecUrl<br/>x402 version 2 · scheme exact · facilitator URL
+    Ag->>Ag: reads the prices back out of the index<br/>triage $0.02 · interaction-check $0.02 · records/summary $0.05<br/>notes records/summary is gated by x402 PLUS on-chain consent
+    Note over Ag,API: The agent now knows what exists, what it costs, and<br/>what is conditional. None of it was compiled in.
+    end
+
+    rect rgb(240, 240, 240)
+    Note over Ag,Fac: 2 — TRIAGE $0.02 · the full x402 handshake, shown once
+    Ag->>API: POST /v1/triage — unpaid
+    API-->>Ag: 402 + PAYMENT-REQUIRED
+    Ag->>Ag: ExactAvmScheme builds and signs an axfer<br/>asset 10458941 · amount 20000 · fee paid by the facilitator
+    Ag->>API: POST /v1/triage + PAYMENT-SIGNATURE
+    API->>Fac: verify
+    Fac-->>API: verified · nothing settled yet
+    API->>API: scoreTriage(...) — pure function over a static table, no model
+    API->>Fac: handler returned 200 — processSettlement
+    Fac-->>API: settled · tx DOSKCNKJ…FYKIA · sender UYBTLPHS… ≠ receiver 2WDV2J2F…
+    API-->>Ag: 200 band=EMERGENCY score=70 + PAYMENT-RESPONSE
+    end
+
+    rect rgb(240, 240, 240)
+    Note over Ag,Fac: 3 — INTERACTION CHECK $0.02 · same handshake, abbreviated
+    Ag->>API: POST /v1/interaction-check + PAYMENT-SIGNATURE<br/>after its own 402 round trip
+    API->>Fac: verify · then settle on the 200
+    Fac-->>API: settled · tx PLBFDDAD…P7NVHQ
+    API-->>Ag: 200 MAJOR — warfarin + aspirin
+    Note over Ag: Two medications on board change the management of a<br/>suspected cardiac event. The agent needs the record.
+    end
+
+    rect rgb(235, 250, 235)
+    Note over Ag,App: 4 — FREE PRE-FLIGHT · the step that avoids a wasted $0.05
+    Ag->>API: GET /v1/consent/status — patient · requester · scope records:summary
+    API->>Gw: checkAccess(patient, requester, scope)
+    Gw->>Algod: atc.simulate — nothing submitted, no fee
+    Algod->>App: evaluate check_access
+    App-->>Algod: true
+    Algod-->>Gw: returnValue true
+    Gw-->>API: true
+    API-->>Ag: 200 granted=true · cost $0.00
+    alt granted is false
+        Ag->>Ag: DECLINE — report the two paid findings and stop<br/>agent-demo.ts:194-197
+        Note over Ag,App: No 402 requested · no payment signed · no money moved.<br/>THE AGENT NEVER PAYS TO BE TOLD NO.
+    end
+    end
+
+    rect rgb(240, 240, 240)
+    Note over Ag,App: 5 — GATED CALL $0.05 · the spend is now justified
+    Ag->>API: POST /v1/records/summary + PAYMENT-SIGNATURE<br/>requesterAddress is the agent's OWN address
+    API->>Fac: verify 50000 microUSDC
+    Fac-->>API: verified · not settled
+    API->>API: payerFromRequest — the payer must equal requesterAddress<br/>otherwise 403, see diagram 7
+    API->>Gw: checkAccess — the server's own read, not the agent's word for it
+    Gw->>App: simulate check_access
+    App-->>Gw: true
+    API->>Gw: logAccess(...) — audit append, signed by the ADMIN key
+    Gw->>Algod: atc.execute
+    Algod->>App: log_access — assert Txn.sender == admin
+    App-->>Algod: next_seq recomputed on-chain
+    Algod-->>Gw: audit appended · tx E6ZTGEAO… · txId returned to the caller
+    Gw-->>API: txId + sequence
+    API->>Fac: handler returned 200 — processSettlement
+    Fac-->>API: settled · tx COMJ3TQO…GRK36A · round 66563944
+    API-->>Ag: 200 · consentVerifiedOnChain true<br/>auditStatus recorded · auditTxId · the synthetic summary
+    end
+
+    rect rgb(255, 250, 235)
+    Note over Ag,App: 6 — REPORT
+    Ag->>Ag: one assessment, plus its own ledger<br/>$0.02 + $0.02 + $0.05 = $0.09 across 3 settled transactions<br/>zero accounts created · zero API keys issued · zero invoices
+    end
+```
+
+**What the three transaction ids are.** Three settled payments, each from the agent's account (`UYBTLPHS…`) to the service's (`2WDV2J2F…`):
+
+| Step | What it bought | Transaction |
+|---|---|---|
+| 2 | `/v1/triage` — $0.02 | `DOSKCNKJRXIMY2UDSDZ377LKPZQIZJW5JHCGUAGKOYV6KUCFYKIA` |
+| 3 | `/v1/interaction-check` — $0.02 | `PLBFDDADW576IUCH62HGGYI4AJQNO3QXSENNDIBKAORWVMP7NVHQ` |
+| 5 | `/v1/records/summary` — $0.05 | `COMJ3TQOGTKP6LXDJS7HZY7B45QZJQWXXJ23HQ3IDDQYD7GRK36A` |
+
+Step 5 also produced an audit append on `768743428` and returned its id to the agent in the response body: `E6ZTGEAOTLJQDYOUVBYJYL7LKTXHBGXGVTBKN3SR2NUPWJ2PIGQA`, confirmed at round 66563942. Its `requester` argument decodes to the agent's address — the entry attributes the access to the party that actually paid for it.
+
+Each resolves at `https://lora.algokit.io/testnet/transaction/<TXID>`. Full record in [`../07_Testing/Test_Results.md`](../07_Testing/Test_Results.md) §5.7.
+
+**Three provisioning steps precede the run and are not part of it.** `api/scripts/provision-agent-wallet.ts` created the agent's wallet — funding `YKGXFTZU…`, the agent's own USDC opt-in `KOALP5W2…`, and a $1.00 float `3ODGZ44Z…`. `api/scripts/provision-patient-wallet.ts` created the patient's wallet `56LFG5EE…`, funded with 150,000 µALGO in `GCYA23PH…`, so that the grant would come from an account that is neither the payer nor the payee. And `api/scripts/grant-consent.ts` recorded the patient's grant to that specific agent, `IG4XEBTM…`, signed by the patient and submitted straight to Algorand with the backend out of the path.
+
+**An earlier run of the same script, before the agent had a wallet of its own,** settled `POAQNSOP…`, `W3Z55BZY…` and `5CO5XV7M…` with audit append `5HYV5B2L…`. Those transactions are real and remain checkable; in that configuration a single account was payer, patient and `payTo` at once.
+
+**Walkthrough.** Steps 2, 3 and 5 are diagrams 2 and 4 verbatim — nothing in the service behaves differently because the caller is a program. What is new is step 1 and step 4, and neither of them is a payment.
+
+**Step 1 is why the agent needs no documentation.** The only MedRail-specific value in `agent-demo.ts` is `API_BASE`. The endpoint paths it calls, the prices it pays, the fact that one route is consent-gated, the App ID it could verify against, and the ARC-56 URL it would need in order to do so are all read out of `GET /` at runtime (`agent-demo.ts:144-158`). A price change on the server changes what the agent pays, with no client release. See [`./System_Architecture.md`](./System_Architecture.md) §2.3.
+
+**Step 4 is the sharpest beat in the flow, and the argument is economic rather than technical.** The gated endpoint costs $0.05 and can refuse. The oracle that decides whether it will refuse costs nothing and answers the same question against the same contract state. An agent that reads `gate` in step 1 finds `GET /v1/consent/status` sitting next to it in the same index, and can therefore turn a possible loss into a free answer. The `alt` branch is not decoration — `agent-demo.ts:194-197` returns early and reports on the two findings it already paid for.
+
+Note precisely what the pre-flight does and does not save, because a denial is **already** free to the caller (diagram 5: a 403 cancels settlement). What it saves is a round trip, a chain fee that MedRail pays for the `consent_denied` audit write, and an entry on the patient's own audit trail recording an attempt that was never going to succeed. The agent that checks first leaves no such trace. That is the free route earning its place in the index rather than merely being cheap.
+
+**Step 5 shows the composition the project exists for, from the outside.** One HTTP request is simultaneously a settled USDC payment, an on-chain authorisation read and an immutable audit append — and the agent receives the audit transaction id in its own response body, so it can confirm on a public explorer that it was recorded as having read the record. That is a caller being handed the evidence against itself, which is a stronger property than a service promising to keep logs.
+
+**Honest limits, the same ones that govern every other diagram here.**
+
+1. **It is not an automated test.** No runner invokes it, nothing asserts on its output, and CI never executes it. It proves the path works when run; it does not protect the path from regressing. [`../07_Testing/Test_Plan.md`](../07_Testing/Test_Plan.md) §3.5.1 sizes the conversion.
+2. **The API was a local process.** Nothing is publicly hosted, so "an agent discovered the service" means an agent was pointed at `http://localhost:4021`. Discovery from a public URL has never happened, because there is no public URL.
+3. **The payer is independent; the money is not external.** The agent signs with its own `AGENT_MNEMONIC` (`agent-demo.ts:37`) — keypair `UYBTLPHS…`, which this service does not hold — so all three settlements have sender `UYBTLPHS…` and receiver `2WDV2J2F…`, confirmed on the checked transactions against `testnet-idx.algonode.cloud` at rounds 66563930 and 66563944, `fee: 0` and facilitator-sponsored. What that does *not* demonstrate is demand: the agent's TestNet USDC float was seeded from the project's own wallet, because TestNet USDC has no other practical source. No external or unrelated party has paid for this service.
+4. **The patient is a third account, not a second role on an existing one.** `PATIENT_ADDRESS` names `56LFG5EE…` (`agent-demo.ts:50`), a wallet with its own keypair that is neither the payer nor the payee, and that patient granted this specific agent access on-chain in `IG4XEBTM…`, signing for itself. The requester asserted at step 5 is the agent's own address, the grant belongs to someone else, and the payer binding of diagram 7 therefore does real work here rather than holding trivially. What three separate keypairs still do not buy is a patient with an independent motive: that wallet's TestNet ALGO was funded from the project's own account in `GCYA23PH…`, for the same reason as the agent's float in limit 3.
+5. **There is nothing behind the gate.** `SYNTHETIC_RECORD` is a fixed constant (`api/src/routes/records.ts:17-23`) returned regardless of `patientId`, and neither priced compute endpoint contains a model — `scoreTriage` and `checkInteractions` are pure functions over static tables. The agent paid real money for a real authorisation decision over a placeholder record.
+6. **The evidence file is the run's own account of itself.** Like `e2e-proof.ts`, `e2e-consent-proof.ts`, `verify-g01-fix.ts` and both provisioning scripts, this one now writes to `contracts/artifacts/` — `agent-run.json`, produced by `writeArtifact` (`agent-demo.ts:81-101`, called from `report()` at `:259-267`) with the agent and patient addresses, the three payments and their explorer links, the total, and the audit transaction id. Addresses only; no key material is written. But it is written by the same process it describes and asserts nothing, so it is a record, not an attestation. The check that does not depend on MedRail is still reading the transaction ids above off the public indexer.

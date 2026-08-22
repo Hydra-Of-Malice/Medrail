@@ -2,21 +2,25 @@
 
 **Purpose:** how to present MedRail's technical architecture to a mixed audience of engineers and non-engineers in under three minutes — one thesis, one diagram, three evidenced claims, and the depth to hold in reserve for Q&A.
 
-**Status of this document:** Pitch guidance, 2026-08-21. Every technical fact and transaction id below was verified against source or the public Algorand TestNet indexer. No MainNet deployment, public hosting, Bazaar listing, leaderboard presence, or third-party payment volume is claimed — all are pending. **Every settled payment to date is a self-payment from the project's own account.** Judging criteria referenced are per `docs/COMPLIANCE.md:31-33`; the official rules were not independently re-fetched during this review.
+**Status of this document:** Pitch guidance, 2026-08-21. Every technical fact and transaction id below was verified against source or the public Algorand TestNet indexer. No MainNet deployment, public hosting, Bazaar listing, leaderboard presence, or third-party payment volume is claimed — all are pending. **Payments now settle between distinct accounts — the agent pays from a keypair this service does not hold — but the agent's TestNet float was seeded from the project's own wallet, so no external or unrelated party has paid for this service; earlier settlements were self-payments and are labelled as such.** Judging criteria referenced are per `docs/COMPLIANCE.md:31-33`; the official rules were not independently re-fetched during this review.
 
-Companion documents: [`Demo_Script.md`](Demo_Script.md), [`Winning_Strategy.md`](Winning_Strategy.md), [`Judge_Evaluation.md`](Judge_Evaluation.md), [`../02_Requirements/Requirements_Gap_Analysis.md`](../02_Requirements/Requirements_Gap_Analysis.md), [`../06_Security/Threat_Model.md`](../06_Security/Threat_Model.md).
+Companion documents: [`Demo_Script.md`](Demo_Script.md) (the 2- and 5-minute runs, beat by beat), [`Demo_Video_Script.md`](Demo_Video_Script.md) (the ≤3-minute submission video), [`Winning_Strategy.md`](Winning_Strategy.md), [`Judge_Evaluation.md`](Judge_Evaluation.md), [`../02_Requirements/Requirements_Gap_Analysis.md`](../02_Requirements/Requirements_Gap_Analysis.md), [`../06_Security/Threat_Model.md`](../06_Security/Threat_Model.md).
 
 ---
 
 ## 1. The one-sentence thesis
 
-> **MedRail turns "who may read my medical records" into a public object the patient signs and can revoke without asking anyone — and then charges per call to read it, using x402, so the permission layer and the payment layer are the same round trip.**
+> **MedRail sells three clinical services an AI agent can discover, use and pay for per call over x402 — and the one that returns a patient's record is gated by consent the patient signed on-chain and can revoke without asking us, so the permission layer and the payment layer are the same round trip.**
 
 Say it exactly once, at the start. Do not repeat it, do not paraphrase it later, and do not add a second sentence of clarification — the diagram is the clarification.
 
+**Lead with the agent, always.** x402 is a machine-to-machine protocol, and an audience that hears "medical records" before it hears "agent" will spend the rest of the pitch mentally placing a human at the keyboard. The patient half is the *differentiator*; the agent half is the *frame*. In that order.
+
 **If you have five more seconds and the room is non-technical**, add:
 
-> "Today, the only way to find out who read your records is to ask the organisation holding them. That's the thing we changed."
+> "An agent working a patient case needs triage, a drug-interaction check, and the record itself. Today that's three signups and three API keys — and it still can't touch the record, because nobody can prove the patient allowed it."
+
+**If the room is technical and you have ten seconds, don't say anything — run it.** `npx tsx api/scripts/agent-demo.ts` is a better opening than any sentence in this document.
 
 **Two words to avoid.** *Platform* and *ecosystem*. You have one contract, three priced endpoints, and one page. Precision is the pitch.
 
@@ -42,6 +46,7 @@ flowchart LR
     Facil["GoPlausible facilitator<br/>verify + settle · sponsors fees"]
     Consent["MedRailConsent — App 768743428<br/>grants · audit_seq · audit_log (boxes)"]
 
+    Agent -->|"0 · GET / — discover catalogue<br/>prices · gates · App ID · ARC-56"| Free
     Agent -->|"1 · unpaid call → 402"| Open
     Agent -->|"2 · PAYMENT-SIGNATURE"| Open
     Open <-->|"verify + settle USDC"| Facil
@@ -59,12 +64,13 @@ flowchart LR
     style Patient stroke-width:3px
 ```
 
-### How to narrate it — 45 seconds, four gestures
+### How to narrate it — 45 seconds, five gestures
 
 1. **Point at the two boxes on the left.** *"Two kinds of caller. A stranger's agent, and a patient. They never meet."*
-2. **Trace the top path.** *"Open endpoints. Anyone's agent pays two cents through the facilitator and gets an answer. No account, no API key, no prior relationship with us."*
-3. **Trace the thick line from the patient.** *"This is the important one. The patient grants and revokes consent by signing directly against Algorand. Our backend never sees that key, never proxies it, and could not revoke on their behalf if it wanted to."*
-4. **Point at the bold gated box.** *"And this endpoint requires both. You pay, and the same call reads the patient's on-chain grant. One round trip that's simultaneously 'you paid for the compute' and 'you were allowed to see this.'"*
+2. **Trace arrow zero, into the free box.** *"The agent starts by asking what we sell. `GET /` returns the catalogue — every endpoint, its price, whether it's gated, and the App ID and ABI spec of the consent contract. It doesn't need to know anything about us in advance, and it doesn't pay to find out."*
+3. **Trace the top path.** *"Open endpoints. Anyone's agent pays two cents through the facilitator and gets an answer. No account, no API key, no prior relationship with us."*
+4. **Trace the thick line from the patient.** *"This is the important one. The patient grants and revokes consent by signing directly against Algorand. Our backend never sees that key, never proxies it, and could not revoke on their behalf if it wanted to."*
+5. **Point at the bold gated box.** *"And this endpoint requires both. You pay, and the same call reads the patient's on-chain grant. One round trip that's simultaneously 'you paid for the compute' and 'you were allowed to see this.' The agent checks the free oracle first, so it never pays to be told no."*
 
 ### The three things the diagram is designed to make obvious
 
@@ -77,6 +83,8 @@ flowchart LR
 ## 3. Three claims, and the evidence for each
 
 Make exactly these three. Each takes about twenty seconds including its evidence.
+
+**If there is a terminal in the room, open with the agent instead of with a claim.** `npx tsx api/scripts/agent-demo.ts` runs the whole thesis — an agent with no account reads `GET /`, learns eight endpoints and their prices, decides what the case needs, checks the **free** consent oracle before spending on the gated call, and settles $0.09 across three Algorand transactions. Sixty seconds. Everything below then lands as a confirmation of something the room already watched happen, rather than as an assertion it has to take on trust. Full detail in Q18; beat-by-beat delivery in [`Demo_Script.md`](Demo_Script.md).
 
 ### Claim 1 — "The contract is real, and you can verify it without me."
 
@@ -104,7 +112,7 @@ curl -s https://testnet-idx.algonode.cloud/v2/applications/768743428
 
 **Say:** *"Twenty thousand base units — exactly two cents at six decimals. Our route config contains the string `$0.02` and nothing else: no asset id, no decimal conversion. The SDK asked the facilitator what USDC is on this network and produced that number. Fee zero, because the facilitator sponsors it — a caller needs USDC and no ALGO at all. We built the thing that asks correctly; the protocol did the rest."*
 
-**Then, unprompted:** *"Sender and receiver on that transaction are the same address. That was our own proof run — we paid ourselves, because it needed one funded account instead of two. It's a genuine facilitator-settled payment with no special-casing, and it's the only one that exists. It's written up in section six of our proof log, before anyone asked."*
+**Then, unprompted:** *"Sender and receiver on that particular transaction are the same address — that was our first proof run, and we paid ourselves because it needed one funded account instead of two. It's a genuine facilitator-settled payment with no special-casing, and it's labelled as a self-payment in section six of our proof log. Since then the agent pays from its own keypair to a different receiver, and the patient who allowed it is a third account again — section ten, sender ≠ receiver on the indexer, and no two roles sharing an address. What still hasn't happened is anyone unrelated paying us: we funded both those wallets, because TestNet money has no other source."*
 
 **Why it works:** you demonstrate that you know which parts of your own system you didn't write, and you disclose your weakest fact voluntarily. Both read as competence.
 
@@ -204,7 +212,7 @@ That answer demonstrates three things at once: you audit your own arithmetic aga
 
 ## 5. Q&A bank
 
-Seventeen questions with honest, strong answers. Every answer here is true as of 2026-08-21. Three of them (Q3, Q5, Q10) used to be confessions and are now demonstrations — those are the ones to rehearse, because the delivery for a good answer is different from the delivery for a bad one. Q17 is new and it is the sharpest question a well-prepared judge can ask.
+Twenty questions with honest, strong answers. Every answer here is true as of 2026-08-21. Three of them (Q3, Q5, Q10) used to be confessions and are now demonstrations — those are the ones to rehearse, because the delivery for a good answer is different from the delivery for a bad one. **Q17 is the sharpest question a well-prepared judge can ask. Q18, Q19 and Q20 are the machine-to-machine set, and Q18 is the one the organisers' own framing puts in a judge's mouth — rehearse it first, and answer it by running something rather than by talking.**
 
 ---
 
@@ -281,11 +289,15 @@ What the chain guarantees today is narrower: entries are append-only and can't b
 
 **Q8. "Has anyone other than you ever paid for this?"**
 
-No. Every settled payment we have is one of ours — TestNet, sender equals receiver — and it's disclosed in our proof log before anyone asks. What those transactions prove is that the pipeline settles: real facilitator, real asset transfer, twenty thousand base units, fee-sponsored, independently confirmed on the indexer, and now the whole consent-gated composition end to end with an audit entry on-chain. What they don't prove is demand, and I'm not going to claim they do.
+No — and there are two halves to that, so let me give you both.
 
-The reason there's no external volume is that there's no public URL — the endpoint runs on my laptop. That's a deployment gap, not a design gap, and it's the next thing we do.
+**The half that's better than you're expecting:** the payments aren't self-payments any more. The agent runs on its own keypair, `UYBTLPHS…`, which this service doesn't hold; it opted itself in to USDC; the patient is a third account again, `56LFG5EE…`, which granted *that specific address* consent in a transaction it signed itself and which is neither the payer nor the payee; and the indexer will show you sender ≠ receiver on all three settlements — `DOSKCNKJ…`, `PLBFDDAD…`, `COMJ3TQO…`. Three roles, three accounts, three keypairs, all independently checkable. Our earlier settlements, including `OYRQRKYA…`, were straight self-payments and they're labelled that way in our proof log.
 
-**This is the weakest answer in the bank, and it is the one to be shortest about.** Do not pad it. Do not argue that the architecture is designed for volume; that makes zero volume sound worse, not better. State it, name the cause, move on.
+**The half that isn't: I funded both of those wallets.** Their TestNet balances came from our own account, because TestNet ALGO and USDC have no other practical source. So **no external or unrelated party has paid for this service**, and none of this may be described as payment volume. What we've proven is the mechanism between distinct accounts. Not demand.
+
+The reason there's no external volume is that there's no public URL — the endpoint runs on my laptop, so there's nowhere for anyone else's agent to discover it. That's a deployment gap, not a design gap, and it's the next thing we do.
+
+**This is still the weakest answer in the bank, and it is the one to be shortest about.** Do not pad it and do not oversell the sender ≠ receiver half — it removes an objection, it does not add a claim. State both halves, name the cause, move on.
 
 ---
 
@@ -309,21 +321,27 @@ Transaction `4YLKLQKKWXXFW3UT5APJVYKXI7T7A6OACTAWCC5YBAN3XGOGHRVQ`, sequence 1 �
 
 **Q11. "Why is the audit write not atomic with the payment?"**
 
-See §4.3 — deliver it in full. Short form: it could be, and we chose compatibility over atomicity, because bundling would make us uncallable by any off-the-shelf x402 client. Two transactions moments apart, admin-gated, submitted only after the facilitator confirms. The residual risk is that the second one can fail after the money moves, and today that returns a 500 to a caller who already paid — finding R-2, roughly ten lines to fix.
+See §4.3 — deliver it in full. Short form: it could be, and we chose compatibility over atomicity, because bundling would make us uncallable by any off-the-shelf x402 client — including the agent I just showed you, which knows nothing about our App ID or our ABI. Two transactions moments apart, admin-gated, submitted only after the facilitator confirms.
+
+And the residual risk is smaller than it looks, for a structural reason rather than one we wrote: **you can't be charged for a failure.** `@x402/hono` settles only on a sub-400 response, so any error cancels the payment before the money moves (`REL-002`, validated, and credit belongs to x402 v2 rather than to us). What we did have to fix was the other side — a chain hiccup shouldn't cost you a record you were entitled to — so `records.ts:76-100` wraps the audit write in `try/catch` and returns **200 with the record**, `auditStatus: "pending"`, and a structured `audit_write_failed` event logged server-side.
 
 ---
 
-**Q12. "You have thirty-two tests — what do they actually cover?"**
+**Q12. "You have seventy-three tests — what do they actually cover?"**
 
-Fourteen contract tests in the official AVM simulator, including the negative paths that matter: non-admin `log_access` rejection, non-admin `withdraw_excess` rejection, revoking a grant that doesn't exist, expiry, re-grant reactivation, per-patient sequence isolation. Eighteen API tests — thirteen on the two rule engines, five asserting the real 402 shape against the live facilitator.
+Twenty-eight contract tests in the official AVM simulator, including the negative paths that matter: non-admin `log_access` rejection, non-admin `withdraw_excess` rejection, revoking a grant that doesn't exist, expiry, re-grant reactivation, per-patient sequence isolation. Forty-five API tests — thirteen on the two rule engines, five asserting the real 402 shape against the live facilitator, six on payer recovery from a payment signature, seven asserting the advertised route list equals the mounted set, and fourteen on cross-language box-key parity.
 
-And I'll give you the gap: zero tests on `routes/records.ts` and zero on `services/algorand.ts` — the two highest-risk files in the repository — no cross-implementation test that our three box-key derivations agree, and no frontend test of any kind. There's one worse than that: our interaction-checker test calls `checkInteractions(["a","b"])`, which returns five spurious severe matches, and asserts only that the disclaimer is present. So the suite executes that defect on every run and structurally cannot see it. Thirty-two tests is a real number; it's also concentrated on the two functions carrying the least risk.
+Two things worth more than the count. **Three of the contract tests were run against the pre-fix code first, to confirm they go red** — a regression test that has never failed hasn't been shown to test anything. And the box-key tests read one shared golden-vector fixture, `api/test/fixtures/box-key-vectors.json`, from *both* toolchains, which is the only honest way to test three independent implementations of one hash.
+
+And I'll give you the gap: `services/algorand.ts` still has no dedicated unit-test file — the lock and both on-chain call paths are only exercised by end-to-end scripts that need funded keys and don't run in CI — and there's no frontend test of any kind. There's one worse than that: our interaction-checker test calls `checkInteractions(["a","b"])`, which returns five spurious severe matches, and asserts only that the disclaimer is present. So the suite executes that defect on every run and structurally cannot see it.
 
 ---
 
 **Q13. "Is this production ready?"**
 
-No, and I'd distrust anyone who said yes about a build this age. It's demo ready: every claim on the critical path has a transaction id you can check without me in the room. It is not beta ready — no public host, no payer binding on the gated endpoint, no coverage on the two riskiest modules, and a facilitator outage 500s our priced routes.
+No, and I'd distrust anyone who said yes about a build this age. It's demo ready: every claim on the critical path has a transaction id you can check without me in the room.
+
+Beta ready means publicly reachable, authenticated where it matters, degrades gracefully, covered on the risky modules, and doesn't lose money on a failure path. Four of those five now hold — the gate authenticates and we can show it refuse a live attack, a facilitator outage returns 503 with `Retry-After` instead of an opaque 500, and no error path can consume a settled payment. **What's missing is the first word: publicly reachable.** No public URL, no observability, and no performance measurement of any kind.
 
 I can hand you the list. It's written down, with reproduction commands, in our own gap analysis.
 
@@ -343,15 +361,71 @@ A design proposal for a different product built on the same substrate. It has ne
 
 **Q16. "What would you do with another week?"**
 
-Bind the payer to the requester — that's the security fix and it's fifteen lines. Run the audit write on TestNet so that story has a transaction id, which is minutes once the operator account is funded. Get the API onto a public URL, because every usage claim depends on it. Then tests on `records.ts` and `algorand.ts`, and graceful degradation when the facilitator is down.
+Get the API onto a public URL — every usage claim depends on it, and until it exists nobody else's agent can even *discover* us, which is the whole pitch. Then re-run all four proof scripts against that URL so every claim in the repo points at something a stranger can reach. Then get one unrelated wallet to run `agent-demo.ts` against it, so the ledger has a payment where the sender isn't the receiver. Then minimal observability — a metric and an alert on the audit-write failure path — and unit tests on `services/algorand.ts`.
 
 Notice what isn't on that list: no new endpoints, no MainNet, no model. We know what's weak, and it isn't feature count.
 
 ---
 
+**Q17. "Your contract fixes aren't on the deployed contract, are they?"** ★ *the sharpest question available to a prepared judge — raise it before they do*
+
+No — deliberately, and here's the whole trade. We found two defects in the contract: `request_access` emits its ARC-28 event with `patient` and `requester` swapped, and `GRANT_BOX_MBR` under-reports true box minimum balance by 400 µALGO per box because it omits the one-byte `"g"` key prefix. Both are fixed in `contract.py`. Both are covered by regression tests we ran against the *old* code first, to confirm they go red. Neither is exploitable — one is an event field order, the other is an arithmetic constant our own advertised `get_grant_box_mbr()` quotes.
+
+And App `768743428` is still running the pre-fix bytecode, because `deploy_testnet.py` uses `OnUpdate.AppendApp`, which mints a **new** application. Redeploying doesn't upgrade that app — it abandons it, along with the consent lifecycle, the settled payments and the five audit entries that are the best evidence in this submission. A four-hundred-microalgo error is worth less than the deployment history. When we deploy to MainNet, the fixed source is what ships.
+
+**Why you must say this first.** Our own proof log pins the deployed bytecode to the *committed artifacts*, which predate those fixes — so a judge following our source-to-chain verification gets there on their own. If they find it, "fixed" reads as a claim rather than a change, and they re-examine every other "fixed" in the submission. If you raise it, it is the clearest demonstration in the entry that you reason about consequences rather than checkboxes.
+
+---
+
+**Q18. "x402 is machine-to-machine. Isn't this human-to-machine?"** ★ *do not answer this — run it*
+
+The right response is nine words and a keypress: *"Fair question. Let me show you an agent do it."*
+
+```bash
+cd api && npx tsx scripts/agent-demo.ts
+```
+
+A clinical triage agent with no MedRail account, no API key and no prior relationship. It reads `GET /` and learns the catalogue — eight endpoints, the price of each, which are gated, the App ID of the consent contract, and the ARC-56 spec URL it would need to build its own ABI client. **Nothing about MedRail is hardcoded in it except the base URL.** Then it decides what the case needs: $0.02 for triage (`EMERGENCY`, score 70), $0.02 for the interaction check (`MAJOR: warfarin + aspirin` — anticoagulant plus antiplatelet, which changes how you manage a suspected cardiac event), and for the record, which is gated, **it checks the free consent oracle before it spends anything.** Granted — so it pays $0.05 and gets the record with `consentVerifiedOnChain: true` and an audit entry written to the patient's trail. $0.09, three settled Algorand transactions, no human in the loop.
+
+**The beat to land on is the free oracle.** *"It refused to spend money to be told no."* Revoke the grant and re-run it and the agent declines the gated call, spends nothing, and reports what it has. That is a service priced for a machine buyer: we give away the permission check precisely so a paying agent can avoid a doomed spend. A service optimising for revenue would charge for the denial.
+
+**If they push on whether it's really autonomous** — and a good judge should — open the file. The only MedRail-specific constant is `API_BASE`; every path, every price and the App ID come out of the discovery response, and the amount it pays is read from the returned catalogue rather than typed in. It is ~270 lines and readable in five minutes.
+
+**The honest caveat, and give it in the same breath as the consent check passing:** the run spans three separate accounts — the agent's own keypair, which we don't hold, paying a different receiver, against a grant signed by a patient account (`56LFG5EE…`) that is neither of those — but **we funded two of them.** Their TestNet balances came from our own wallet, because TestNet money has no other practical source, so no external or unrelated party has paid for this service. Say the strong half first and the funding second, in one breath. See Q8.
+
+---
+
+**Q19. "How would a real agent actually discover you?"**
+
+Two endpoints, both free, both already built for exactly this.
+
+**`GET /`** is a machine-readable service index: every endpoint with its method, path, **price**, and **gate** (`x402`, or `x402 + on-chain consent`), plus the consent contract's App ID, the network, and the URL of its ARC-56 spec. That is enough for an agent to decide what a task costs before committing to it, and enough to know which calls will fail without a permission it doesn't have. `api/test/app.spec.ts` asserts that this list equals the actually-mounted route set, so the catalogue cannot drift from reality — an integrator's first fetch is this document, and a stale one is worse than none.
+
+**`GET /v1/consent/arc56`** serves the contract's ARC-56 spec over HTTP. An agent that wants to check consent itself — rather than trusting our oracle — can build an ABI client against App `768743428` straight from that spec, without cloning our repository and without asking us for anything. That is the difference between an API you integrate with and an API you can be independent of.
+
+Beyond our own surface: the endpoints speak plain x402 v2 with the `exact` scheme, so any off-the-shelf client (`@x402/fetch`, or another team's agent) can pay them with no MedRail-specific code at all. That compatibility is a defended design constraint, not an accident — see §4.3 for why we rejected bundling the audit write into the client's signed payment group.
+
+**And the gap, stated plainly:** none of this is on the public internet yet, so today the only agent that can discover us is one you point at `localhost`. There's no Bazaar listing for the same reason — and I want to be exact about which half is missing. The discovery *extension* is wired: `api/src/x402.ts` registers `bazaarResourceServerExtension`, every priced route declares its real input shape and an output example, and the live 402 carries an `extensions.bazaar` block plus the `x402-global-challenge` tag. But x402 has no registration call — a facilitator catalogues a resource by reading that declaration off a payment it verifies, and the record is keyed on the resource URL. Ours says `localhost`, so we are implemented and not listed, and I'd rather say it that way than let you find the difference yourself.
+
+---
+
+**Q20. "Why does an *agent* need a blockchain for this? Couldn't you just check permissions in a database?"**
+
+Q2 answers this for the patient. The agent's answer is different and sharper, and it comes down to two words: **revocation** and **proof.**
+
+**Revocation, from the patient's side.** The patient has to be able to withdraw access *without asking the party holding the data*. If consent lives in our Postgres, "the patient owns their data" is a marketing claim about a table we control — we could edit it, and neither the patient nor the agent would ever know. On-chain, the patient signs `revoke_access` with their own key and submits it straight to Algorand; our backend never sees that key and couldn't undo it. Instant finality matters here specifically: `check_access` reflects a revocation in the very next round. For a consent system, probabilistic finality is a correctness problem, not a latency inconvenience — "probably revoked" is not a state you want a clinical record to be in.
+
+**Proof, from the agent's side, and this is the part a database genuinely cannot do.** An autonomous agent acting on a patient's record needs to demonstrate *afterwards* that it was allowed to. If the permission lived in our database, the agent's evidence would be a 200 from a vendor — which is a claim about us, verifiable only by asking us, at a moment when we are the party with the strongest incentive to be believed. On-chain, three separate things are independently checkable by anyone, forever, without our cooperation: the patient's signed grant, the settled payment that authenticated the requester, and the audit entry the access produced. The agent doesn't have to trust us and neither does an auditor.
+
+**Then close it in one sentence:** *"An agent that can't prove it was allowed is an agent nobody can safely deploy against real records — and a permission it has to ask us to confirm isn't proof, it's a reference."*
+
+**The caveat to volunteer if pressed:** what the chain guarantees is that entries are append-only and cannot be quietly edited. It does not make the audit trail unforgeable at the point of writing — `log_access` is admin-gated and that admin is a single hot key (§4.2). That's a smaller claim than "trustworthy audit trail", and it's the one that's true.
+
+---
+
 ## 6. Three delivery rules
 
-**1. Volunteer your worst fact before you're asked.** The self-payment, the zero audit entries, the payer binding, the negation defect. Every one of them is findable in under two minutes by a competent judge. Disclosed, each costs one point and buys credibility for everything else; discovered, each costs five and makes every other claim suspect. This submission's single greatest asset is that its claims survive checking — protect that above any individual feature.
+**1. Volunteer your worst fact before you're asked.** **That we funded the agent's wallet ourselves**, the earlier self-payments, the pre-fix bytecode on the deployed app, the negation defect, the absence of any model. Every one of them is findable in under two minutes by a competent judge. Disclosed, each costs one point and buys credibility for everything else; discovered, each costs five and makes every other claim suspect. The funding one is the newest and the most urgent, because it sits directly behind the strongest beat in the demo: say it at the moment the consent check passes, paired with the sender ≠ receiver fact that precedes it, not in the Q&A afterwards. This submission's single greatest asset is that its claims survive checking — protect that above any individual feature.
 
 **2. Never say "I'll come back to that."** Answer the hard question when it lands, in one breath, then return to your thread. Deferral reads as evasion even when it isn't, and you will not come back to it.
 

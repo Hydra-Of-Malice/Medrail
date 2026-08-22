@@ -11,8 +11,25 @@ output quoted. Timings are rehearsed estimates.
 ## Before you hit record
 
 - [ ] API running: `cd api && npx tsx src/index.ts`
-- [ ] Wallet funded — check with the balance query in [`Demo_Runbook.md`](Demo_Runbook.md). You need
-      roughly **$0.11 USDC** for one full run (agent demo $0.09 + a spare call) and a little ALGO.
+- [ ] **The agent's wallet** funded — it pays, not yours. `AGENT_MNEMONIC` must be set in `api/.env`,
+      and `UYBTLPHS…` needs roughly **$0.11 USDC** for one full run (agent demo $0.09 + a spare call)
+      and a little ALGO. Check with the balance query in [`Demo_Runbook.md`](Demo_Runbook.md). It was
+      provisioned with a $1.00 float, so this is a top-up check rather than a setup step; if it is
+      ever emptied, `npx tsx scripts/provision-agent-wallet.ts` mints a fresh one and
+      `npx tsx scripts/grant-consent.ts <newAddress>` re-grants it consent.
+- [ ] **The patient's wallet** — a third keypair, `56LFG5EE…`, that is neither the payer nor the payee.
+      It pays for nothing, so it needs **ALGO only** and a zero USDC balance is correct; it just has to
+      be able to sign a grant. `PATIENT_MNEMONIC` and `PATIENT_ADDRESS` must both be set in `api/.env`.
+      If it is ever lost, `npx tsx scripts/provision-patient-wallet.ts` mints a fresh one.
+- [ ] Consent still active for the agent — note the patient here is `56LFG5EE…`, **not** the project
+      wallet; querying the old pair returns `granted: true` from a stale grant and tells you nothing:
+      `curl "http://localhost:4021/v1/consent/status?patient=56LFG5EEHIJ4ZVMPHUMJH6BST2O3D4DMG3AWRZ2SN7Y3LLUDVUDILO66YM&requester=UYBTLPHS6APCXVBDPASQMUIQCEORDIR6EMTVMNSDPSVRSR5HEPKQ5GO4YQ&scope=records:summary"`
+      → `granted: true`. If it is `false` the gated call will be declined on camera.
+- [ ] API funded for the audit write: `curl -s http://localhost:4021/v1/health | python -m json.tool`
+      → `chain.warning` is `null`. That block reports the operator's and the application account's
+      spendable µALGO and `estimatedAuditWritesRemaining`; if it warns, the audit beat is what fails
+      first. It is sampled in the background, so if `chain` is `null` and `chainError` says
+      `"not sampled yet"`, call it again rather than debugging it.
 - [ ] Facilitator reachable: `curl https://facilitator.goplausible.xyz/supported`
 - [ ] Terminal font large enough to read at 1080p. Dark theme, wide window.
 - [ ] Browser tabs pre-opened, in this order:
@@ -50,7 +67,8 @@ cd api && npx tsx scripts/agent-demo.ts
 
 Narrate over the output as it scrolls. Do not read it out — point at what matters.
 
-> *"No account. No API key. The agent has never seen this service before.*
+> *"No account. No API key. Its own wallet — we don't hold that key. The agent has never seen this
+> service before.*
 >
 > *First it discovers it — reads `GET /`, learns there are eight endpoints, the prices, which ones
 > are gated, and the App ID of the consent contract. Nothing is hardcoded.*
@@ -78,7 +96,16 @@ Copy one transaction link from the agent's output. Paste into the Lora tab.
 
 > *"That's the actual payment. Asset 10458941 — TestNet USDC. Twenty thousand base units, which is
 > exactly two cents at six decimals. Fee zero, because the GoPlausible facilitator sponsors it — the
-> agent needs USDC, not ALGO."*
+> agent needs USDC, not ALGO.*
+>
+> *And look at sender and receiver — two different addresses. The agent pays us; it isn't us paying
+> ourselves. And the patient who allowed this is a third address again, neither of those two. We did
+> fund both those wallets on TestNet, because TestNet money has nowhere else to come from, so nobody
+> outside this project has paid us yet. But the mechanism is real, between real, separate accounts."*
+
+**Point at the sender and receiver fields while you say it.** This beat used to be the submission's
+weakest fact and is now one of its better ones — but only if both halves are said in the same
+breath. Volunteered, it costs nothing; discovered, it costs everything around it.
 
 Switch to the audit transaction link.
 
@@ -87,7 +114,11 @@ Switch to the audit transaction link.
 
 Switch to the App tab.
 
-> *"The contract. Five audit entries, four active grants. All independently checkable."*
+> *"The contract. The audit entries, the active grants, the boxes holding them. All independently
+> checkable."*
+
+**Read the counters off the screen rather than from this script.** They climb every time anyone
+rehearses, so a memorised number will be wrong on camera.
 
 ---
 
@@ -128,9 +159,9 @@ npx tsx scripts/verify-g01-fix.ts
 
 | Failure | What to say | Recovery |
 |---|---|---|
-| Agent errors on payment | *"That's a live network — let me re-run"* | Check USDC balance; re-run |
+| Agent errors on payment | *"That's a live network — let me re-run"* | Check the **agent** wallet's USDC balance (`UYBTLPHS…`), not yours; re-run |
 | Facilitator down | *"Payment facilitator is having a moment — here's the same run from earlier"* | Cut to a pre-recorded take |
-| Consent shows `granted=false` | *"Grant lapsed — one transaction to restore"* | `npx tsx scripts/e2e-consent-proof.ts` re-grants |
+| Consent shows `granted=false` | *"Grant lapsed — one transaction to restore"* | `npx tsx scripts/grant-consent.ts UYBTLPHS6APCXVBDPASQMUIQCEORDIR6EMTVMNSDPSVRSR5HEPKQ5GO4YQ` re-grants, signed by the patient |
 | Lora slow to index | *"It settles in about three seconds; the explorer takes a moment"* | Keep talking, refresh |
 
 **Record a clean backup take of the agent demo before the live one.** If anything breaks on the
@@ -148,3 +179,7 @@ In this order — the first items cost the least:
 
 **Never cut:** the discovery step, the free consent check before spending, or the 403. Those three
 are the entire argument.
+
+**And never cut the sender-versus-receiver line, but you may compress it** to *"different addresses —
+and we funded the payer, because TestNet USDC has nowhere else to come from."* That is the whole
+disclosure in one sentence. Dropping the second half is not a saving; it is an overclaim.

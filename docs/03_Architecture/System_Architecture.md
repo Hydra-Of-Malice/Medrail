@@ -34,7 +34,8 @@ There is **no database, no cache, no queue, no message bus, no background worker
 
 | Party | Type | Role | Trusted by MedRail? |
 |---|---|---|---|
-| **Caller / paying agent** | Human or autonomous agent | Presents an x402 payment and consumes a priced endpoint. Any off-the-shelf x402 v2 client works. | No. Fully untrusted. |
+| **Paying caller** | Human-operated client — the `web/` demo, a script, or `curl` plus an x402 signer | Presents an x402 payment and consumes a priced endpoint. Any off-the-shelf x402 v2 client works. | No. Fully untrusted. |
+| **Autonomous agent** | Software, with no human in the loop | **Discovers** the service from `GET /` — endpoints, prices, gates, App ID, CAIP-2 network and the ARC-56 spec URL — then decides which priced routes a task needs, reads the free consent oracle before spending on the gated one, and pays per call. It holds no MedRail account, no API key and no prior relationship; the only MedRail-specific value it is given is a base URL. Worked reference: `api/scripts/agent-demo.ts`. | No. Fully untrusted — and it needs no trust, because the payment is the credential (TB-1). |
 | **Patient** | Human with an Algorand key | Grants and revokes consent by signing `grant_access` / `revoke_access` directly against the chain. Never interacts with the API to do so. | Not applicable — the patient's authority is enforced on-chain by `Txn.sender`, not by the API. |
 | **MedRail operator** | Holder of `OPERATOR_MNEMONIC` | Contract `admin`; the only account that may write audit entries or move app funds. | Fully trusted. This is the system's single hot key. |
 | **GoPlausible facilitator** | External service, `https://facilitator.goplausible.xyz` | Publishes supported payment kinds, verifies and settles `exact`-scheme AVM payments, sponsors network fees. | **Trusted for settlement truth.** Standard x402 trust model; see §7. |
@@ -49,7 +50,8 @@ Rendered as a Mermaid flowchart rather than the experimental `C4Context` syntax,
 ```mermaid
 flowchart TB
     subgraph People["Actors"]
-        Caller["Paying caller<br/>any x402 v2 client or agent"]
+        Agent["Autonomous agent<br/>no account, no API key<br/>knows only a base URL"]
+        Caller["Paying caller<br/>human-operated x402 v2 client"]
         Patient["Patient<br/>holds an Algorand key"]
         Operator["MedRail operator<br/>contract admin key"]
     end
@@ -66,6 +68,9 @@ flowchart TB
         Chain["Algorand TestNet<br/>public ledger"]
     end
 
+    Agent -->|"1 · discover — GET / then GET /v1/consent/arc56"| API
+    Agent -->|"2 · free pre-flight — GET /v1/consent/status"| API
+    Agent -->|"3 · pay per call — HTTPS + PAYMENT-SIGNATURE"| API
     Caller -->|"HTTPS + PAYMENT-SIGNATURE"| API
     Caller -.->|"optional: browser demo"| Web
     Web -->|"HTTPS JSON"| API
@@ -81,6 +86,29 @@ flowchart TB
 ```
 
 **Reading the diagram.** Two paths reach the chain and they are deliberately separate. Consent *writes* go browser → algod, never through the API (`web/lib/consent.ts:44-89`) — this is what makes NFR-008 true. Audit *writes* go API → algod under the operator key (`api/src/services/algorand.ts:140-179`). The API therefore never holds a patient key, and the browser never holds an admin key.
+
+The agent's three edges are one actor, drawn separately because they are three different kinds of interaction with the same surface: a **discovery** read that costs nothing and requires nothing, a **free authorisation pre-flight** that lets the agent decline before it spends, and the **paid** call itself. Only the third moves money, and each of the first two exists to make the third correct.
+
+### 2.3 The discovery surface
+
+`GET /` and `GET /v1/consent/arc56` are free, unauthenticated routes, and it would be easy to file them under convenience. They are not: together they are **the integration boundary**, and they are what makes the autonomous-agent actor in §2.1 possible at all.
+
+| Route | What it publishes | What an integrator would otherwise have to be told |
+|---|---|---|
+| `GET /` | All eight routes as `{method, path, price, gate}`; a `contract` block (`appId`, `network`, `networkCaip2`, `arc56SpecUrl`); an `x402` block (`version: 2`, `scheme: "exact"`, `facilitator`) | Which endpoints exist, what each costs, which are gated and by what, which chain and which application to read, and which payment scheme and facilitator to use |
+| `GET /v1/consent/arc56` | The compiled ARC-56 spec for `MedRailConsent` — 13 methods, their selectors, their state schema | How to construct an ABI call against application `768743428` |
+
+Every row in the right-hand column is otherwise a *documentation* dependency: a human reads a README, copies constants into their client, and those constants rot silently. Served as data, they become a runtime lookup — and the difference is the difference between an integration that requires cloning this repository and one that requires a URL.
+
+**The pairing that matters is `gate` plus the free pre-flight.** `GET /` tells a caller that `/v1/records/summary` is gated by `"x402 + on-chain consent"`, and `GET /v1/consent/status` lets it evaluate exactly that gate for **$0.00** before committing $0.05. An agent that reads the first will find the second, and can then decline a call it would have lost. Neither route is useful without the other; that is why both are free and both are advertised.
+
+**The spec route goes one step further and removes MedRail from the path entirely.** An agent that does not want to take the API's word for a grant can build its own ABI client from `/v1/consent/arc56` and read `check_access` off the chain itself (§5.1, FR-015). The HTTP layer is a convenience over a public contract, not a gatekeeper in front of a private one — and the discovery surface is what makes that claim checkable rather than rhetorical.
+
+**Executed, not asserted.** `api/scripts/agent-demo.ts` is a clinical triage agent that receives one task and a base URL and nothing else. It reads `GET /`, learns the eight endpoints and their prices, pays $0.02 for `/v1/triage` and $0.02 for `/v1/interaction-check`, queries the free consent oracle before touching the gated route, then pays $0.05 for `/v1/records/summary` — **$0.09 in total across three settled Algorand transactions, with no account created and no API key issued.** Nothing about MedRail is hardcoded in that script except the base URL: every price it pays is read back out of the index (`agent-demo.ts:157-158`). Transaction IDs are in [`../07_Testing/Test_Results.md`](../07_Testing/Test_Results.md) §5.7, and the message-level flow is [`./Sequence_Diagrams.md`](./Sequence_Diagrams.md) §10.
+
+**Two of the usual limits still apply to that run; the third has changed shape.** It is a **manual verification script, not an automated test**, and it does not run in CI. The API it called was a local process, because nothing is publicly hosted (§4). What is no longer a limit is the identity of the parties: three roles, three separate keypairs. The agent holds its own (`UYBTLPHS6APCXVBDPASQMUIQCEORDIR6EMTVMNSDPSVRSR5HEPKQ5GO4YQ`), which this service does not control; the patient holds a third (`56LFG5EE…`) that is neither the payer nor the payee, and granted *that* agent access in a transaction the patient signed itself — so the consent step runs between genuinely different parties rather than circular, and the identity binding at TB-1 is what carries it (§5.3). The remaining gap is the money's origin, not the mechanics: the agent's TestNet USDC float and the patient's TestNet ALGO were both seeded from the project's own wallet, because TestNet assets have no other practical source, so no external party has paid for this service.
+
+This surface was incomplete until recently: an earlier revision of `GET /` advertised five of the eight routes and omitted both the App ID and the ARC-56 URL, which means the actor described above could not have existed. Finding **G-34 closed**, and `api/test/app.spec.ts` now asserts that the advertised set equals the mounted set so it cannot regress silently.
 
 ---
 
@@ -149,6 +177,7 @@ flowchart TB
     Page --> LibWallet
     LibX402 -->|"HTTPS JSON + payment headers"| CORS
     LibConsent -->|"signed app call"| Algod
+    Agent -->|"GET / and GET /v1/consent/arc56 — discovery, free"| CORS
     Agent -->|"HTTPS JSON + payment headers"| CORS
 
     CORS --> Pay
@@ -202,8 +231,10 @@ The audit-log write path — the mechanism this architecture exists to provide �
 | x402 settlement, 20000 µUSDC | `OYRQRKYA7WUKBVLWTOFJSJMZFBW7VCNGP5VGH5EBUJGRCVFQFJRQ` | 66091768 |
 | x402 settlement, 50000 µUSDC, consent-gated | `5DKFUULWLTNGKLYLH3TT44F22MHKOFRCEO6K4JVEPOPETFBYOESA` | — |
 | `log_access`, sequence 1 | `4YLKLQKKWXXFW3UT5APJVYKXI7T7A6OACTAWCC5YBAN3XGOGHRVQ` | — |
+| `grant_access`, patient → the independent agent | `IG4XEBTMRCKI724ZVHSYUN4ECTYBXAGZM5N35NP4Y3ZVWECG7WUQ` | — |
+| x402 settlement, 50000 µUSDC, agent → service (§2.3) | `COMJ3TQOGTKP6LXDJS7HZY7B45QZJQWXXJ23HQ3IDDQYD7GRK36A` | 66563944 |
 
-**The honest limits.** Every settled payment to date is a **self-payment** — sender and receiver are both `2WDV2J2FTWF535SMSUVEBOF5IGXF2OTV7ZZTLTCRBXPVS32UMLOPTI64GE`. Each is a genuine facilitator-settled x402 transfer with `fee: 0` (fee-sponsored), and none of it is third-party payment volume. Nothing is publicly hosted, there is no MainNet deployment, and there is no Bazaar listing.
+**The honest limits.** The two earlier x402 rows above are self-payments: sender and receiver are both `2WDV2J2FTWF535SMSUVEBOF5IGXF2OTV7ZZTLTCRBXPVS32UMLOPTI64GE`, the account that is deployer and `payTo` and that stood in for the patient in those runs as well. That is no longer true of every payment. Since the agent and patient wallets were provisioned, settlements run between **distinct accounts** — `UYBTLPHS…` pays, `2WDV2J2F…` receives, and the indexer confirms sender ≠ receiver — while the grant that authorises the gated call is signed by a third account again, `56LFG5EE…`, which is neither of them. **But the agent's TestNet USDC float and the patient's TestNet ALGO were both seeded from the project's own wallet**, because TestNet assets have no other practical source, so none of this is third-party payment volume and no external party has paid for the service. Every payment on record is a genuine facilitator-settled x402 transfer with `fee: 0` (fee-sponsored). Nothing is publicly hosted, there is no MainNet deployment, and there is no Bazaar listing.
 
 ### 5.4 Why the contract has not been redeployed
 
@@ -222,7 +253,7 @@ flowchart TD
     A(["HTTP request arrives at Hono"]) --> B["cors middleware<br/>app.ts:22-35"]
     B --> RL{"Is this path rate-limited?<br/>app.ts:44-46"}
     RL -->|"over the window"| RL429["429 + Retry-After<br/>RATE_LIMITED"]
-    RL --> C{"Is the method+path in the<br/>priced route map?<br/>app.ts:50-60"}
+    RL --> C{"Is the method+path in the<br/>priced route map?<br/>app.ts:58-175"}
     C -->|"No — free route"| H["Route handler"]
     C -->|"Yes"| D{"resourceServer initialised?"}
     D -->|"No"| E["Fetch /supported from facilitator<br/>cache payment kinds for process lifetime"]
@@ -248,7 +279,7 @@ flowchart TD
 Four properties of this ordering are worth stating because they are consequences, not accidents:
 
 1. **Settlement is the last step, and it is conditional.** `@x402/hono` verifies before the handler and settles after it, only when the response status is below 400. Every error branch above — 429, 400, 403, 500, and a handler throw — reaches `cancellationDispatcher.cancel` instead. **No error path in this service can consume a settled payment.** REL-002 **VALIDATED — satisfied by the SDK**, and credited as an inherited strength of x402 v2 rather than as MedRail's own engineering.
-2. **Payment is enforced before handler validation.** The payment middleware is registered at `api/src/app.ts:50` (wrapped at `:73`) and the route modules at `:107-111`, so an unpaid *malformed* request returns **402, not 400**. `api/test/x402-flow.spec.ts:48-59` documents this deliberately, with a comment explaining the ordering, and accepts either status so the test does not silently encode an accident. A *paid* malformed request returns 400 and the settlement is cancelled — the caller keeps their money.
+2. **Payment is enforced before handler validation.** The payment middleware is registered at `api/src/app.ts:58` (wrapped at `:73`) and the route modules at `:107-111`, so an unpaid *malformed* request returns **402, not 400**. `api/test/x402-flow.spec.ts:48-59` documents this deliberately, with a comment explaining the ordering, and accepts either status so the test does not silently encode an accident. A *paid* malformed request returns 400 and the settlement is cancelled — the caller keeps their money.
 3. **The 402 challenge requires no per-request outbound call.** Facilitator payment kinds are fetched once and cached, which is why the reviewer measured a warm 402 at roughly 15 ms. PERF-001 **IMPLEMENTED**. The cost of that design is a hard dependency: `accepts[].asset` and `extra.feePayer` come from the facilitator, not from MedRail config (`api/src/x402.ts:16-32` sets no `asset`), so a 402 cannot be constructed offline. A facilitator outage is therefore total for the three priced routes — but it now returns **503 with `Retry-After: 30`** and a stable `PAYMENT_FACILITATOR_UNAVAILABLE` code rather than an opaque 500, which is the difference between an agent backing off and an agent giving up. Free routes stay up — REL-005 **VALIDATED**. REL-001 remains **PARTIALLY IMPLEMENTED**: no cached fallback, no circuit breaker, no second facilitator.
 4. **`app.onError` discloses nothing.** It logs the method, path, message and stack server-side against a generated `requestId` and returns `{"code":"INTERNAL_ERROR","retryable":true,"requestId":"…"}`. A 58-character but checksum-invalid address never reaches it in the first place: `api/src/validation.ts`'s `algorandAddress` schema validates the checksum at the route boundary, so that input is a **400** with a field error. SEC-010, SEC-011 **IMPLEMENTED**.
 
@@ -267,7 +298,9 @@ Exactly **eight routes**: three priced and five free, the service index among th
 | GET | `/v1/health` | free | none | `routes/health.ts:6-14` | none |
 | GET | `/` | free | none | `app.ts:149-176`, service index | none |
 
-The service index at `GET /` returns each route as `{method, path, price, gate}`, plus a `contract` block (`appId`, `network`, `networkCaip2`, `arc56SpecUrl`) and an `x402` block (`version: 2`, `scheme: "exact"`, `facilitator`). The `contract` and `arc56` pair is precisely what a third party needs to build an ABI client without cloning this repository — an earlier revision advertised five of the eight routes and omitted both. Finding **G-34 closed**, with `api/test/app.spec.ts` asserting that the advertised set equals the mounted set.
+The service index at `GET /` returns each route as `{method, path, price, gate}`, plus a `contract` block (`appId`, `network`, `networkCaip2`, `arc56SpecUrl`) and an `x402` block (`version: 2`, `scheme: "exact"`, `facilitator`). The `contract` and `arc56` pair is precisely what a third party needs to build an ABI client without cloning this repository — an earlier revision advertised five of the eight routes and omitted both. Finding **G-34 closed**, with `api/test/app.spec.ts` asserting that the advertised set equals the mounted set. Why that makes the index an architectural component rather than a courtesy is argued in §2.3.
+
+Read the `gate` column as a pair with the free routes above it. Two of the three priced routes are gated by payment alone and have nothing to pre-check; the third is gated by payment **and** an on-chain grant, and the check for that grant is published on the row below it at a price of zero. A caller that reads this table top to bottom can price a call, discover it is conditional, and evaluate the condition without spending — which is the whole of what an agent needs in order to be economical rather than merely capable.
 
 ---
 
@@ -287,7 +320,7 @@ The service index at `GET /` returns each route as `{method, path, price, gate}`
 | Validation | `zod` | `^3.24.1` | Applied in all four request-accepting routes. Address fields use the shared `algorandAddress` schema (`api/src/validation.ts`), which chains `.length(58)` with `.refine(algosdk.isValidAddress)` so a bad checksum is a **400** at the boundary rather than a throw deep in the chain gateway. FR-038, SEC-010, SEC-011 **IMPLEMENTED**. |
 | Rate limiting | in-house, `api/src/rateLimit.ts` | — | Fixed-window, in-memory, scoped to the surface that is free *to the caller*: `/v1/consent/status` 60/min, `/v1/consent/arc56` and `/v1/records/summary` 30/min. Priced happy paths are deliberately unthrottled — settling USDC per call is a stronger limiter than a counter. SEC-013 **IMPLEMENTED**. Per-process and keyed on a spoofable forwarded IP, so it is a courtesy guard, not a security boundary. |
 | Frontend | Next.js App Router + React + Tailwind | `next 16.3.0`, `react 19.2.8`, Tailwind 4 | One route (`/`). Two static routes are emitted at build (`/` and `/_not-found`), both prerendered. |
-| Test tooling | `vitest` (API), `pytest` + `algorand-python-testing` AVM simulator (contract) | `vitest ^4.1.10`, `algorand-python-testing==1.1.0` | 45 API tests + 28 contract tests = **73 passing**. Frontend has **zero tests** of any kind, and `api/src/services/algorand.ts` still has no dedicated unit-test file (finding **G-05**). |
+| Test tooling | `vitest` (API), `pytest` + `algorand-python-testing` AVM simulator (contract) | `vitest ^4.1.10`, `algorand-python-testing==1.1.0` | 93 API tests + 28 contract tests = **121 passing**. Frontend has **zero tests** of any kind, and `api/src/services/algorand.ts` still has no dedicated unit-test file (finding **G-05**). |
 
 ---
 
@@ -304,7 +337,7 @@ Recorded here because they are properties of the architecture, not of any single
 | **REL-003** | No timeout, no retry and no circuit breaker on `Algodv2` (`api/src/services/algorand.ts:5`, `:175`). `atc.execute(algod, 4)` waits four rounds and throws. | REL-003 **NOT IMPLEMENTED** | [`./LLD.md`](./LLD.md) §3.5 |
 | **G-24** | No performance measurement of any kind. The two latency figures quoted anywhere in these documents (a ~15 ms warm 402, a 505 ms cold consent read) are single observations, not percentiles. | PERF-* **UNVALIDATED** | [`./HLD.md`](./HLD.md) |
 | **Source/chain divergence** | Two contract fixes are in source but not deployed — the `AccessRequested` field order and `GRANT_BOX_MBR`. Deliberate: redeploying would mint a new App ID under `OnUpdate.AppendApp`. | FR-024, FR-032 **corrected in source, redeploy deferred** | §5.4 above |
-| **Nothing is hosted** | DU-1 and DU-2 have never been deployed publicly. There is no MainNet deployment and no Bazaar listing, and every settled payment to date is a self-payment from the project's own account. | NFR-007 **UNVALIDATED** | §4 above |
+| **Nothing is hosted** | DU-1 and DU-2 have never been deployed publicly. There is no MainNet deployment and no Bazaar listing. Payments do now settle between independent accounts, but the paying agent's float was seeded from the project's own wallet, so no external party has paid for the service. | NFR-007 **UNVALIDATED** | §4 above |
 
 ### 8.1 Closed since the review
 

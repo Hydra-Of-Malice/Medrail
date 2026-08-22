@@ -145,7 +145,7 @@ paths; the tests pin the amounts (`20000`, `20000`, `50000`) alongside the disco
 
 ## 6. Verification (measured, not asserted)
 
-`npx tsc --noEmit` exits 0. `npx vitest run` reports **53 passed** (the pre-existing 45, plus 8 new).
+`npm run typecheck` exits 0. `npx vitest run` reports **93 passed** across 9 spec files, of which `bazaar-discovery.spec.ts` contributes 8.
 
 The live 402 from `POST /v1/triage` now contains:
 

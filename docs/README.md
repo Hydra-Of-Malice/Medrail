@@ -31,7 +31,7 @@ endpoints. Live on TestNet as App [`768743428`](https://lora.algokit.io/testnet/
 | [For Judges](JUDGES.md) | The pitch, the evidence table, and a 2-minute demo script |
 | [Evidence Log](PROOF.md) | Every claim with a transaction ID and a command to reproduce it |
 | [Agent Run Facts](AGENT_RUN_FACTS.md) | The canonical machine-to-machine run: the three accounts, every transaction ID, and what may and may not be claimed |
-| [Engineering Gap Report](ENGINEERING_GAP_REPORT.md) | 34 findings — 22 closed, 12 open — with evidence, severities and fixes |
+| [Engineering Gap Report](ENGINEERING_GAP_REPORT.md) | 37 findings — 25 closed, 12 open — with evidence, severities and fixes |
 | [Winning Roadmap](WINNING_ROADMAP.md) | Four-phase remediation plan; Phase 1 complete |
 | [Compliance](COMPLIANCE.md) | Rule-by-rule mapping to the Global x402 Challenge requirements |
 | [Go-Live Checklist](GO_LIVE_CHECKLIST.md) | Competition entry checklist |

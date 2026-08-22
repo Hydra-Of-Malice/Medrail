@@ -561,15 +561,17 @@ There is no dependency scanning of any kind. `.github/workflows/ci.yml` contains
 | Contract toolchain | `algopy` 3.5.1, `puyapy` 5.9.0 — a compiler that turns Python into AVM bytecode. A compromised compiler produces a compromised contract, and nothing in this repository verifies compiled output against source. |
 | Pinning | `@x402/core`, `@x402/avm`, `@x402/hono`, `@x402/extensions` are pinned exactly to `2.21.0` (good). `@x402/fetch` is `^2.21.0`, `algosdk` is `^3.6.0`, `hono` is `^4.7.1`, `zod` is `^3.24.1` — caret ranges that admit new code on a fresh install. Both Dockerfiles use `npm install`, so a container build can pull minor/patch updates the lockfile never saw (**D-4**). |
 
-### 13.1 `@x402/extensions` is declared and never used
+### 13.1 `@x402/extensions` — was declared and never used, now wired
 
-Verified: `@x402/extensions@2.21.0` is a declared runtime dependency (`api/package.json:17`) and is imported **nowhere** — zero references across `api/src`, `api/scripts`, `web/lib`, `web/components`, and `web/app`. The only `@x402/*` imports in the API are `@x402/hono` (`app.ts:8`, `x402.ts:1`), `@x402/core/server` (`x402.ts:2`), and `@x402/avm/exact/server` (`x402.ts:3`).
+The finding recorded here was that `@x402/extensions@2.21.0` sat in `api/package.json` as a declared runtime dependency with **zero** importers anywhere in the repository: unnecessary supply-chain surface, and the sole evidence behind `docs/COMPLIANCE.md`'s claim that the backend implements Bazaar's discovery-extension schema (**DOC-9**). The recommendation was to uninstall it.
 
-Two consequences:
-1. **Unnecessary supply-chain surface.** An unused package still executes its install scripts, still ships into `node_modules`, and still counts as a trusted dependency of the build. It should be removed.
-2. **It undermines a documentation claim.** `docs/COMPLIANCE.md` asserts the backend "correctly implements Bazaar's discovery-extension schema" on the strength of this package being present. The route metadata in `api/src/x402.ts:16-32` is well-shaped, but no discovery extension is wired up. That claim should be downgraded to **PARTIALLY IMPLEMENTED / unused dependency** (finding **DOC-9**).
+**That recommendation is now withdrawn, because the dependency is used.** `api/src/x402.ts` imports `bazaarResourceServerExtension`, `declareDiscoveryExtension` and the `DeclareDiscoveryExtensionInput` type from the package's `@x402/extensions/bazaar` subpath, registers the extension on the shared `x402ResourceServer`, and emits a discovery declaration on each of the three priced routes. Note that the subpath is why a search for `from "@x402/extensions"` alone found nothing: the entry point is the subpath, not the package root. Evidence and the full export surface: [`../05_API/Bazaar_Discovery.md`](../05_API/Bazaar_Discovery.md).
 
-**RECOMMENDED:** `npm uninstall @x402/extensions`; add `npm audit --audit-level=high` and `pip-audit` steps to CI; enable Dependabot on both `package.json` files and `contracts/requirements-dev.txt`; pin the remaining carets. Note that CI must be fixed first — see §15.5 — because the workflow currently never runs.
+The security posture of the change is small and worth stating precisely. It adds no network call and no new trust relationship: the extension contributes no verify or settle hook, only an `enrichDeclaration` step that stamps the HTTP method onto a declaration MedRail itself authored. What it does add is **outbound description of the service in every 402** — route paths, an input schema and an output example — all of which `GET /` already publishes to anonymous callers, so no surface is disclosed that was not disclosed before.
+
+**Do not restate DOC-9 as an implementation claim beyond what is true.** The extension is implemented; the **Bazaar listing** does not exist, because a resource is catalogued only when a paid call is verified against a publicly reachable URL, and MedRail answers on `localhost`.
+
+**RECOMMENDED (unchanged, minus the uninstall):** add `pip-audit` to CI alongside the `npm audit --audit-level=high` step that now gates both Node jobs; enable Dependabot on both `package.json` files and `contracts/requirements-dev.txt`; pin the remaining carets.
 
 ---
 
@@ -791,7 +793,7 @@ Ordered by value per unit of effort, not by CVSS-style severity alone.
 
 - Repository at commit `32ffd73`, branch `master`. Paths cited as `path:line` throughout.
 - Deployed contract: App ID **768743428**, Algorand **TestNet**, app account `CCO26Y6Z56DDZ3OELO2UKJMIPJVSIT52I23F2MPMR52JBM3HQZZNUZNOR4`, 2 boxes, 100 box bytes, `total_audit_entries = 5`. Read from `https://testnet-idx.algonode.cloud` on 2026-08-21.
-- Settled x402 payment: `OYRQRKYA7WUKBVLWTOFJSJMZFBW7VCNGP5VGH5EBUJGRCVFQFJRQ` (asset `10458941`, 20000 base units, round 66091768, `fee: 0`). One payment exists, and it is a self-payment (sender == receiver == the deployer), disclosed in `docs/PROOF.md` §6.
+- Settled x402 payments: `OYRQRKYA7WUKBVLWTOFJSJMZFBW7VCNGP5VGH5EBUJGRCVFQFJRQ` (asset `10458941`, 20000 base units, round 66091768, `fee: 0`) — a self-transfer, sender == receiver == the deployer, disclosed in `docs/PROOF.md` §6; and the agent run's `DOSKCNKJ…` (20000 base units, round 66563930), `PLBFDDAD…` and `COMJ3TQO…` (50000 base units, round 66563944), all `fee: 0`, sent by an independent keypair `UYBTLPHS…` to `payTo` `2WDV2J2F…`, against a grant (`IG4XEBTM…`, round 66563915) signed by a third account `56LFG5EE…` that is neither the payer nor the payee — `docs/PROOF.md` §10. Both of those wallets' TestNet balances were seeded from the project's own, so no external party has paid for this service.
 - Consent lifecycle: `5XIADMCGFP5I7H7AS656RXZS7MFEEPCVJGLA7T3SVE6XDEYSGFFA` (request), `X2BQ5FD4MW52B75WQGDB67TEULYLN7FHVFO6ZOBNI74PNCAKVOUA` (grant), `OV2J2T5VWMIQG64JYGL7JEGZKKNZNKCMNIQU6AC4PDRQYZ6ZOO5A` (revoke).
 - SDK API surface verified in `api/node_modules/@x402/{core,avm,hono}` at pinned version `2.21.0`.
 - `docs/SECURITY.md` — prior art, independently re-verified claim by claim; every claim held.

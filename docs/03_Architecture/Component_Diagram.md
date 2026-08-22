@@ -117,7 +117,7 @@ flowchart LR
         HONO["new Hono()"]
         MW1["hono/cors<br/>app.ts:22-35"]
         MW0["rateLimit x3<br/>app.ts:44-46"]
-        MW2["@x402/hono paymentMiddleware<br/>app.ts:50-60"]
+        MW2["@x402/hono paymentMiddleware<br/>app.ts:58-175"]
         MW3["facilitator-outage wrapper<br/>app.ts:73-105 — 503 + Retry-After"]
         ERR["app.onError<br/>app.ts:113-140 — generic body + requestId"]
         SRV["GET / and GET /v1/consent/arc56<br/>app.ts:141-176"]
@@ -208,7 +208,7 @@ flowchart LR
 | `services/algorand.ts` | box-key derivation only, via `boxKeyParity.spec.ts` | **no dedicated file** — no lock test, no `checkAccess` test. Finding **G-05**, open |
 | `routes/consent.ts`, `config.ts` | `app.spec.ts` exercises `consent.ts` validation | no direct `config.ts` test |
 
-**45 API tests and 28 contract tests — 73 in total** — plus two repeatable live-TestNet proof scripts. There is still no coverage measurement, no threshold and no report, and the frontend has no automated tests of any kind.
+**93 API tests and 28 contract tests — 121 in total** — plus repeatable live-TestNet proof scripts. Coverage is now measured (`npm run coverage`, run by CI): 83.05% of statements and 65.85% of branches across `api/src`, with `src/services` at 98.37%/93.18% and `src/routes` at 74.19%/63.63%. There is still **no threshold** — nothing fails a build when coverage drops — and the frontend has no automated tests of any kind.
 
 ---
 

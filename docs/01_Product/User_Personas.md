@@ -2,7 +2,9 @@
 
 **Purpose:** Define the five actors the current code actually serves, what each one touches at the level of specific endpoints and files, and what is concretely missing for each of them today.
 
-**Status of this document:** Authored 2026-08-21 against the verified fact ledger and source at commit `3b387df`. Personas are derived from the implemented surface, not from an imagined roadmap: if no code serves a persona, that is stated rather than filled in. No demographic, adoption, or market figure appears here — none exists in this repository.
+**Status of this document:** Authored 2026-08-21 against the verified fact ledger and source at commit `3b387df`, with **P-1 expanded once `api/scripts/agent-demo.ts` had been run against live TestNet**. Personas are derived from the implemented surface, not from an imagined roadmap: if no code serves a persona, that is stated rather than filled in. No demographic, adoption, or market figure appears here — none exists in this repository.
+
+**P-1 is the persona the product is for.** x402 is a machine-to-machine protocol, so the primary customer is a program. P-2 through P-5 are real and served, but each exists in support of P-1 being able to complete a task: the patient (P-2) is what makes the gated endpoint sellable at all, the requester role (P-3) is the identity P-1 assumes when it calls it, the operator (P-4) keeps the thing running, and the judge (P-5) checks that the story is true.
 
 **Scope note.** These are personas for a **TestNet demonstration**. P-2 and P-3 in particular describe roles a production system would have; in this build they are exercised by throwaway keypairs against synthetic data. Nothing here implies a real patient or clinician has used this system.
 
@@ -12,7 +14,7 @@
 
 | ID | Persona | Primary surface | Priced? | Best-served today? |
 |---|---|---|---|---|
-| P-1 | Autonomous agent / third-party developer | `POST /v1/triage`, `POST /v1/interaction-check` | $0.02 each | **Yes** — proven end to end, but with nothing publicly hosted to call |
+| **P-1** | **Autonomous agent — the primary persona** | `GET /` for discovery, then all three priced routes and the free consent oracle | $0.02 / $0.02 / $0.05 | **Yes** — a full unassisted discovery-to-synthesis run is on record, but nothing is publicly hosted to call |
 | P-2 | Patient granting consent from a wallet | `grant_access` / `revoke_access` direct to Algorand | Network fee only | Mostly — two hard gaps (no real wallet, no audit view) |
 | P-3 | Requesting clinician / care application | `POST /v1/records/summary` | $0.05 | **Yes on the mechanism** — success path proven on-chain and the gate now authenticates the payer; no identity layer above the keypair |
 | P-4 | MedRail operator | Deploy, config, `OPERATOR_MNEMONIC`, `log_access` | — | **No** — no observability of any kind, single hot key |
@@ -20,16 +22,48 @@
 
 ---
 
-## P-1 — Autonomous agent / third-party developer
+## P-1 — Autonomous agent (the primary persona)
 
-**Role.** A program (or the developer integrating one) that needs a clinical-intelligence result at runtime and has no relationship with MedRail. Concretely: another challenge entrant's orchestrator agent, a triage bot, or a script.
+**Role.** A program that is handed a task at runtime, works out which services the task needs, buys them, and synthesises a result. It has no MedRail account, no API key, and no prior relationship with the service — and no human is available to create one. Concretely: another challenge entrant's orchestrator, a triage bot, a scheduled clinical-review job.
+
+**The task it is actually trying to finish.** Not "call an endpoint" — that is a step, not a goal. A representative task, and the one `api/scripts/agent-demo.ts` executes: *sudden crushing chest pain and shortness of breath since this morning; the patient is on warfarin and aspirin 81mg — produce an assessment.*
+
+| # | What the task requires | Which MedRail surface serves it | Cost to the agent |
+|---|---|---|---|
+| 1 | Urgency, to rank this case against the others in the queue | `POST /v1/triage` | $0.02 |
+| 2 | Whether the medication list is itself a risk | `POST /v1/interaction-check` | $0.02 |
+| 3 | The patient's allergies and comorbidities, so the assessment is not made blind | `POST /v1/records/summary` | $0.05 |
+| — | Whether it is *permitted* to do 3 at all, **before** paying for it | `GET /v1/consent/status` | free |
+
+**How it discovers.** One URL is the only thing it starts with. `GET /` returns the whole catalogue in one fetch — all eight routes with `method`, `path`, `price` and `gate`, plus a `contract` block carrying the App ID, the CAIP-2 network and the ARC-56 spec URL, and an `x402` block carrying the version, scheme and facilitator (`api/src/app.ts:149-177`; `api/test/app.spec.ts` asserts the advertised list equals the mounted set, so it cannot drift). From that response alone the agent can tell which endpoints cost money, which are gated on something beyond payment, and — via `GET /v1/consent/arc56` — how to build its own ABI client against App `768743428` without ever calling MedRail again. Prices are then confirmed authoritatively by the `402` itself; there is no price list to trust and no documentation to parse.
+
+**How it decides to spend.** Two decisions, and they are different in kind:
+
+1. *Which services does the task need?* Derived from the discovered catalogue against the task at hand. `agent-demo.ts` reads the price for each path out of the index rather than hard-coding it (`priceOf`), so a price change on the server changes what the agent budgets, with no client change.
+2. *Is this particular spend justified?* This is where the free consent oracle earns its place. Before paying $0.05 for a gated endpoint the agent calls `GET /v1/consent/status` for free. If `granted` is false it **declines the call, spends nothing, and reports the assessment it can make without the record.** An agent that pays to be told no is a script with a retry loop; an agent that checks first is reasoning about cost. That single free endpoint is what makes the difference available.
+
+Note the guarantee underneath: even a *wrong* decision is not expensive. Settlement is unreachable on any response of status ≥ 400 (`@x402/hono`), so a 400, 403, 429, 500 or 503 costs the caller nothing (REL-002 **VALIDATED**, satisfied structurally by the SDK). The pre-flight check saves a round trip, not a refund.
+
+**What it cannot do without on-chain consent.** Rows 1 and 2 above are ordinary paid compute — any vendor could sell them per call. Row 3 is different in kind, and this is the part of the persona that does not exist without the contract:
+
+- An API key would entitle the *holder*. Nothing in a key says the **patient** agreed, so no vendor can sell the agent that fact, and the agent has no artefact it could carry to prove it holds one.
+- The agent cannot manufacture the permission. `grant_access` takes `Txn.sender` as the patient identity (`contract.py:148-176`), so only the patient's own key can create the grant, and only the patient's own key can withdraw it.
+- The agent cannot assert its way past the gate either. `records.ts:41-51` recovers the address that signed the payment and returns **403** unless it equals the asserted `requesterAddress` — so the agent may only act as the requester it can actually sign as (UC-011).
+- What it gets in exchange is something an API key cannot give it: a **live** authorisation read at call time rather than an entitlement provisioned at some point in the past, evaluated against a permission no organisation mediates, with the access it made written to a trail the operator cannot delete.
 
 **Goals**
 
-1. Discover what an endpoint costs and how to pay it, from the endpoint itself, without reading documentation.
+1. Discover what an endpoint costs, what it is gated on, and how to pay it — from the endpoint itself, without reading documentation.
 2. Pay for exactly one call, with no account, no API key, no contract, no minimum.
-3. Receive a machine-parseable result and a verifiable receipt for the money spent.
-4. Fail loudly and recoverably when something is wrong.
+3. Find out whether a gated call will succeed *before* paying for it.
+4. Receive a machine-parseable result and a verifiable receipt for the money spent.
+5. Fail loudly and recoverably when something is wrong.
+
+**Proven end to end.** `api/scripts/agent-demo.ts` walks all five goals against live TestNet in one run: discovery from `GET /`, two paid intelligence calls, a free consent pre-flight, one paid gated read, one synthesised assessment — **$0.09 across 3 settled Algorand transactions, zero accounts, zero API keys, zero invoices**. Nothing about MedRail is hard-coded in the script except the base URL.
+
+The agent pays from **its own keypair, `UYBTLPHS6APCXVBDPASQMUIQCEORDIR6EMTVMNSDPSVRSR5HEPKQ5GO4YQ`, which this service does not control** — settled payments `DOSKCNKJ…` (20000 µUSDC, round 66563930), `PLBFDDAD…` and `COMJ3TQO…` (50000 µUSDC, round 66563944), all to `payTo` `2WDV2J2F…`, sender ≠ receiver on the public indexer. The patient `56LFG5EE…` granted *that* address in `IG4XEBTM…` (round 66563915), so the consent the gated call evaluates is a real grant, signed by an account that is neither the payer nor the payee, rather than an account authorising itself. The earlier self-paid run (`POAQNSOP…`, `W3Z55BZY…`, `5CO5XV7M…`, audit `5HYV5B2L…`), and the two after it in which the service still stood in as the patient, are retained rather than replaced.
+
+**What this still is not** ([`../PROOF.md`](../PROOF.md) §10): the three roles are three separate accounts with three separate keypairs, but every one of them is ours — the agent's TestNet USDC float was seeded from the project's own wallet and the patient wallet was funded the same way, so **no external or unrelated party has paid for this service.** It is proof that the mechanism settles between independent keypairs, and that the grant it evaluates comes from an account that is neither the payer nor the payee. It is not payment volume.
 
 **Pain points MedRail addresses**
 
@@ -42,6 +76,9 @@
 | Opaque decision logic | Both engines are pure functions over static tables, readable in one screen | AI-001, NFR-009 | **VALIDATED** |
 | Cannot tell "broken" from "try again" | A facilitator outage returns **503** with `Retry-After: 30` and `{"error":{"code":"PAYMENT_FACILITATOR_UNAVAILABLE","retryable":true}}`; every other failure returns a generic `INTERNAL_ERROR` with a `requestId` to quote. An agent can branch on the code and back off on the header | REL-001, SEC-011 | **IMPLEMENTED** |
 | Paying for a call that then fails | Impossible. `@x402/hono` reaches settlement only on a status below 400 — a 400, 403, 429, 500 or 503 cancels the payment | REL-002 | **VALIDATED** (satisfied by the SDK) |
+| Cannot learn the catalogue without documentation | `GET /` returns all eight routes with `price` and `gate`, plus the contract's App ID, network and ARC-56 spec URL, in one free fetch | FR-017 | **VALIDATED** |
+| Cannot tell in advance whether a gated call will be refused | `GET /v1/consent/status` is free and unauthenticated, and the 403 body's `hint` names it | FR-013 | **IMPLEMENTED** |
+| Needs MedRail-specific client code to participate | None is needed. The audit write is a follow-up transaction rather than a leg in the caller's signed group, precisely so a generic `@x402/fetch` client works unmodified (ADR-005) | — | **IMPLEMENTED** |
 
 **Technical proficiency.** High. Comfortable with HTTP semantics, an x402 client SDK (`@x402/fetch` or equivalent), an Algorand account, and an ASA opt-in. Will not read a PDF or fill in a form.
 
@@ -49,12 +86,17 @@
 
 | Surface | Evidence |
 |---|---|
+| `GET /` — free service index listing **all eight** routes with `method`, `path`, `price`, `gate`, plus `contract` and `x402` blocks. **This is the first request an agent makes** | `api/src/app.ts:149-177`; asserted against the mounted set by `api/test/app.spec.ts` |
 | `POST /v1/triage` — $0.02 (20000 µUSDC) | `api/src/routes/triage.ts:11-18` → `api/src/services/triageScorer.ts:53-73` |
 | `POST /v1/interaction-check` — $0.02 | `api/src/routes/interaction.ts:11-18` → `api/src/services/interactionChecker.ts:36-55` |
-| The 402 challenge and settlement path | `api/src/x402.ts:11-32`; price declarations at `api/src/app.ts:50-60` |
-| `GET /` — free service index listing **all eight** routes with `method`, `path`, `price`, `gate`, plus `contract` and `x402` blocks | `api/src/app.ts:149-177`; asserted against the mounted set by `api/test/app.spec.ts` |
+| `GET /v1/consent/status` — free pre-flight, so the agent never pays to be refused | `api/src/routes/consent.ts:19-31`; consumed by `agent-demo.ts` step 4 |
+| `POST /v1/records/summary` — $0.05, and the only route where the agent must be able to *sign as* the requester the patient granted | `api/src/routes/records.ts`; payer binding at `:41-51` |
+| The 402 challenge and settlement path | `api/src/x402.ts:11-32`; price declarations at `api/src/app.ts:58-175` |
+| `GET /v1/consent/arc56` — the compiled spec, so the agent can build ABI calls against App `768743428` without this repository | `api/src/app.ts:141-147` |
 | `GET /v1/health` — free liveness, network, App ID | `api/src/routes/health.ts:6-14` |
 | CORS: `origin: "*"`, `exposeHeaders: PAYMENT-REQUIRED, PAYMENT-RESPONSE` | `api/src/app.ts:22-35` (with a documented note on a prior preflight regression at `:27-32`) |
+
+*P-3 below is the same HTTP surface seen from the other side: it describes the requester **role** — the party a patient granted — which an agent of this kind assumes when it calls the gated route.*
 
 **What they get back**
 
@@ -66,9 +108,10 @@
 
 | Gap | Impact | ID |
 |---|---|---|
-| **No published OpenAPI/JSON-schema spec.** `docs/API.md` is hand-written; no machine-readable contract exists in the repository. | Integration requires reading prose. | — |
-| **No discovery listing.** Bazaar registration and the `x402-global-challenge` tag are pending operator action. `@x402/extensions` is declared in `api/package.json` but **imported nowhere in `api/src`** (DOC-9). | The endpoint cannot be found by an agent that does not already know its URL. | **PARTIALLY IMPLEMENTED** |
+| **No published OpenAPI/JSON-schema spec.** `docs/API.md` is hand-written; no machine-readable *request/response* contract exists in the repository. `GET /` describes the catalogue — paths, prices, gates — but not body shapes. | An agent can discover *what to buy* and *what it costs* without prose; it still needs prose to learn what to put in the body. | — |
+| **No external discovery listing.** `GET /` makes the service self-describing once you have the URL; **getting the URL is the unsolved half.** Bazaar registration and the `x402-global-challenge` tag are pending operator action, and `@x402/extensions` is declared in `api/package.json` but **imported nowhere in `api/src`** (DOC-9). | An agent that does not already know the base URL cannot find the service. This is the one step of the discover-use-pay chain that is not demonstrated. | **PARTIALLY IMPLEMENTED** |
 | **No public URL.** No hosting is deployed. The configuration in `api/fly.toml` is now correct and complete — it has simply never been run. | Nothing to call. This is the binding constraint for this persona. | **NOT IMPLEMENTED** |
+| **No published scope vocabulary.** The contract accepts free-form `scope` strings (DATA-003), but `records.ts:10` hard-codes `"records:summary"` and nothing advertises the set. | An agent can construct ABI calls against the contract but cannot discover what permission to ask a patient for. | — |
 | **No rate-limit contract published for the priced routes.** The free and refundable surface is limited (60/min on `/v1/consent/status`, 30/min on `/v1/consent/arc56` and `/v1/records/summary`, returning **429** with `Retry-After`), but the priced happy paths are deliberately unthrottled and no quota is documented for them. | An agent has a limit it can discover only by hitting it. | SEC-013 **IMPLEMENTED**, undocumented |
 | **Unanchored substring matching on medication names.** `m.includes(a) \|\| a.includes(m)` (`interactionChecker.ts:42-43`) means a one- or two-character name matches many table entries. | Silent false positives on short or malformed input; the existing test passes `["a","b"]` and asserts only the disclaimer. | AI-006 **NOT IMPLEMENTED** (G-21) |
 | **No idempotency key or retry token.** | A network failure *after* a 200 is unrecoverable for the caller. Note that a failure *before* the response is harmless: settlement is unreachable on any status ≥ 400, so a failed call costs the caller nothing (REL-002 **VALIDATED**). | — |
@@ -195,6 +238,9 @@ The admin key can: write arbitrary audit entries (`log_access`, `contract.py:217
 | Live lifecycle exercise | `contracts/scripts/exercise_contract.py` |
 | USDC opt-in | `contracts/scripts/opt_in_usdc.py` — every Algorand account must opt in to an ASA before it can receive it |
 | Payment proof | `api/scripts/e2e-proof.ts` → `contracts/artifacts/e2e-proof.json` (FR-040 **IMPLEMENTED**, not run in CI) |
+| Agent-wallet provisioning | `api/scripts/provision-agent-wallet.ts` → `contracts/artifacts/agent-wallet.json` — generates an independent payer keypair, funds it, opts it in to USDC `10458941` and seeds its float from the operator's own wallet. Writes the address only; the mnemonic is printed once and never persisted |
+| Patient-wallet provisioning | `api/scripts/provision-patient-wallet.ts` → `contracts/artifacts/patient-wallet.json` — generates and funds a patient keypair (`56LFG5EE…`, 150,000 µALGO in `GCYA23PH…`) that is neither the payer nor the payee, so the grant comes from a genuinely third account. Address only; no key material on disk |
+| Patient-signed consent | `api/scripts/grant-consent.ts <requester> [scope] [--revoke]` — the patient's key signs directly against App `768743428`, so the backend is not in the path |
 | Liveness | `GET /v1/health` (`api/src/routes/health.ts`) |
 | Containers | `api/Dockerfile` (2-stage, `node:20-slim`, build context = repo root), `api/fly.toml`, `web/Dockerfile` |
 
@@ -234,7 +280,7 @@ The admin key can: write arbitrary audit entries (`log_access`, `contract.py:217
 | "The differentiator is a design document" | The full composition — settle, authorise, audit — executed in one call and recorded: grant `M26NPR32…` → payment `5DKFUULW…` → audit `4YLKLQKK…` at sequence 1, with `total_audit_entries` moving 0 → 1 → 5 on the public indexer | [`../PROOF.md`](../PROOF.md) §9; `contracts/artifacts/e2e-consent-proof.json` |
 | "The security fix is claimed, not tested" | `api/scripts/verify-g01-fix.ts` runs the impersonation attack against the live service (403) **and** a matched control (200), writing both to `contracts/artifacts/g01-verification.json` | [`./Use_Cases.md`](./Use_Cases.md) UC-011 |
 | Hidden shortcuts | `docs/SECURITY.md` and `docs/COMPLIANCE.md` both carry explicit "what this does not claim" sections | Existing docs |
-| Unrunnable tests | One command per suite; **28 contract + 45 API = 73**, all green | `contracts/tests/`, `api/test/` |
+| Unrunnable tests | One command per suite; **28 contract + 93 API = 121**, all green | `contracts/tests/`, `api/test/` |
 
 **Technical proficiency.** Expert; will read `contract.py` (259 lines) end to end and query the indexer directly.
 
@@ -260,7 +306,7 @@ The admin key can: write arbitrary audit entries (`log_access`, `contract.py:217
 | **No frontend tests of any kind.** No Vitest, Jest, Playwright, or Cypress configuration exists in `web/`. | The demo a judge is asked to click through has zero automated coverage. | — |
 | **`web/README.md` is unmodified `create-next-app` boilerplate** in a repository whose root README is otherwise carefully written. | An avoidable blemish. | DOC-7 |
 | **`ACTION_NEEDED.md` has an unbalanced backtick** that breaks rendering. | Cosmetic. | DOC-8 |
-| **Nothing is publicly hosted, on MainNet, or listed on Bazaar**, and every settled payment is a self-payment. | A judge assessing traction rather than mechanism finds none. This is the honest headline. | — |
+| **Nothing is publicly hosted, on MainNet, or listed on Bazaar**, and no external party has paid. Payments do now settle between distinct accounts — the agent wallet `UYBTLPHS…` is an independent keypair — but its TestNet USDC float came from the project's own wallet. | A judge assessing traction rather than mechanism finds none. This is the honest headline. | — |
 
 ---
 

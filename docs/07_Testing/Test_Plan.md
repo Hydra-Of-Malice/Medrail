@@ -26,6 +26,7 @@
 | Consent status/app-info routes | `api/src/routes/consent.ts` | validation and rate limiting covered via `app.spec.ts`; the handlers themselves untested |
 | Frontend | `web/` (1 route, 5 components, 5 lib modules) | **zero tests, no test runner installed** |
 | Deployment artefacts | `api/Dockerfile`, `web/Dockerfile`, `api/fly.toml`, `.dockerignore` | **never built by CI** (NFR-007 **UNVALIDATED**) |
+| Agent integration path — discover, decide, pay, pre-flight | `api/scripts/agent-demo.ts` against the whole running stack | **manual verification script only.** No assertions, no runner, **not in CI** — see §3.5.1 |
 
 ### 1.2 Out of scope (and why)
 
@@ -55,6 +56,7 @@
 | O10 | Gate every change on an automated pipeline | **Met.** CI triggers on `push` to `[main, master]`, on `pull_request` and on `workflow_dispatch`, with caching, `npm audit --audit-level=high` on both Node packages, and an artifact-freshness gate (**G-06 / CI-1** closed) |
 | O11 | Prove the composition of payment, consent check and audit write | **NOT MET.** Each part is tested in isolation; `api/src/routes/records.ts` still has no route-level test (TC-100…TC-105) |
 | O12 | Prove the rule engines do not fabricate warnings from short input | **NOT MET.** `checkInteractions(["a","b"])` returns five spurious severe-interaction matches and `scoreTriage("I have no chest pain")` bands as `urgent`. Both are disclosed, neither is pinned (**G-21**, **G-26**) |
+| O13 | Prove a caller with no prior knowledge of MedRail can discover the service, choose services for a task, and pay for them unattended | **Met by live procedure only.** `api/scripts/agent-demo.ts` did it once — $0.09 across three settled transactions from its own keypair (`UYBTLPHS…` → `2WDV2J2F…`), catalogue read from `GET /`, free consent pre-flight before the gated call ([`Test_Results.md`](Test_Results.md) §5.7). The agent's float was seeded from the project's own wallet, so this is not external revenue. **Not a test, not asserted, not in CI** (§3.5.1) |
 
 ---
 
@@ -88,12 +90,12 @@
 
 | | |
 |---|---|
-| **Exists today** | **PARTIALLY IMPLEMENTED** — as four live scripts, not as tests. `contracts/scripts/exercise_contract.py` runs a real request→grant→check→revoke→check cycle on TestNet with two freshly-generated throwaway accounts, asserting both `check_access` results in-script. `api/scripts/e2e-proof.ts` runs a real 402→sign→settle→200 against `/v1/triage`. `api/scripts/e2e-consent-proof.ts` runs the full consent-gated composition — grant on-chain, free status check, paid call, on-chain audit append — and aborts before paying if the grant did not take effect. `api/scripts/verify-g01-fix.ts` performs the G-01 impersonation attempt against the live deployment plus a legitimate control call, and **exits non-zero** unless the attack is blocked *and* the control succeeds. |
-| **Status** | **VALIDATED but not automated / not in CI.** None runs on a schedule or under a test runner. Two of the four now carry a real pass/fail contract; `verify-g01-fix.ts` is a test in everything but its runner. |
-| **Landed since the first edition** | The system path that had never been run — a paid `/v1/records/summary` against a real grant, producing a real `auditTxId` and `auditSequence`. It has now run: settled payment `5DKFUULW…`, audit append `4YLKLQKK…`, `auditSequence: "1"`, and `total_audit_entries` on the deployed app moved 0 → 5. **E-1 closed.** |
+| **Exists today** | **PARTIALLY IMPLEMENTED** — as eight live scripts, not as tests. `contracts/scripts/exercise_contract.py` runs a real request→grant→check→revoke→check cycle on TestNet with two freshly-generated throwaway accounts, asserting both `check_access` results in-script. `api/scripts/e2e-proof.ts` runs a real 402→sign→settle→200 against `/v1/triage`. `api/scripts/e2e-consent-proof.ts` runs the full consent-gated composition — grant on-chain, free status check, paid call, on-chain audit append — and aborts before paying if the grant did not take effect. `api/scripts/verify-g01-fix.ts` performs the G-01 impersonation attempt against the live deployment plus a legitimate control call, and **exits non-zero** unless the attack is blocked *and* the control succeeds. `api/scripts/agent-demo.ts` drives the whole stack from the outside as an autonomous caller — discovery, two paid compute calls, a free consent pre-flight, and the paid gated call — and asserts nothing at all. Three more are setup rather than evidence: `api/scripts/provision-agent-wallet.ts` creates and funds the independent agent account, `api/scripts/provision-patient-wallet.ts` does the same for a patient account that is neither payer nor payee, and `api/scripts/grant-consent.ts` signs the patient's grant to it. All seven in `api/scripts/` are itemised in §3.5.1. |
+| **Status** | **VALIDATED but not automated / not in CI.** None runs on a schedule or under a test runner. Two of the seven carry a real pass/fail contract; `verify-g01-fix.ts` is a test in everything but its runner, and `agent-demo.ts` is at the other end of that range — a demonstration whose only verdict is that nothing threw. |
+| **Landed since the first edition** | The system path that had never been run — a paid `/v1/records/summary` against a real grant, producing a real `auditTxId` and `auditSequence`. It has now run: settled payment `5DKFUULW…`, audit append `4YLKLQKK…`, `auditSequence: "1"`, and `total_audit_entries` on the deployed app moved 0 → 5. **E-1 closed.** Since then the tier also gained an independent payer: `agent-demo.ts` settled `DOSKCNKJ…`, `PLBFDDAD…` and `COMJ3TQO…` from a keypair this service does not control, into `payTo`, with the patient's consent granted to *that* party (`IG4XEBTM…`). The agent's TestNet float was seeded from the project's own wallet, so it is **not** external revenue — no unrelated party has paid. |
 | **Should still cover** | The same paths under a runner rather than by hand (TC-143, TC-201), on a nightly schedule; and the real-network failure modes that remain untried — app-account MBR exhaustion, operator ALGO exhaustion, box-reference rejection under concurrency. |
-| **Tooling recommendation** | Wrap all four scripts as `vitest` integration specs with real assertions, gated on `RUN_LIVE=1`; run them nightly rather than per-commit so a facilitator or AlgoNode blip does not block merges. `verify-g01-fix.ts` is the easiest conversion — its verdict logic is already written. |
-| **Effort** | ~0.5 day to convert all four. |
+| **Tooling recommendation** | Wrap the five evidence scripts as `vitest` integration specs with real assertions, gated on `RUN_LIVE=1`; run them nightly rather than per-commit so a facilitator or AlgoNode blip does not block merges. `verify-g01-fix.ts` is the easiest conversion — its verdict logic is already written. `agent-demo.ts` is the one that needs assertions written from scratch, and §3.5.1 names them. The two setup scripts belong in a fixture, not a spec: they provision state rather than check it. |
+| **Effort** | ~0.5 day to convert all five. |
 | **Requirements** | FR-003, FR-010, FR-012, FR-018, FR-020, FR-023, FR-025, FR-040, SEC-007, SEC-008 |
 
 ### 3.4 API testing
@@ -110,11 +112,35 @@
 
 | | |
 |---|---|
-| **Exists today** | **NOT IMPLEMENTED.** No automated E2E test exists in any form. The only end-to-end evidence is manual: `api/scripts/e2e-proof.ts` (headless, API-level) and the browser demo captured in `docs/PROOF.md`. |
+| **Exists today** | **NOT IMPLEMENTED.** No automated E2E test exists in any form. The only end-to-end evidence is manual: the four evidence scripts in `api/scripts/` catalogued in §3.5.1 — of which `agent-demo.ts` is the widest, driving discovery, two paid compute calls, a free consent pre-flight and the paid gated call in one unattended run — and the browser demo captured in `docs/PROOF.md`. |
 | **Should cover** | Browser opens `/`; demo wallet is generated and its address displayed; a paid call to `/v1/triage` completes and the settled transaction id is rendered; a consent grant is signed client-side and `GET /v1/consent/status` subsequently reports `granted: true`; a revoke flips it back to `false`; a paid `/v1/records/summary` for a granted pair returns the summary and an `auditTxId`. |
 | **Tooling recommendation** | Playwright, against a locally-running API (`npm run dev` in `api/`) and `next dev` in `web/`, targeting TestNet. Nightly, not per-commit — the flow spends real TestNet USDC and depends on two third parties. |
 | **Effort** | ~1 developer-day for the first path, ~2 days for the full set. |
 | **Requirements** | FR-033…FR-037, FR-001…FR-003, FR-010 |
+
+#### 3.5.1 The verification scripts in `api/scripts/`
+
+Four scripts in `api/scripts/` produce evidence, and they are the integration and end-to-end evidence this project actually has. They are listed in the plan because they belong to it, not because they satisfy it: **not one of them is a test.** None is registered with `vitest` or `pytest`, none is invoked by a runner, and **none of them runs in CI** — the pipeline in §4.1 has three jobs and none of them executes a script in `api/scripts/`. They are excluded from the 73-test total for that reason.
+
+They also cost money. Each run spends real TestNet USDC against the live GoPlausible facilitator and, where an audit entry is written, real ALGO in fees from the operator account. That is the substantive argument for keeping them off the per-commit path and running them nightly instead (§4.3).
+
+| Script | What it proves | Verdict logic today | Artefact written | In CI |
+|---|---|---|---|---|
+| `agent-demo.ts` | That a caller with **no account, no API key and no prior knowledge** can discover the catalogue from `GET /`, choose the services a task needs, price them from the index, check the free consent oracle before spending on the gated route, and pay for three calls — **$0.09 across three settled Algorand transactions**, paid from an independent keypair the service does not hold, against a grant signed by a third account that is neither the payer nor the payee. The machine-to-machine claim, executed — though both those wallets' TestNet floats were seeded from the project's own wallet, so it is not external revenue. | **None.** It prints a report and exits non-zero only if a call throws. | `contracts/artifacts/agent-run.json` (overwritten each run) — the three payment ids, the audit id and both addresses | **No** |
+| `e2e-proof.ts` | That the x402 round trip settles: real `402` → sign → settle → `200` on `/v1/triage`, with the settled transaction id captured. | Fails on a non-200; no assertion on the settled amount or the body. | `contracts/artifacts/e2e-proof.json` (overwritten each run) | **No** |
+| `e2e-consent-proof.ts` | The composition the project exists for: `grant_access` on-chain → free status check → paid `/v1/records/summary` → on-chain audit append, with `consentVerifiedOnChain: true` and a real `auditTxId`. | **Aborts before paying** if the grant did not take effect, so it cannot spend money to prove nothing. Idempotent — skips the grant when one is already active. | `contracts/artifacts/e2e-consent-proof.json` | **No** |
+| `verify-g01-fix.ts` | That the consent gate discriminates: the G-01 impersonation attempt is refused **403** against the live deployment, *and* a legitimate control call from the same payer returns **200**. | **Exits non-zero unless both hold.** The strongest verdict of the four — a test in everything but its runner. | `contracts/artifacts/g01-verification.json` | **No** |
+
+The directory also holds **setup utilities, which prove nothing and are not verification runs**: `provision-agent-wallet.ts` creates and funds an independent TestNet agent account and opts it in to USDC, `provision-patient-wallet.ts` creates and funds the patient account that grants consent, and `grant-consent.ts` signs `grant_access` / `revoke_access` as the patient. They are preconditions for the four above, not evidence in their own right, and they are not in CI either. `dotenvLoad.ts` is a shared helper.
+
+**What each still does not prove.**
+
+- `agent-demo.ts` — the decline branch (`granted === false`) was not exercised by the recorded run, because the grant was active. Nothing checks that the discovered prices match the amounts actually settled, that the index lists what is mounted (that part *is* covered, hermetically, by `app.spec.ts`), or that the free pre-flight and the server's own `checkAccess` agree. Those three are exactly the assertions a conversion should add.
+- `e2e-proof.ts` — proves settlement, not correctness: it does not assert `amount === 20000` on chain, and the triage body is not checked against `triageScorer`.
+- `e2e-consent-proof.ts` — covers only the *granted* path. The denied path, and the audit-write-failure degradation to `auditStatus: "pending"`, are untested at any tier (TC-103, TC-134).
+- `verify-g01-fix.ts` — proves the payer binding rejects a mismatch and admits a match. It does not prove that `logAccess` is never reached on the rejected path; that ordering assertion is TC-113 and remains open (SEC-008).
+
+**Recommended disposition (unchanged in kind, wider in scope).** Convert all four evidence scripts into `vitest` specs gated behind `RUN_LIVE=1`, run nightly and reported non-blocking, per §4.3. `verify-g01-fix.ts` converts almost for free. `agent-demo.ts` is the one worth converting *last and most carefully*: its value as a demonstration depends on it reading like an agent rather than like a test harness, so the sensible form is a thin spec that imports the flow and asserts on the ledger it returns, leaving the narrated script intact.
 
 ### 3.6 UI / component testing
 
@@ -181,7 +207,7 @@
 | Job | Steps | Verifies |
 |---|---|---|
 | `contract` | `checkout` → `setup-python@v5` (3.12, `cache: pip` keyed on `contracts/requirements-dev.txt`) → `pip install -r requirements-dev.txt` → `python -m puyapy smart_contracts/consent/contract.py --out-dir artifacts` **and copy the output into `contracts/artifacts/`** → `git diff --exit-code -- contracts/artifacts/` → `pytest tests/ -v` | Contract compiles under `puyapy==5.9.0`, **the committed ARC-56 spec matches a fresh compile**, and 28/28 unit tests pass |
-| `api` | `checkout` → `setup-node@v4` (20, `cache: npm`) → `npm ci` → `npm audit --audit-level=high` → `npx tsc --noEmit` → `npm run build` → `npx vitest run` | No high-or-critical advisory, strict typecheck (NFR-005), build, 45/45 tests |
+| `api` | `checkout` → `setup-node@v4` (20, `cache: npm`) → `npm ci` → `npm audit --audit-level=high` → `npm run typecheck` → `npm run build` → `npx vitest run` | No high-or-critical advisory, strict typecheck of `src`, `scripts` **and** `test` — `npm run typecheck` is `tsc -p tsconfig.all.json`, wider than the `src`-only config `npm run build` compiles (NFR-005) — build, 45/45 tests |
 | `web` | `checkout` → `setup-node@v4` (20, `cache: npm`) → `npm ci` → `npm audit --audit-level=high` → `npx tsc --noEmit -p tsconfig.json` → `npm run build` with `NEXT_PUBLIC_API_BASE=http://localhost:4021`, `NEXT_PUBLIC_NETWORK=testnet` | No high-or-critical advisory, strict typecheck, Next.js production build |
 
 **All three jobs pass when run locally** (see [`Test_Results.md`](Test_Results.md) §2, §3 and §4).
@@ -205,7 +231,7 @@
 | **Coverage** | every change | `vitest --coverage`, `pytest --cov`, published as artefacts with a stored baseline | must not regress | **No** (TC-202) |
 | **Security** | every change | `pip-audit`, CodeQL (JS/TS + Python), `gitleaks` on the build context | High/Critical blocks merge | **Partly** — `npm audit --audit-level=high` is in place on both Node jobs; the rest is absent (TC-204) |
 | **Image** | every change | `docker build` for `api/` (context = repo root) and `web/`, then boot the API image and assert `GET /v1/health` returns 200 with the expected `network` and a non-null `consentAppId` | build + boot must pass | **No** (TC-203) — the only thing standing between NFR-007 and **VALIDATED** |
-| **Live integration** | nightly | `RUN_LIVE=1` suite against TestNet app `768743428`, wrapping the four existing proof scripts | reported, non-blocking; alert on failure | **No** — the scripts exist and are run by hand (TC-143, TC-201) |
+| **Live integration** | nightly | `RUN_LIVE=1` suite against TestNet app `768743428`, wrapping the five existing proof scripts — the four in `api/scripts/` (§3.5.1) plus `contracts/scripts/exercise_contract.py` | reported, non-blocking; alert on failure | **No** — the scripts exist and are run by hand (TC-143, TC-201) |
 | **E2E** | nightly | Playwright browser flow | reported, non-blocking | **No** (TC-194) |
 | **Performance** | weekly / on demand | k6 baseline against a fixed environment | reported against team-chosen thresholds once those exist | **No** (**G-24**) |
 
@@ -251,6 +277,7 @@
 | API — service index, checksum validation, error hygiene, rate limiting | 7 tests in `app.spec.ts` | **G-34**, **G-10**, SEC-010, SEC-011, **G-09** / SEC-013 |
 | CI — real trigger, caching, dependency audits, artifact-freshness gate | `ci.yml` | **G-06 / CI-1**, **CI-4**, **G-16**, **G-27** |
 | System — the consent-gated composition executed on TestNet | `e2e-consent-proof.ts`, `total_audit_entries` 0 → 5 | **E-1**, FR-010, FR-012, FR-025 |
+| System — an autonomous caller discovering the service and paying for three of its endpoints unattended | `agent-demo.ts`, $0.09 across 3 settled transactions. Three separate accounts: payer `UYBTLPHS…` → payee `2WDV2J2F…`, with the grant signed by `56LFG5EE…`, which is neither; floats seeded from the project's own wallet, so not external revenue | **O13** — by live procedure only. No assertions, no runner, not in CI (§3.5.1) |
 
 ### 7.2 Remaining
 

@@ -103,7 +103,7 @@ Four trust boundaries, matching the zones in `Security_Architecture.md` §1.1:
 | E-4 | `GET /v1/consent/status` | **free, unauthenticated** | `?patient&requester&scope` | 2 outbound algod calls per request; **T-12, T-13, T-32** |
 | E-5 | `GET /v1/consent/app-info` | free | none | Static config echo |
 | E-6 | `GET /v1/consent/arc56` | free | none | Fixed file path, verified non-user-controlled (`api/src/app.ts:64`) |
-| E-7 | `GET /v1/health` | free | none | Echoes network + App ID |
+| E-7 | `GET /v1/health` | free | none | Echoes network + App ID, and now a `chain` block: the **operator address**, the application-account address, both accounts' spendable µALGO, and `estimatedAuditWritesRemaining`. All four are already public on the indexer, so this discloses no secret — but it does hand an unauthenticated caller a live, low-latency read of how close both accounts are to the exhaustion **T-14** describes, without their having to query the indexer themselves. Sampled in the background with a 30 s TTL (`services/algorand.ts:219-241`), so it adds no per-request algod call and no new blocking dependency |
 | E-8 | `GET /` | free | none | Service index |
 
 **13 ABI methods** on App `768743428` — every one is reachable by any Algorand account that can pay a transaction fee; the guards are inside the methods:
@@ -345,7 +345,7 @@ Nothing below is optional if this system ever holds real data. These are not "ni
 
 - Repository at commit `32ffd73`, branch `master`; all `path:line` citations verified by direct read.
 - App ID **768743428** on Algorand **TestNet**; app account `CCO26Y6Z56DDZ3OELO2UKJMIPJVSIT52I23F2MPMR52JBM3HQZZNUZNOR4`; 2 boxes, 100 box bytes, min-balance 145,000 µALGO; global state `total_requests=2, total_grants_active=0, total_revocations=2, total_audit_entries=0`. Read from `https://testnet-idx.algonode.cloud`, 2026-08-21.
-- Settled x402 payment `OYRQRKYA7WUKBVLWTOFJSJMZFBW7VCNGP5VGH5EBUJGRCVFQFJRQ` — one payment exists, and it is a self-payment (sender == receiver == deployer), disclosed in `docs/PROOF.md` §6.
+- Settled x402 payments: `OYRQRKYA7WUKBVLWTOFJSJMZFBW7VCNGP5VGH5EBUJGRCVFQFJRQ` — a self-transfer, sender == receiver == deployer, disclosed in `docs/PROOF.md` §6 — and the agent run's `DOSKCNKJ…`, `PLBFDDAD…` and `COMJ3TQO…`, paid by an independent keypair (`UYBTLPHS…`) into `payTo` (`2WDV2J2F…`) against a grant signed by a third account (`56LFG5EE…`) that is neither, `docs/PROOF.md` §10. Both of those wallets' TestNet balances were seeded from the project's own, so no external party has paid for this service.
 - Reproduced by the reviewer: R-1 (facilitator down → 500, free routes still 200), R-3 (58-char invalid address → 500 with `wrong checksum for address`), and the live 402 challenge on `/v1/triage`.
 - SDK surface verified in `api/node_modules/@x402/{core,avm,hono}` at `2.21.0`: `decodePaymentSignatureHeader` (`core/dist/cjs/http/index.d.ts:20`), `getSenderFromTransaction` (`avm/dist/cjs/index.d.ts:186`), `ProtectedRequestHook` (exported from `@x402/core/server`; usage at `hono/dist/cjs/index.d.ts:117`), payment note construction (`avm/dist/cjs/index.js:266`).
 - `docs/SECURITY.md` — prior art. Every claim in it was independently re-verified in this review and every claim held.

@@ -116,7 +116,7 @@ the 2026-08-21 engineering review — not taken from this repository's own word.
 | A real x402 payment settled | [`OYRQRKYA…`](https://lora.algokit.io/testnet/transaction/OYRQRKYA7WUKBVLWTOFJSJMZFBW7VCNGP5VGH5EBUJGRCVFQFJRQ) — `axfer`, asset `10458941` (TestNet USDC), **20000** base units = exactly $0.02 at 6 decimals, `fee: 0` via facilitator sponsorship, round 66091768 |
 | 402 challenge matches the live facilitator | Decoded `PAYMENT-REQUIRED` carries the real asset id, the real fee-payer address, and an SDK-computed unit conversion — nothing hardcoded ([`docs/PROOF.md`](docs/PROOF.md) §3) |
 | **The deployed program is this repo's source** | `contract.py` → (reproducible `puyapy` 5.9.0 compile) → committed TEAL → (algod assemble) → **byte-identical** to the bytecode running at App `768743428` ([`docs/PROOF.md`](docs/PROOF.md) §7) |
-| Test suites pass | **28** contract tests (AVM simulator) + **45** API tests = **73**, all green; API and web both typecheck and build |
+| Test suites pass | **28** contract tests (AVM simulator) + **93** API tests = **121**, all green; API and web both typecheck and build |
 
 **The full composition, proven on-chain.** One paid call to `/v1/records/summary` produced three
 real transactions — the patient's [`grant_access`](https://lora.algokit.io/testnet/transaction/M26NPR32Z5YBLBBMZDTBQL6Y7EUSNS5YV4PXYEUBXIVJQGVJ3MAA),
@@ -385,7 +385,7 @@ Every document is linked below. Click any row to open it.
 | [For Judges](docs/JUDGES.md) | The pitch, the evidence table, and a 2-minute demo script |
 | [Evidence Log](docs/PROOF.md) | Every claim with a transaction ID and a command to reproduce it |
 | [Agent Run Facts](docs/AGENT_RUN_FACTS.md) | The canonical machine-to-machine run: the three accounts, every transaction ID, and what may and may not be claimed |
-| [Engineering Gap Report](docs/ENGINEERING_GAP_REPORT.md) | 34 findings — 22 closed, 12 open — with evidence, severities and fixes |
+| [Engineering Gap Report](docs/ENGINEERING_GAP_REPORT.md) | 37 findings — 25 closed, 12 open — with evidence, severities and fixes |
 | [Winning Roadmap](docs/WINNING_ROADMAP.md) | Four-phase remediation plan; Phase 1 complete |
 | [Compliance](docs/COMPLIANCE.md) | Rule-by-rule mapping to the Global x402 Challenge requirements |
 | [Go-Live Checklist](docs/GO_LIVE_CHECKLIST.md) | Competition entry checklist |
@@ -582,7 +582,7 @@ Not Orchestrator: MedRail does not pay other x402 endpoints, and does not claim 
 
 ```
 contracts/   Algorand Python contract (algopy/puya), 28 unit tests, deploy + proof scripts
-api/         Hono/TypeScript x402 resource server, 45 tests
+api/         Hono/TypeScript x402 resource server, 93 tests
 web/         Next.js demo — live payment flow and on-chain consent UI
 docs/        Product, requirements, architecture, data, API, security,
              testing, deployment, intelligence layer, operations, hackathon

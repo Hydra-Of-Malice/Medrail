@@ -2,7 +2,7 @@
 
 **Purpose:** Separate, with no benefit of the doubt, what in MedRail is genuinely new from what is standard practice, borrowed, or simply small — and state exactly how much of the defensible claim is currently proven.
 
-**Status of this document:** Authored 2026-08-21 against the verified fact ledger and source at commit `3b387df`. This is written to be read by a hostile reviewer. Every novelty claim below is stated with the evidence for it **and** the strongest available argument against it. Where a claim is weak, the weakness is in the same paragraph, not in a footnote. **All three legs of the central claim have now executed on Algorand TestNet**, and §0 states exactly how many times and by whom.
+**Status of this document:** Authored 2026-08-21 against the verified fact ledger and source at commit `3b387df`, and sharpened once `api/scripts/agent-demo.ts` had been run against live TestNet. This is written to be read by a hostile reviewer. Every novelty claim below is stated with the evidence for it **and** the strongest available argument against it. Where a claim is weak, the weakness is in the same paragraph, not in a footnote. **All three legs of the central claim have now executed on Algorand TestNet**, and §0 states exactly how many times and by whom.
 
 ---
 
@@ -10,11 +10,13 @@
 
 > **MedRail's defensible novelty is a composition, not a component.** A single paid HTTP call is simultaneously (1) a settled stablecoin payment, (2) an on-chain authorisation evaluation against a permission the patient controls, and (3) an immutable append to a per-patient audit trail — with no account, API key, or prior relationship required from either party. Around that, a deliberate architectural split — open endpoints priced for volume, one consent-gated endpoint priced for the ownership proof, both underwritten by the same contract — reconciles two goals that are otherwise in direct tension: "the patient owns their data" and "generate real payment volume."
 
+**Who that claim is *for*, because the differentiators only make sense once the customer is fixed: an autonomous agent.** An agent triaging a patient case needs three things — symptom triage, a drug-interaction check, and the patient's record. Today that is three vendor signups, three API keys, three billing relationships, and even then the agent cannot legally touch the record, because nobody can prove the patient allowed it. MedRail sells all three per call over x402. The differentiators below are what a competitor building the same three endpoints would have to reproduce.
+
 **The state of that claim today:**
 
 | Leg | Mechanism | Proven on live infrastructure? |
 |---|---|---|
-| 1. Settled payment | x402 v2 `exact`, GoPlausible facilitator, USDC ASA `10458941` | **Yes** — first at tx `OYRQRKYA7WUKBVLWTOFJSJMZFBW7VCNGP5VGH5EBUJGRCVFQFJRQ`, 20000 base units, round 66091768, `fee: 0`, and repeatedly since on the gated route (`5DKFUULW…`, `QZIQWHN5…`). **Every payment is a self-payment from the project's own account.** |
+| 1. Settled payment | x402 v2 `exact`, GoPlausible facilitator, USDC ASA `10458941` | **Yes** — first at tx `OYRQRKYA7WUKBVLWTOFJSJMZFBW7VCNGP5VGH5EBUJGRCVFQFJRQ`, 20000 base units, round 66091768, `fee: 0`, and repeatedly since on the gated route (`5DKFUULW…`, `QZIQWHN5…`). The current agent run settles between **distinct payer and payee** — `UYBTLPHS…` → `2WDV2J2F…`, an independent keypair this service does not control (`DOSKCNKJ…` round 66563930, `PLBFDDAD…`, `COMJ3TQO…` round 66563944; the indexer confirms sender ≠ receiver). Float seeded from the project's own wallet; **not external revenue.** |
 | 2. Authorisation evaluation | `check_access` via `simulate()` — free, submits nothing — behind a payer-identity binding | **Yes.** The contract read is proven (tx `X2BQ5FD4…` → `check_access = True` → tx `OV2J2T5V…` → `False`), and the gate around it is now an access control: `payerFromRequest` binds the asserted requester to the address that signed the payment (`api/src/x402Payer.ts`), verified live with both an attack and a control by `api/scripts/verify-g01-fix.ts`. |
 | 3. Audit append | `log_access`, admin-gated, per-patient append-only | **Yes.** First at tx `4YLKLQKKWXXFW3UT5APJVYKXI7T7A6OACTAWCC5YBAN3XGOGHRVQ`, sequence 1. `total_audit_entries` on App `768743428` now reads **5**, with `s`- and `a`-prefixed boxes present and the app account's minimum balance reconciling exactly against the box inventory. |
 
@@ -37,7 +39,69 @@ flowchart LR
     style V3 stroke-width:2px
 ```
 
-**All three legs have touched real infrastructure, in a single call, repeatably** — `api/scripts/e2e-consent-proof.ts` performs grant → check → paid call → audit append end to end and can be re-run at will. What remains unproven is not the mechanism but the *adoption*: every payment is a self-payment, nothing is publicly hosted, and there is no MainNet deployment or Bazaar listing. Everything below is written on that footing.
+**All three legs have touched real infrastructure, in a single call, repeatably** — `api/scripts/e2e-consent-proof.ts` performs grant → check → paid call → audit append end to end and can be re-run at will. And the whole three-service task has been walked by a program that started with nothing but a URL: `api/scripts/agent-demo.ts` discovers the catalogue from `GET /`, buys triage and an interaction check, checks the free consent oracle before spending on the gated endpoint, buys the record, and synthesises one assessment — **$0.09, 3 settled Algorand transactions, zero accounts, zero API keys, zero invoices** (`DOSKCNKJ…`, `PLBFDDAD…`, `COMJ3TQO…`). That agent is a **separate account with its own keypair, which this service does not control**: it pays `UYBTLPHS…` → `2WDV2J2F…`, and the patient `56LFG5EE…` — an account that is neither the payer nor the payee — granted *that* address consent in tx `IG4XEBTM…`, so the three roles are three separate accounts with three separate keypairs rather than one account rehearsing all of them. The first run of the same script was self-paid (`POAQNSOP…`, `W3Z55BZY…`, `5CO5XV7M…`, with audit entry `5HYV5B2L…`), and two runs after it paid from the agent's own key while the service still stood in as the patient. What remains unproven is not the mechanism, and no longer the payment mechanics — it is the *demand*: the agent's TestNet USDC float was seeded from the project's own wallet, because TestNet USDC has no other practical source, so **no external or unrelated party has paid for this service**; nothing is publicly hosted; and there is no MainNet deployment or Bazaar listing. Everything below is written on that footing.
+
+---
+
+## 0.1 The five differentiators, graded honestly
+
+A competitor could clone the three endpoints in an afternoon. These five are what they would still have to build, and what a reviewer should actually weigh. Each is stated with its evidence, its grade, and the strongest thing to say against it. Full analysis follows in §1–§5; this is the index to it.
+
+### D-1 — The payment *is* the authentication
+
+MedRail issues no API keys, holds no sessions, and has no user table — so on the face of it there is nothing to check an asserted `requesterAddress` against, which is exactly why the first version of this endpoint took the caller's word for it. But an x402 payment is a **signed Algorand transaction**, and a signature is an identity assertion. The credential was already inside the request, unread. `payerFromRequest` (`api/src/x402Payer.ts`) decodes the verified `PAYMENT-SIGNATURE` header, reads the AVM `exact` payload `{paymentGroup, paymentIndex}`, and recovers the sender of the one leg the caller signed. `records.ts:41-51` returns **403** unless that address equals the asserted `requesterAddress`, and treats a failed recovery as a mismatch rather than a fallback.
+
+**Proven adversarially, live:** `api/scripts/verify-g01-fix.ts` grants a genuine third-party requester consent, pays from a *different* key while asserting that third party, and confirms the **403** — then runs a control with payer and requester matched and confirms the **200**. A gate that rejects everything is not a fix; the control is the half that makes the result meaningful. Six unit cases in `api/test/x402Payer.spec.ts` cover the recovery itself.
+
+**Grade: MEDIUM-HIGH as an idea, ZERO as a mechanism.** `decodePaymentSignatureHeader` and `getSenderFromTransaction` are SDK exports; the implementation is roughly fifteen lines of documented API calls (NN-13). The idea is the valuable half: *for a stranger-callable paid endpoint, the payment already carries the identity, so authentication costs one header decode and no account system at all.* The property that made the endpoint attackable is the property that makes the defence free.
+
+**Against it:** what a signature proves is control of a keypair, nothing more. Nothing establishes that an address belongs to a licensed clinician or any real-world party (N-1, N-9 in [`./Problem_Statement.md`](./Problem_Statement.md) §7). It is the right boundary for a demonstration and the blocking gap for anything clinical.
+
+### D-2 — The patient authorises, and the backend structurally *cannot* override them
+
+`grant_access` and `revoke_access` take `Txn.sender` as the patient identity (`contract.py`, `MedRailConsent.grant_access` / `.revoke_access`), so only the patient's own key can create or withdraw a grant. Both are signed in the browser and submitted straight to AlgoNode (`web/lib/consent.ts:44-89`). There is **no key-ingress path in `api/src` at all** — not "we choose not to", but "there is nowhere for it to go." NFR-008 **IMPLEMENTED**; the claim was checked and holds.
+
+**Grade: LOW as architecture, MEDIUM-HIGH as discipline.** Client-side signing is normal in web3. What is unusual is designing the *server* so the capability is absent rather than merely unused — a property a reviewer can verify by failing to find the code, which is a stronger form of evidence than a policy document.
+
+**Against it:** the demo wallet stores `{address, mnemonic}` as plaintext JSON in `sessionStorage` (`web/lib/demoWallet.ts:3`, `:25`), so any XSS on the demo page exfiltrates the key. The strong claim is about the *backend* and must not be allowed to imply the *frontend* has good key hygiene — it does not (§4, I-2). And the referenced production wallet path (`lib/walletConnect.ts`) **does not exist** (DOC-4).
+
+### D-3 — Every paid access writes an audit entry the operator cannot delete
+
+`log_access` appends `AuditEntry{ts, requester, scope, endpoint, action}` at `audit_log[patient ‖ itob(seq)]` and increments a per-patient counter (`contract.py`, `MedRailConsent.log_access`). **No method in the contract deletes or mutates an audit entry**, the sequence only ever increments (DATA-002), and no `DeleteApplication` or `UpdateApplication` handler is declared on any of the thirteen ABI methods — so the history cannot be rewritten or dropped by redeploying over it either.
+
+**Proven on-chain:** first entry at tx `4YLKLQKKWXXFW3UT5APJVYKXI7T7A6OACTAWCC5YBAN3XGOGHRVQ`, sequence 1; `total_audit_entries` on App `768743428` reads **5**, with `s`- and `a`-prefixed boxes present and the app account's minimum balance reconciling exactly against the box inventory.
+
+**Grade: LOW.** "Immutable audit trail on a blockchain" is the oldest claim in the category (NN-10). What makes it worth stating here is not the immutability but *what triggers it*: the entry is written as part of the paid call itself, naming the requester **recovered from the payment signature** rather than one the caller supplied (D-1). That makes the record defensible against the accessor, not only against the custodian.
+
+**Against it, and this is the sharp edge:** the operator **cannot delete an entry, but can forge one.** `log_access` is admin-gated and the admin is a single hot mnemonic in an environment variable, so whoever holds `OPERATOR_MNEMONIC` can write arbitrary entries about any patient, rotate `set_admin`, and drain the app account (SEC-012 **NOT IMPLEMENTED**). Append-only is not the same as trustworthy. Patient *grants* cannot be forged (D-2); patient *audit entries* can. And five self-generated entries is a working mechanism, not a track record.
+
+### D-4 — An off-the-shelf agent works with zero MedRail-specific code
+
+A generic `@x402/fetch` client can buy every endpoint here, including the consent-gated one, without knowing MedRail's App ID, ABI, or box layout. That is not an accident of implementation; it is the reason the most-criticised design decision in the system was made the way it was.
+
+The Algorand `exact` scheme permits up to 16 top-level transactions in a client's signed group, so the audit write *could* have been bundled into it — making "payment settled" and "access logged" a single all-or-nothing ledger event. **ADR-005 rejected that**, and the recorded rationale is agent-compatibility, verbatim from `docs/IMPLEMENTATION_PLAN.md:49`:
+
+> "Generic x402 clients (`@x402/fetch`, `@x402/axios`, or any other team's agent calling our endpoint) only know how to construct the payment transaction(s) described in `paymentRequirements`. They have no way to know our app ID or method signature. Requiring a custom multi-transaction group would make the endpoint incompatible with off-the-shelf x402 clients."
+
+Bundling would additionally require the client to supply a *predicted* audit sequence number as a box reference — which it cannot compute without reading chain state first — and `log_access` is admin-only, so a client could not sign it at all without rewriting the contract to accept caller-signed writes, destroying SEC-001.
+
+**Grade: MEDIUM as a decision, ZERO as an artefact.** Nothing was built here; something was deliberately *not* built. But it is the one place where the machine-to-machine framing visibly changed the architecture rather than decorating it, and the reasoning is recorded in four independent places (ADR-005, `IMPLEMENTATION_PLAN.md` §3, `ARCHITECTURE.md`, and the docstrings in `contract.py` and `algorand.ts`) with the trade-off named in all of them.
+
+**Against it:** the cost is real and permanent. **The composition is not atomic** — payment and audit are two transactions, moments apart — so "one call" describes the HTTP interaction, not the ledger. A settled payment with a failed audit write is representable; it is now caught and degraded to HTTP 200 with `auditStatus: "pending"` (`records.ts:83-99`) rather than a 500, which is better behaviour and also quieter, since nothing alerts on it (G-15). ADR-005 also names the correct fix — a durable outbox — and records that ADR-002's no-database decision excludes it.
+
+### D-5 — Self-describing for machines
+
+`GET /` returns the whole catalogue in one free fetch: all eight routes with `method`, `path`, `price` and `gate`; a `contract` block with `appId` `768743428`, network, CAIP-2 id and `arc56SpecUrl`; and an `x402` block with version, scheme and facilitator (`api/src/app.ts:149-177`). `GET /v1/consent/arc56` then serves the compiled ARC-56 spec itself, so a third party can build ABI calls against the contract **without cloning this repository or calling MedRail again** (`api/src/app.ts:141-147`).
+
+Two properties make this more than a README in JSON. First, `gate` is machine-actionable: `"x402"` versus `"x402 + on-chain consent"` is how an agent knows to run the free pre-flight before spending. Second, `api/test/app.spec.ts` asserts that the advertised list equals the mounted route set, so the catalogue cannot drift from reality — an earlier revision advertised five routes and omitted both blocks (G-34, closed).
+
+**Proven consumed:** `agent-demo.ts` hard-codes nothing about MedRail except the base URL. Paths, prices, gates, App ID and spec URL all come from that response at runtime, and prices are read out of it (`priceOf`) rather than assumed.
+
+**Grade: LOW-MEDIUM.** Publishing a service index and an app spec is good practice, not invention, and it is uncommon in hackathon submissions rather than novel. A submission that makes itself bypassable is showing confidence in the contract rather than in the wrapper, which is the right instinct.
+
+**Against it, and this is the honest hole in the discovery story:** self-description works only once you have the URL, and **getting the URL is not solved.** Nothing is publicly hosted, there is no Bazaar listing, and `@x402/extensions` is declared in `api/package.json` but imported nowhere in `api/src` (DOC-9). No scope vocabulary is published either, so an agent can construct calls against the contract but cannot discover what permission to ask a patient for (§2, P-3).
+
+**In one line:** D-1 is the differentiator; D-2 and D-3 are what it is for; D-4 is what makes it reachable; D-5 is what makes it findable once you know where to look.
 
 ---
 
@@ -113,13 +177,13 @@ The resolution: two categories, one trust layer.
 | Purpose | broad repeatable volume | the ownership proof |
 | State touched | none — pure compute | `check_access` + `log_access` |
 
-Argued in [`../JUDGES.md`](../JUDGES.md) and [`../ARCHITECTURE.md`](../ARCHITECTURE.md), and reflected in the code: `api/src/app.ts:50-60` declares all three prices in one place, `GET /` advertises every route with its `price` and `gate`, and `web/components/PricingTable.tsx` publishes the gate for each.
+Argued in [`../JUDGES.md`](../JUDGES.md) and [`../ARCHITECTURE.md`](../ARCHITECTURE.md), and reflected in the code: `api/src/app.ts:58-175` declares all three prices in one place, `GET /` advertises every route with its `price` and `gate`, and `web/components/PricingTable.tsx` publishes the gate for each.
 
 **Novelty grade: MEDIUM-HIGH.** It identifies a real structural tension, names it, and resolves it with an architecture rather than a slogan. It is also *falsifiable*, which is the mark of a real claim: if consent-gated calls were high-volume, the split would be unnecessary.
 
 **Counter-arguments:**
 - The split is partly a competition artefact. It optimises for a leaderboard that scores payment volume. A different scoring rule might not justify it.
-- **The volume half has not materialised.** Every settled payment on record is a self-payment from the project's own account (disclosed in [`../PROOF.md`](../PROOF.md) §6). The strategy is sound; the outcome is unrealised. Nothing here may be described as "payment volume."
+- **The volume half has not materialised.** Payments do now settle between independent accounts — the agent pays from its own keypair (`UYBTLPHS…`), which this service does not control — but that agent's TestNet float was seeded from the project's own wallet, and **no external or unrelated party has paid for anything** (disclosed in [`../PROOF.md`](../PROOF.md) §10). The strategy is sound; the outcome is unrealised. Nothing here may be described as "payment volume."
 - [`../ARCHITECTURE.md`](../ARCHITECTURE.md) says "Both categories write to the same audit log" and then corrects itself in the same sentence. The correction is the accurate half: only the consent-gated category writes to the trail, and the open endpoints are pure compute that persist nothing (DOC-5). Any restatement of this claim must carry the correction.
 
 ### P-2 — Pricing the verification, not the data
@@ -147,7 +211,7 @@ Held to a strict standard: *novel*, not merely *competent*. By that standard, **
 | Practice | Where | Assessment |
 |---|---|---|
 | Hand-constructed `ABIMethod` literals instead of parsing ARC-56, with the reason in a comment | `api/src/services/algorand.ts:16-46` | **Defensive, not novel.** Correct call for SDK-version stability; the cost is that a contract signature change produces no type error. |
-| CORS `allowHeaders` deliberately unset so Hono reflects the browser's preflight, with a documented note about a prior regression | `api/src/app.ts:25-30` | **Good engineering evidence.** A comment that records a real bug and why the fix is shaped that way is worth more than the fix. Not novel. |
+| CORS `allowHeaders` deliberately unset so Hono reflects the browser's preflight, with a documented note about a prior regression | `api/src/app.ts:27-32` | **Good engineering evidence.** A comment that records a real bug and why the fix is shaped that way is worth more than the fix. Not novel. |
 | Per-patient in-process promise-chain lock | `api/src/services/algorand.ts:129-138` | **Pragmatic and honestly bounded**, and the deployment configuration now agrees with it: `api/fly.toml` sets `max_machines_running = 1` deliberately. That is a limitation accepted openly rather than a contradiction papered over — and it remains an open finding (G-11). |
 | Payer identity recovered from the payment itself, rather than trusted from the body | `api/src/x402Payer.ts`; `api/src/routes/records.ts:41-51` | **The single best change in the codebase.** Not novel — the SDK exports every primitive it uses — but it is the right ten lines in the right place, it fails closed on an unreadable header, and it was verified adversarially with a control rather than assumed. |
 | Shared golden-vector fixture asserted from three runtimes | `api/test/fixtures/box-key-vectors.json` + `boxKeyParity.spec.ts` + `contracts/tests/test_box_keys.py` | **Correct answer to a triplication problem.** One file that Python, Node and the browser must all agree with, rather than three tests that each agree with themselves. |
@@ -234,34 +298,42 @@ The section that decides whether the rest of this document is credible.
 | NN-9 | **The tech stack.** | Hono, Next.js 16, React 19, Tailwind 4, zod, vitest, Algorand Python. Current and sensibly chosen; entirely conventional. |
 | NN-10 | **"Immutable audit trail on a blockchain."** | The oldest claim in the category. It is now proven here — `total_audit_entries = 5`, first entry at tx `4YLKLQKK…` — which moves it from *unproven* to *unremarkable*, not to *novel*. Five self-generated entries is a working mechanism, not a track record. |
 | NN-11 | **Being deployed on TestNet.** | Expected of every entrant. Not a differentiator. |
-| NN-12 | **Having settled payments at all.** | A minimum bar, not an achievement — and every one of them is a self-payment. |
-| NN-13 | **Recovering the payer from a signed payment.** | `decodePaymentSignatureHeader` and `getSenderFromTransaction` are both SDK exports. Using them is the correct thing to do, and the *idea* that a payment can serve as authentication is the interesting half (§N-5) — but the mechanism is fifteen lines of documented API calls. |
+| NN-12 | **Having settled payments at all.** | A minimum bar, not an achievement. They now settle between independent accounts (`UYBTLPHS…` → `2WDV2J2F…`) rather than one account paying itself, which removes an objection without adding a claim: the payer's float was seeded from the project's own wallet, and no external party has paid. |
+| NN-13 | **Recovering the payer from a signed payment.** | `decodePaymentSignatureHeader` and `getSenderFromTransaction` are both SDK exports. Using them is the correct thing to do, and the *idea* that a payment can serve as authentication is the interesting half (D-1, §N-5) — but the mechanism is fifteen lines of documented API calls. |
+| NN-14 | **A JSON service index.** | `GET /` returning routes with prices is a README in a different serialisation. What is worth crediting is narrow and should be stated narrowly: the `gate` field is machine-actionable, and `api/test/app.spec.ts` asserts the advertised list equals the mounted set so it cannot drift. Neither is an invention. Advertising an ARC-56 spec over HTTP is likewise good practice, not novelty (D-5, §I-1). |
+| NN-15 | **A free read before a paid write.** | The consent oracle being free so an agent can check before spending is ordinary API design — every paid lookup service in existence has a cheap or free existence check. It is a *good* decision, well-placed, and it is the sharpest beat in the agent demo (UC-013 A1). It is not new. Note also the honest limit: the caller is protected either way, since a 403 cancels settlement, so the pre-flight saves a round trip and a decision, not a refund. |
+| NN-16 | **The agent demo itself.** | `api/scripts/agent-demo.ts` is roughly two hundred lines of glue over a stock `@x402/fetch` client. It proves something worth proving — that the service is usable end to end by a program with no prior knowledge of it — but it is a *demonstration*, not a product, not an orchestrator, and not a component anyone else can reuse. The agent is not sold, deployed, or reachable by anyone but its author. |
+| NN-17 | **Composing three API calls into one assessment.** | The synthesis happens in the caller, in a `console.log`. MedRail sells three results and does not sell a combined judgement. There is no orchestrator endpoint, no planner, no agent framework, and none is claimed ([`../COMPLIANCE.md`](../COMPLIANCE.md)). |
+| NN-18 | **Append-only meaning trustworthy.** | The contract has no method that deletes or mutates an audit entry, which is genuinely useful and genuinely narrow. It does **not** follow that the trail is trustworthy: `log_access` is admin-gated and the admin is one hot mnemonic in an environment variable, so its holder can write arbitrary entries about any patient (SEC-012 **NOT IMPLEMENTED**). Immutability constrains deletion, not authorship. Any claim in the neighbourhood of "tamper-proof audit" must carry this sentence with it. |
 
 ---
 
 ## 7. The USP, in the form it can actually be defended
 
-**Defensible today, with evidence:**
+**The one sentence, if only one survives:**
 
-> MedRail places a patient-controlled, publicly verifiable consent registry directly inside the request path of a stranger-callable, per-call-paid HTTP API — so that one call is both a settled payment and a live authorisation evaluation against a permission no organisation mediates. It pairs that with a deliberate two-tier endpoint design that makes the patient-ownership story and real payment volume achievable in the same system rather than trading one against the other.
+> **The payment is the authentication: MedRail recovers the address that signed the x402 payment and refuses to serve a patient's record unless that exact address is the one the patient granted on-chain — so an agent needs no API key, an impersonator cannot buy their way in, and every access that does succeed is written to a trail the operator cannot delete.**
 
-Every clause above is backed: FR-001…FR-003 (**VALIDATED**), FR-013 / SEC-009 (**IMPLEMENTED**), FR-018 / FR-020 / SEC-003 (**VALIDATED**, three transaction IDs), FR-039 / SEC-007 / SEC-008 (**VALIDATED**, `contracts/artifacts/g01-verification.json`), FR-012 / FR-025 (**VALIDATED on-chain**, audit tx `4YLKLQKK…`), NFR-008 (**IMPLEMENTED**), NFR-011 (**VALIDATED**), FR-101 (**IMPLEMENTED**).
+Each clause is separately checkable. *Recovers the address that signed* — `api/src/x402Payer.ts`. *Refuses unless it matches* — `records.ts:41-51`, **403**, with a failed recovery treated as a mismatch. *The one the patient granted on-chain* — `check_access` on App `768743428`, against a grant only the patient's key can create or withdraw. *An impersonator cannot buy their way in* — executed against the live service and rejected, with a matched control admitted (`contracts/artifacts/g01-verification.json`). *A trail the operator cannot delete* — no method in the contract deletes or mutates an audit entry; first entry at tx `4YLKLQKK…`, `total_audit_entries = 5`. And the one qualification that must travel with it: the operator **cannot delete** an entry but **can forge** one, because `log_access` is admin-gated and the admin is a single hot key (SEC-012 **NOT IMPLEMENTED**).
 
-And one clause can now be added to it:
+**Defensible today, with evidence, at length:**
 
-> The requester's identity is not asserted, it is recovered — from the signature on the payment that bought the call. The consent gate is an authorisation check with no account system behind it, and the impersonation attack it was built against has been executed against the live service and rejected, alongside a control call proving the legitimate path still works.
+> MedRail places a patient-controlled, publicly verifiable consent registry directly inside the request path of a stranger-callable, per-call-paid HTTP API — so that one call is both a settled payment and a live authorisation evaluation against a permission no organisation mediates. It pairs that with a deliberate two-tier endpoint design that makes the patient-ownership story and real payment volume achievable in the same system rather than trading one against the other. An off-the-shelf x402 client can buy every endpoint, including the gated one, with **zero MedRail-specific code** — which is not a side effect but the recorded reason the audit write is a follow-up transaction rather than a leg in the caller's signed group (ADR-005) — and a program that started with only a base URL has walked the whole three-service task unassisted for $0.09.
+
+Every clause above is backed: FR-001…FR-003 (**VALIDATED**), FR-013 / SEC-009 (**IMPLEMENTED**), FR-017 (**VALIDATED**, consumed unassisted by `agent-demo.ts`), FR-018 / FR-020 / SEC-003 (**VALIDATED**, three transaction IDs), FR-039 / SEC-007 / SEC-008 (**VALIDATED**, `contracts/artifacts/g01-verification.json`), FR-012 / FR-025 (**VALIDATED on-chain**, audit tx `4YLKLQKK…`), NFR-008 (**IMPLEMENTED**), NFR-011 (**VALIDATED**), FR-101 (**IMPLEMENTED**). The agent run itself is `api/scripts/agent-demo.ts` with three settled transactions and one audit entry on the public ledger (§0).
 
 **Not defensible today, and must be said in the same breath:**
 
-> Nothing is publicly hosted. There is no MainNet deployment, no Bazaar listing, and no third-party payment volume — every settled payment on record is a self-payment from the project's own account, and every one of the five audit entries was written by the project's own scripts. The deployed contract at App `768743428` still runs bytecode that predates two source fixes (C-1, C-2), because redeploying would mint a new App ID and discard the very history these proofs rest on. Twelve engineering findings remain open, including no observability of any kind and no direct test coverage of the chain client.
+> Nothing is publicly hosted. There is no MainNet deployment, no Bazaar listing, and no third-party payment volume. Payments settle between independent accounts, but the agent's TestNet float was seeded from the project's own wallet, and every one of the five audit entries was written by the project's own scripts. **The agent that discovered and paid for the service is our agent**: its keypair is genuinely separate and the service cannot spend from it, but we created it, we funded it, and we ran it. The same is true of the *patient*: `56LFG5EE…` is a genuinely separate account, neither the payer nor the payee, and we created and funded that one too. `agent-demo.ts` proves the service is usable by a program with no prior knowledge of it, and proves nothing whatsoever about anyone else wanting to. Discovery is self-description only — the base URL still has to be known in advance, because nothing is hosted and `@x402/extensions` is a declared dependency `api/src` never imports (DOC-9). The deployed contract at App `768743428` still runs bytecode that predates two source fixes (C-1, C-2), because redeploying would mint a new App ID and discard the very history these proofs rest on. Twelve engineering findings remain open, including no observability of any kind and no direct test coverage of the chain client.
 
 **What that costs the claim.** The composition is **three proven legs and no traction.** As an argument it is strong; as a demonstration it is complete at hackathon scale; as a product it has one user, and that user is the author. A reviewer who marks it "proven mechanism, unproven traction" is correct, and this document does not ask for better.
 
 **What would raise it further** — none of this is implemented, and none of it is a code change:
 
 1. **A public deployment**, so a third party can call the endpoints without cloning the repository. The Fly configuration is correct and nothing is running on it.
-2. **A payment from an account that is not the project's own.** That, and only that, converts "the mechanism settles" into "someone bought something."
+2. **A payment from a party with no connection to the project.** Half of this is done: the payer is now a separate keypair the service does not control, so the settlements are genuinely account-to-account. The half that remains is the one that counts — the float still came from the project's own wallet, and only money an unrelated party chose to spend converts "the mechanism settles" into "someone bought something."
 3. **A read surface for the audit trail.** Five entries exist on-chain and no endpoint or UI exposes them, so the patient-facing half of the ownership story is still told rather than shown.
+4. **External discoverability.** `GET /` makes the service self-describing to any agent that can reach it; nothing makes it *reachable*. A Bazaar listing and the `x402-global-challenge` tag would close the one step of discover → use → pay that is currently asserted rather than demonstrated, and would turn `agent-demo.ts` from a script we run into something someone else's agent could do to us.
 
 ---
 
@@ -269,10 +341,11 @@ And one clause can now be added to it:
 
 | Category | Grade | One-line justification |
 |---|---|---|
-| Technical novelty | **MEDIUM-HIGH as design, MEDIUM as proven artefact** | The composition is the idea, and all three legs now run on live infrastructure — at demonstration scale, self-generated. |
+| Technical novelty | **MEDIUM-HIGH as design, MEDIUM as proven artefact** | The composition is the idea, and all three legs now run on live infrastructure — at demonstration scale, self-generated. D-1, *the payment is the authentication*, is the single defensible idea in it. |
 | Product novelty | **MEDIUM-HIGH** | The open/gated split is a real, falsifiable answer to a real structural tension — with the volume half unrealised. |
 | Engineering novelty | **NONE** | Competent, well-commented, honestly bounded. The best change in the codebase (payer binding) is fifteen lines of documented SDK calls, and twelve findings remain open. |
 | Integration novelty | **LOW-MEDIUM** | Publishing the ABI and designing out key ingress are good instincts; fee sponsorship is the facilitator's. |
+| **Machine-to-machine fit** | **MEDIUM-HIGH as design, PROVEN as a demonstration** | No accounts, no keys, per-call pricing, a machine-readable catalogue with an actionable `gate` field, a free pre-flight so an agent can decide before spending, and — recorded in ADR-005 — an architecture bent to keep off-the-shelf clients working. Walked end to end by an unassisted program. External discoverability remains the missing step. |
 | UX differentiation | **MEDIUM** | Zero-install real payment and protocol-literate error states are genuine; the surface is one route with no tests and no audit-trail view. |
 | Overall | **A strong thesis with a proven mechanism and no traction.** | |
 

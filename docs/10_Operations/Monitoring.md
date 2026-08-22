@@ -11,7 +11,7 @@
 
 One endpoint. That is the complete list.
 
-### `GET /v1/health` — `api/src/routes/health.ts:6-13`
+### `GET /v1/health` — `api/src/routes/health.ts:7-22`
 
 ```json
 {
@@ -19,21 +19,40 @@ One endpoint. That is the complete list.
   "service": "medrail-api",
   "network": "testnet",
   "consentAppId": 768743428,
-  "time": "2026-08-21T00:00:00.000Z"
+  "chain": {
+    "operatorAddress": "2WDV2J2FTWF535SMSUVEBOF5IGXF2OTV7ZZTLTCRBXPVS32UMLOPTI64GE",
+    "operatorSpendableMicroAlgo": 96000,
+    "appAccountAddress": "CCO26Y6Z56DDZ3OELO2UKJMIPJVSIT52I23F2MPMR52JBM3HQZZNUZNOR4",
+    "appAccountSpendableMicroAlgo": 3866300,
+    "microAlgoPerAuditWrite": 1000,
+    "estimatedAuditWritesRemaining": 96,
+    "warning": null,
+    "sampledAt": "2026-08-22T00:00:00.000Z"
+  },
+  "chainError": null,
+  "time": "2026-08-22T00:00:00.000Z"
 }
 ```
 
 | Field | What it actually proves | What it does not prove |
 |---|---|---|
-| `ok: true` | The Node process is running and Hono is routing. It is a **hardcoded literal** — it is never computed from anything | Nothing about the facilitator, algod, the contract, the operator balance, or whether any endpoint works |
+| `ok: true` | The Node process is running and Hono is routing. It is a **hardcoded literal** — it is never computed from anything | Nothing about the facilitator, algod, the contract, or whether any endpoint works |
 | `service` | Constant string `"medrail-api"` | — |
 | `network` | The value of `config.network`, i.e. the `NETWORK` env var | **Not** that the contract exists on that network. This is the field that would have exposed D-2 |
 | `consentAppId` | `config.consentAppId \|\| null` — the resolved App ID, or `null` | **Not** that the app exists, is funded, or that the operator is its admin. `null` here is the D-1 signature — **and `ok` is still `true`** |
+| `chain.operatorSpendableMicroAlgo` | `amount − minBalance` on the operator account, from a real algod read | Nothing about whether a *write* will succeed — only that it is affordable |
+| `chain.appAccountSpendableMicroAlgo` | The same, for the application account that pays box MBR. `null` when no App ID is configured | — |
+| `chain.estimatedAuditWritesRemaining` | The **smaller** of `floor(operatorSpendable / 1000)` and `floor(appSpendable / 22500)` — fee capacity versus box-MBR capacity (`services/algorand.ts:195-197`) | It is an estimate against a fixed 22,500 µALGO box cost, not a reservation. Concurrent grants consume the same headroom |
+| `chain.warning` | `null` when healthy; a string below 20 remaining writes; a harder string at 0 | — |
+| `chain.sampledAt` | When the reading was taken, which is **not** when the request was served | — |
+| `chainError` | Why there is no reading — typically `"not sampled yet"` on a cold process, otherwise the algod error text | — |
 | `time` | Server clock | — |
 
-**The single most important property of this endpoint: it returns `200 {"ok":true}` in every failure mode this system has.** Facilitator down (R-1)? `200`. `CONSENT_APP_ID` unset (D-1)? `200`, with `consentAppId: null`. Operator account out of ALGO? `200`. `OPERATOR_MNEMONIC` missing? `200`. Pointed at a network with no contract (D-2)? `200`.
+**The block is stale-while-revalidate, and that is deliberate.** `chainAccountHealth()` (`services/algorand.ts:237-241`) returns the last successful sample and kicks off a refresh only if it is older than 30 seconds; the request never awaits algod. `api/src/index.ts:13` primes the first sample at boot. So a slow or unreachable node degrades the *freshness* of `chain`, never the latency or the availability of the probe — which is the correct trade for something a platform health check calls every few seconds. Exactly one of `chain` and `chainError` is populated.
 
-A naive uptime check against `/v1/health` would have reported 100% availability through every incident in `Incident_Response.md`. **Treat it as a liveness probe and nothing more.** It is genuinely well-suited to that one job (OPS-001, **IMPLEMENTED**) — and it is not wired to any probe: there is no `HEALTHCHECK` in `api/Dockerfile` and no `[[http_service.checks]]` in `api/fly.toml` (defect D-6).
+**The single most important property of this endpoint is still that it returns `200 {"ok":true}` in every failure mode this system has.** Facilitator down (R-1)? `200`. `CONSENT_APP_ID` unset (D-1)? `200`, with `consentAppId: null`. `OPERATOR_MNEMONIC` missing? `200`. Pointed at a network with no contract (D-2)? `200`. The `chain` block narrows that in exactly one place — an operator or application account running out of ALGO now shows up as a non-null `warning` *before* the audit writes start failing — and it is the only failure mode on that list this endpoint can now anticipate. Everything else remains invisible, and `ok` stays `true` throughout.
+
+A naive uptime check against `/v1/health` would still have reported 100% availability through every incident in `Incident_Response.md`. **Treat it as a liveness probe with one funding gauge attached, and nothing more.** It is genuinely well-suited to that job (OPS-001, **IMPLEMENTED**). It is now wired to one probe and not the other: `api/fly.toml:37-42` declares an `[[http_service.checks]]` block against `/v1/health`, while `api/Dockerfile` still has no `HEALTHCHECK` (defect D-6, half closed) — and the Fly check has never executed, because nothing has ever been deployed.
 
 ### 1.1 Secondary, human-only observation
 
@@ -70,7 +89,7 @@ These are not gaps in a monitoring stack. **There is no monitoring stack.** Thes
 
 ### 3.1 Operator-account ALGO balance — **the most dangerous blind spot in the system**
 
-`logAccess` submits a **real, fee-paying transaction** signed by the operator account (`api/src/services/algorand.ts:146-178`). Nothing anywhere tops that account up, checks it, or warns about it.
+`logAccess` submits a **real, fee-paying transaction** signed by the operator account (`api/src/services/algorand.ts:146-178`). Nothing anywhere tops that account up automatically, and nothing alerts on it — but it is no longer unobservable. `GET /v1/health` now carries a `chain` block reporting `operatorSpendableMicroAlgo` and an `estimatedAuditWritesRemaining` derived from it, with a `warning` string once that drops below 20 (§1). That converts this from *"nobody would ever find out"* to *"anybody who looks will find out"*, which is a smaller improvement than it sounds: **nothing looks.** There is no probe consuming that field, no alert on it, and no schedule. The gauge exists; the monitoring does not.
 
 **When the operator account runs out of ALGO:**
 
@@ -101,7 +120,7 @@ The API trusts the facilitator's settlement verdict and does **not** independent
 
 ### 3.5 App-account box-MBR headroom
 
-Every new grant box and every audit box raises the application account's minimum balance. When the balance minus min-balance no longer covers the next box, `log_access` fails — which is §3.1's failure again, from a different account.
+Every new grant box and every audit box raises the application account's minimum balance. When the balance minus min-balance no longer covers the next box, `log_access` fails — which is §3.1's failure again, from a different account. As with §3.1, `/v1/health`'s `chain` block now reports `appAccountSpendableMicroAlgo` and folds it into `estimatedAuditWritesRemaining` at 22,500 µALGO per box — the *conservative* figure, deliberately, not the 22,100 the deployed ABI method under-quotes. Readable; still unwatched.
 
 Measured on-chain today: App `768743428`'s account holds **5,000,000 µALGO** with a **min-balance of 145,000 µALGO** and **2 boxes**. Headroom is comfortable now, and there is no monitoring that would tell you when it stopped being. `fund_mbr` exists (`contract.py:129-138`) and nothing calls it automatically. Note the sizing hazard: `get_grant_box_mbr()` returns **22,100 µALGO** while the true cost is **22,500** (defect C-2) — a backend sizing top-ups from that ABI method under-funds by ~1.8% per box.
 
@@ -225,6 +244,8 @@ curl -fsS "https://testnet-api.algonode.cloud/v2/accounts/$OPERATOR" \
 
 Alert when `spendable` falls below a chosen floor. **Choosing that floor is a decision, not a number this document can supply** — size it as `(expected log_access calls before the next top-up) × (per-transaction fee)` plus a margin, and revise it once real traffic exists.
 
+The service already computes this for both accounts: `curl -fsS "$API_BASE/v1/health" | jq .chain` returns the same `spendable` figure plus `estimatedAuditWritesRemaining`, cached for 30 seconds so polling it costs algod nothing. Prefer it for a *probe*, because it is one call instead of two and it will not rate-limit the public node. Prefer the direct algod query above for an *investigation*, because it is independent of the process you are investigating — if the API is the thing that is broken, do not ask it how it is.
+
 ### 5.2 App-account balance and box-MBR headroom — closes §3.5
 
 ```bash
@@ -274,7 +295,7 @@ curl -fsS "https://testnet-idx.algonode.cloud/v2/accounts/$PAYTO/transactions?as
 
 Sum the amounts over a window and compare against `x402_settlements_total{outcome="settled"}` (§4.2). **A divergence between "the API thinks it settled" and "the ledger shows a receipt" is the only true revenue check that exists.** MainNet uses ASA `31566704`.
 
-For reference, the one settled payment in existence: tx `OYRQRKYA7WUKBVLWTOFJSJMZFBW7VCNGP5VGH5EBUJGRCVFQFJRQ`, ASA `10458941`, amount `20000` base units (= $0.02 at 6 decimals), confirmed round 66091768, fee `0` (fee-sponsored). Sender and receiver are the same address — it is a self-payment, disclosed in `docs/PROOF.md` §6. **Do not build a revenue dashboard that describes this as volume.**
+For reference, the settled payments on record. The first: tx `OYRQRKYA7WUKBVLWTOFJSJMZFBW7VCNGP5VGH5EBUJGRCVFQFJRQ`, ASA `10458941`, amount `20000` base units (= $0.02 at 6 decimals), confirmed round 66091768, fee `0` (fee-sponsored) — sender and receiver are the same address, a self-transfer, disclosed in `docs/PROOF.md` §6. The agent run's three (`DOSKCNKJ…`, `PLBFDDAD…`, `COMJ3TQO…`, `docs/PROOF.md` §10) are not: they arrive at `payTo` from `UYBTLPHS…`, an independent keypair this service does not control, against a grant signed by a third account (`56LFG5EE…`) that is neither the payer nor the payee. Both of those wallets were nonetheless funded from the project's own, and **no external party has paid for this service. Do not build a revenue dashboard that describes any of it as volume.**
 
 ### 5.5 Facilitator probe — closes §3.6
 

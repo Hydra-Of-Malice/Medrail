@@ -56,7 +56,7 @@ Only the package-verification table (`docs/IMPLEMENTATION_PLAN.md:20-34`) and th
 **Positive**
 - FR-001, FR-002 **VALIDATED** — the 402 challenge shape is asserted in-process by `api/test/x402-flow.spec.ts` without any server harness.
 - NFR-005 **VALIDATED** — `npx tsc --noEmit` passes with zero errors in `api/` (VERIFIED_FACTS §18).
-- NFR-006 **IMPLEMENTED** — permissive CORS is one middleware (`api/src/app.ts:20-33`).
+- NFR-006 **IMPLEMENTED** — permissive CORS is one middleware (`api/src/app.ts:22-35`).
 
 **Negative**
 - SEC-011, SEC-013, OPS-002, OPS-003 remain **NOT IMPLEMENTED**; nothing in the chosen stack supplied them for free.

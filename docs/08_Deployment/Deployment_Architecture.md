@@ -261,7 +261,7 @@ Any full stand-up must go in this order; steps 2 and 3 cannot be reversed.
 | TLS termination point | n/a | Fly's edge proxy; the container speaks plain HTTP on 4021 |
 | HSTS / CSP / `X-Content-Type-Options` | **NOT IMPLEMENTED** — the app sets no security headers | still not implemented; `force_https` is a redirect, not HSTS |
 | DNS | **none.** No domain, no record, no certificate | Fly would allocate `medrail-api.fly.dev`; no custom domain is configured |
-| CORS | `origin: "*"`, methods `GET,POST,OPTIONS`, `allowHeaders` deliberately unset so Hono reflects the browser's preflight (`api/src/app.ts:20-33`, with an explanatory comment about a prior regression) | unchanged |
+| CORS | `origin: "*"`, methods `GET,POST,OPTIONS`, `allowHeaders` deliberately unset so Hono reflects the browser's preflight (`api/src/app.ts:22-35`, with an explanatory comment about a prior regression) | unchanged |
 | Egress from API | `facilitator.goplausible.xyz:443`, `{testnet,mainnet}-api.algonode.cloud:443` | unchanged |
 | Egress from browser | API host, plus `testnet-api.algonode.cloud` directly (patient signs `grant_access`/`revoke_access` client-side — `web/lib/consent.ts`) | unchanged |
 | Inbound firewall / WAF / rate limiter | **NOT IMPLEMENTED** — SEC-013. `/v1/consent/status` is free, unauthenticated and issues two algod round-trips per request | still none |

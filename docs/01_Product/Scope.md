@@ -93,7 +93,7 @@ flowchart TB
 | Item | Detail | Status |
 |---|---|---|
 | x402 v2 `exact` integration | `api/src/x402.ts:11-32`; only the configured CAIP-2 network is registered | **VALIDATED** (FR-001…FR-003, NFR-002) |
-| 3 priced routes | `$0.02` / `$0.02` / `$0.05` = 20000 / 20000 / 50000 µUSDC, declared in one place (`api/src/app.ts:50-60`) | **VALIDATED** (FR-101) |
+| 3 priced routes | `$0.02` / `$0.02` / `$0.05` = 20000 / 20000 / 50000 µUSDC, declared in one place (`api/src/app.ts:58-175`) | **VALIDATED** (FR-101) |
 | 4 free `/v1/*` routes + `GET /` | status, app-info, arc56, health, service index. `GET /` advertises **all eight** routes with `method`, `path`, `price` and `gate`, plus a `contract` block (`appId`, `network`, `networkCaip2`, `arc56SpecUrl`) and an `x402` block (`version: 2`, `scheme: "exact"`, `facilitator`); `api/test/app.spec.ts` asserts the advertised list equals the mounted set | **VALIDATED** (FR-013…FR-017) |
 | Payer identity binding | `payerFromRequest` (`api/src/x402Payer.ts`) recovers the address that signed the payment from the verified `PAYMENT-SIGNATURE` header; `records.ts:41-51` returns 403 on a mismatch and treats a failed recovery as a mismatch | **VALIDATED** (FR-039, SEC-007, SEC-008) |
 | Rate limiting | Fixed-window, in-memory, on the free and refundable surface only: `/v1/consent/status` 60/min, `/v1/consent/arc56` 30/min, `/v1/records/summary` 30/min ⇒ **429** + `Retry-After` (`api/src/rateLimit.ts`). Priced happy paths are deliberately unthrottled | **IMPLEMENTED** (SEC-013) |
@@ -106,8 +106,8 @@ flowchart TB
 | Per-patient write serialisation | `withPatientLock` — in-process promise chain (`algorand.ts:129-138`); `api/fly.toml` sets `max_machines_running = 1` to match | **PARTIALLY IMPLEMENTED** (REL-004, G-11) |
 | Request validation | zod on all four route schemas; addresses validated by **checksum** via `algosdk.isValidAddress` (`api/src/validation.ts`), so a malformed 58-character address is a 400 rather than a 500 | **IMPLEMENTED** (FR-038, SEC-010) |
 | CORS | `origin: "*"`, methods `GET,POST,OPTIONS`, `allowHeaders` deliberately unset so Hono reflects the browser's preflight; documented regression note at `app.ts:27-32` | **IMPLEMENTED** (NFR-006) |
-| 45 tests | 7 triage + 6 interaction + 5 x402 structural + 6 payer binding (`x402Payer.spec.ts`) + 7 app surface (`app.spec.ts`) + 14 box-key parity (`boxKeyParity.spec.ts`) | **VALIDATED**. **Not hermetic**: `x402-flow.spec.ts` makes a live facilitator call at module import (CI-2). |
-| Proof scripts | `api/scripts/e2e-proof.ts` → `contracts/artifacts/e2e-proof.json`; `api/scripts/e2e-consent-proof.ts` → `e2e-consent-proof.json` (grant → check → paid call → audit append, repeatable); `api/scripts/verify-g01-fix.ts` → `g01-verification.json` (impersonation attack plus a matched control) | **IMPLEMENTED** (FR-040), none run in CI |
+| 93 tests | 26 chain service (`algorandService.spec.ts`) + 14 box-key parity (`boxKeyParity.spec.ts`) + 12 gated record handler (`records.spec.ts`) + 8 Bazaar discovery (`bazaar-discovery.spec.ts`) + 7 triage + 7 x402 flow + 7 app surface (`app.spec.ts`) + 6 interaction + 6 payer binding (`x402Payer.spec.ts`) | **VALIDATED**. **Not hermetic**: `x402-flow.spec.ts` makes a live facilitator call at module import (CI-2). |
+| Proof scripts | **Seven** in `api/scripts/`, plus the `dotenvLoad.ts` helper: `e2e-proof.ts` → `contracts/artifacts/e2e-proof.json`; `e2e-consent-proof.ts` → `e2e-consent-proof.json` (grant → check → paid call → audit append, repeatable); `verify-g01-fix.ts` → `g01-verification.json` (impersonation attack plus a matched control); `provision-agent-wallet.ts` → `agent-wallet.json` (funds an independent agent keypair, opts it in to USDC `10458941`, and seeds its float from the project's own wallet — address only, the mnemonic is never written to disk); `provision-patient-wallet.ts` → `patient-wallet.json` (a patient account that is neither the payer nor the payee); `grant-consent.ts` (patient-signed grant or revoke against a named requester, backend not in the path; no artefact); `agent-demo.ts` → `agent-run.json` (unassisted discovery → three paid calls → synthesis, paid from the agent's own keypair against a grant signed by a third patient account) | **IMPLEMENTED** (FR-040), none run in CI |
 
 ### 2.3 Web demo — `web/`
 
@@ -125,7 +125,7 @@ flowchart TB
 
 | Item | Status |
 |---|---|
-| **73** automated tests (28 contract + 45 API), all passing | **VALIDATED** |
+| **121** automated tests (28 contract + 93 API), all passing | **VALIDATED** |
 | Strict TypeScript, zero errors in both `api/` and `web/` | **VALIDATED** (NFR-005) |
 | Both builds pass locally (`api` tsc/build; `web` Next 16.3.0 Turbopack, 2 static routes prerendered) | **VALIDATED** |
 | CI workflow with 3 jobs (contract / api / web) | **IMPLEMENTED** — triggers on `push: branches: [main, master]` plus `workflow_dispatch`, with pip and npm caching, `npm audit --audit-level=high` on both packages, and an artifact-freshness gate (`git diff --exit-code -- contracts/artifacts/` after recompiling) |

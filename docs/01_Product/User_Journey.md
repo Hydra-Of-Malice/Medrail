@@ -1,8 +1,8 @@
 # MedRail — User Journeys
 
-**Purpose:** Trace the two end-to-end journeys the system supports — an agent paying for a triage call, and a patient granting consent so a requester can read a record summary — from discovery through repeat, against the endpoints that actually exist.
+**Purpose:** Trace the two end-to-end journeys the system supports — an autonomous agent completing a multi-service clinical task, and a patient granting consent so a requester can read a record summary — from discovery through repeat, against the endpoints that actually exist.
 
-**Status of this document:** Authored 2026-08-21 against the verified fact ledger and source at commit `3b387df`. Every step is marked with its verification status. **Journey B's success path has now been executed on Algorand TestNet** — `total_audit_entries = 5` on App `768743428`, with both `s`- and `a`-prefixed boxes present (`docs/PROOF.md` §9). No latency, throughput, or duration figure appears here except the measurements that exist in the ledger, each labelled as a single observation.
+**Status of this document:** Authored 2026-08-21 against the verified fact ledger and source at commit `3b387df`, with **Journey A promoted from a single paid call to the full agent arc** once `api/scripts/agent-demo.ts` had been run against live TestNet. Every step is marked with its verification status. **Journey B's success path has also been executed on Algorand TestNet** — `total_audit_entries = 5` on App `768743428`, with both `s`- and `a`-prefixed boxes present (`docs/PROOF.md` §9). No latency, throughput, or duration figure appears here except the measurements that exist in the ledger, each labelled as a single observation.
 
 ---
 
@@ -14,7 +14,7 @@ Fixed and non-negotiable for every diagram below:
 |---|---|---|
 | Priced endpoints | **3** | `POST /v1/triage` $0.02 · `POST /v1/interaction-check` $0.02 · `POST /v1/records/summary` $0.05 |
 | Free `/v1/*` endpoints | **4** | `GET /v1/consent/status` · `GET /v1/consent/app-info` · `GET /v1/consent/arc56` · `GET /v1/health` |
-| Free service index | 1 | `GET /` (`api/src/app.ts:71-84`) — listed separately from the four `/v1/*` routes so the counts reconcile |
+| Free service index | 1 | `GET /` (`api/src/app.ts:149-177`) — listed separately from the four `/v1/*` routes so the counts reconcile. **This is the machine-readable entry point to everything below** |
 | Smart contracts | **1** | `MedRailConsent`, App ID **768743428**, Algorand TestNet |
 | Facilitators | **1** | GoPlausible, `https://facilitator.goplausible.xyz` |
 | Databases, caches, queues, workers, models | **0** | None exist. State lives in Algorand box storage and two static files. |
@@ -22,10 +22,83 @@ Fixed and non-negotiable for every diagram below:
 
 ---
 
-## 1. Journey A — an agent pays for a triage call
+## 1. Journey A — an autonomous agent completes a multi-service task
 
-**Actor:** P-1, autonomous agent / third-party developer ([`./User_Personas.md`](./User_Personas.md)).
-**Overall status:** **VALIDATED** — this is the only journey proven end-to-end on live infrastructure (tx `OYRQRKYA7WUKBVLWTOFJSJMZFBW7VCNGP5VGH5EBUJGRCVFQFJRQ`).
+**Actor:** P-1, the autonomous agent and the primary persona ([`./User_Personas.md`](./User_Personas.md)).
+**Overall status:** **VALIDATED** — walked end to end on live infrastructure by `api/scripts/agent-demo.ts`, and the underlying single-call settlement proven independently at tx `OYRQRKYA7WUKBVLWTOFJSJMZFBW7VCNGP5VGH5EBUJGRCVFQFJRQ`.
+
+### 1.0 The whole arc, before the detail
+
+The agent is handed one task — *sudden crushing chest pain and shortness of breath since this morning; the patient is on warfarin and aspirin 81mg* — and knows exactly one thing about MedRail: a base URL. Everything else it reads at runtime.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Agent as Autonomous agent<br/>no account · no API key
+    participant API as MedRail API
+    participant Chain as Algorand TestNet<br/>+ GoPlausible facilitator
+    participant App as MedRailConsent<br/>App 768743428
+
+    rect rgb(238,243,250)
+    Note over Agent,API: DISCOVER — free
+    Agent->>API: GET /
+    API-->>Agent: 8 endpoints with price + gate<br/>App ID · CAIP-2 network · ARC-56 spec URL<br/>x402 v2 · scheme "exact" · facilitator
+    Note over Agent: SELECT — the task needs urgency,<br/>an interaction check, and the record.<br/>Prices read from the index, not hardcoded.
+    end
+
+    rect rgb(255,247,235)
+    Note over Agent,Chain: PAY — $0.02
+    Agent->>API: POST /v1/triage
+    API-->>Agent: 402 + PAYMENT-REQUIRED
+    Agent->>API: retry + PAYMENT-SIGNATURE
+    API->>Chain: verify + settle
+    API-->>Agent: 200 band=EMERGENCY score=70<br/>+ PAYMENT-RESPONSE
+    end
+
+    rect rgb(255,247,235)
+    Note over Agent,Chain: PAY — $0.02
+    Agent->>API: POST /v1/interaction-check (402 → sign → settle)
+    API-->>Agent: 200 MAJOR — warfarin + aspirin
+    end
+
+    rect rgb(238,246,238)
+    Note over Agent,App: PRE-FLIGHT — free. The agent refuses to pay to be told no.
+    Agent->>API: GET /v1/consent/status — patient · requester · scope
+    API->>App: check_access via simulate() — zero fee · submits nothing
+    App-->>API: true
+    API-->>Agent: 200 granted=true — cost $0.00
+    Note over Agent: granted=false ⇒ decline the gated call,<br/>spend nothing, report what it has
+    end
+
+    rect rgb(255,247,235)
+    Note over Agent,App: PAY — $0.05, gated
+    Agent->>API: POST /v1/records/summary (402 → sign → settle)
+    API->>API: recover the payment signer · 403 unless it is the requester
+    API->>App: check_access · log_access
+    API-->>Agent: 200 record + consentVerifiedOnChain<br/>+ auditTxId + auditSequence
+    end
+
+    Note over Agent: SYNTHESISE — one assessment.<br/>$0.09 spent · 3 settled transactions · 0 accounts
+```
+
+**The recorded run: $0.09 total, across 3 settled Algorand transactions. Zero accounts created, zero API keys issued, zero invoices.** The agent pays from its own keypair `UYBTLPHS6APCXVBDPASQMUIQCEORDIR6EMTVMNSDPSVRSR5HEPKQ5GO4YQ` — which this service does not control — to `payTo` `2WDV2J2F…`:
+
+| Leg | Transaction | Amount | Round |
+|---|---|---|---|
+| $0.02 triage | `DOSKCNKJRXIMY2UDSDZ377LKPZQIZJW5JHCGUAGKOYV6KUCFYKIA` | 20000 µUSDC, `fee: 0` | 66563930 |
+| $0.02 interactions | `PLBFDDADW576IUCH62HGGYI4AJQNO3QXSENNDIBKAORWVMP7NVHQ` | 20000 µUSDC | — |
+| $0.05 record | `COMJ3TQOGTKP6LXDJS7HZY7B45QZJQWXXJ23HQ3IDDQYD7GRK36A` | 50000 µUSDC, `fee: 0` | 66563944 |
+| the patient's grant to that agent | `IG4XEBTMRCKI724ZVHSYUN4ECTYBXAGZM5N35NP4Y3ZVWECG7WUQ` | `grant_access(UYBTLPHS…, "records:summary")` on App `768743428`, signed by the patient `56LFG5EE…` | 66563915 |
+
+Sender ≠ receiver on every payment, confirmable on any public Algorand indexer. The earlier self-paid run of the same script (`POAQNSOP…`, `W3Z55BZY…`, `5CO5XV7M…`, audit entry `5HYV5B2L…`), and the two after it in which the service still stood in as the patient, are retained rather than replaced. Reproduce with `cd api && npx tsx scripts/agent-demo.ts`.
+
+**What this still is not.** The three roles are three separate accounts with three separate keypairs — the patient `56LFG5EE…` signs its own grant and is neither the payer nor the payee — but the agent's TestNet USDC float was seeded from the project's own wallet, and the patient wallet was funded the same way, because TestNet ALGO and USDC have no other practical source. **No external or unrelated party has paid for this service** ([`../PROOF.md`](../PROOF.md) §10).
+
+**Two things about this arc are worth naming before the step-by-step detail.**
+
+*The free pre-flight is a design decision, not a convenience.* An agent that pays $0.05 to receive a 403 has learned the same thing for money that it could have learned for nothing. `GET /v1/consent/status` exists so the spend decision can be made before the spend. Note that the caller is protected either way — a 403 cancels settlement, so a refused gated call costs nothing (§2.7) — so the pre-flight saves a round trip rather than a refund. What it actually buys is the ability to *reason*: `agent-demo.ts`'s `if (!status.granted)` branch declines the call, spends nothing, and reports the assessment it can still make. That is the difference between an agent and a retry loop.
+
+*Nothing in this journey requires MedRail-specific client code.* The agent uses a stock `@x402/fetch` client. That is a consequence of ADR-005: the audit write is a **follow-up transaction submitted by MedRail**, not a leg in the caller's signed payment group, precisely because bundling it would force every caller to know MedRail's App ID, the `log_access` ABI signature, and a *predicted* box reference — which off-the-shelf x402 clients cannot produce. The cost of that choice is that "one call" describes the HTTP interaction and not the ledger (two transactions, moments apart). The benefit is this journey being walkable by a program that had never heard of MedRail one request earlier.
 
 ### 1.1 Discovery
 
@@ -36,7 +109,36 @@ Fixed and non-negotiable for every diagram below:
 | Agent confirms liveness and network | `GET /v1/health` → `{ok, service:"medrail-api", network, consentAppId, time}` | FR-016 **VALIDATED** |
 | Agent learns the price | **From the 402 itself.** No pre-registration, no price list to fetch. | FR-002 **VALIDATED** |
 
-Discovery has no human step. There is no sign-up page, because there is no account.
+Discovery has no human step. There is no sign-up page, because there is no account. **Proven unassisted:** `agent-demo.ts` step 1 fetches `GET /` and prints back the endpoint count, the x402 version and scheme, the facilitator, the App ID and the ARC-56 spec URL — none of which appear anywhere in the script.
+
+**The one unsolved step in this journey.** Everything after "the agent has the base URL" is demonstrated. Obtaining the base URL is not: nothing is publicly hosted, there is no Bazaar listing, and `@x402/extensions` is a declared dependency that `api/src` never imports (DOC-9). An agent that already knows where to look can do the rest by itself; an agent that does not, cannot start. That is the honest shape of the discovery claim (F-1 in §4).
+
+### 1.1a Capability selection — deciding what the task needs
+
+Between reading the catalogue and spending anything, the agent chooses. This is a real step, not a formality, and it is what the shape of `GET /` is designed to support.
+
+| Signal in the index | What the agent does with it |
+|---|---|
+| `price` per endpoint | Budgets before calling. `agent-demo.ts` resolves each price out of the discovered index (`priceOf`) rather than hard-coding it, so a server-side price change changes the agent's spend with no client change. |
+| `gate` per endpoint — `"x402"` vs `"x402 + on-chain consent"` | Distinguishes *"I can buy this"* from *"I can buy this only if the patient allowed me."* That single field is why the agent knows to run the free pre-flight in §1.1b before the third call rather than discovering the refusal by paying for it. |
+| `contract.appId` + `contract.arc56SpecUrl` | Reserves the option of bypassing MedRail's API entirely and reading the consent registry directly. Not exercised by the demo — but advertised, and sufficient (UC-009). |
+| `x402.version`, `x402.scheme`, `x402.facilitator` | Confirms it holds a compatible client before constructing anything. |
+
+Status: **VALIDATED** (FR-017) — the index is asserted against the mounted route set by `api/test/app.spec.ts`, and consumed unassisted by `agent-demo.ts`.
+
+### 1.1b Free pre-flight — the agent refuses to pay to be told no
+
+*Grouped here with selection because it is a decision step, not a purchase. In the run it happens later — after the two open calls and immediately before the gated one (§1.0, step 5), because it is the only endpoint whose `gate` says money alone is not enough.*
+
+Before the one gated call, the agent spends nothing to find out whether it is permitted:
+
+```
+GET /v1/consent/status?patient=<addr>&requester=<addr>&scope=records:summary  →  {granted: true|false}
+```
+
+Free, unauthenticated, no chain fee: `check_access` is `readonly=True` and runs through `AtomicTransactionComposer.simulate()`, which submits nothing (`api/src/services/algorand.ts:82-100`; FR-013, SEC-009). On `false` the agent declines the gated call, spends nothing, and reports the assessment it can make without the record.
+
+Two clarifications that keep this claim honest. First, the caller is protected regardless — a 403 from the gated route cancels settlement, so a refused paid call costs nothing either (§2.7). The pre-flight saves a **round trip and a decision**, not a refund; the 403 body's `hint` points at this endpoint for exactly that reason. Second, "free" is free *to the agent*: the endpoint makes two outbound algod calls per request and is rate-limited to 60/min per client precisely because it is free (`api/src/rateLimit.ts`; SEC-013).
 
 ### 1.2 Onboarding
 
@@ -51,6 +153,8 @@ There is no onboarding *with MedRail*. What the agent needs is chain-side:
 | An x402 v2 client | To parse `PAYMENT-REQUIRED` and emit `PAYMENT-SIGNATURE` | `@x402/fetch` or equivalent |
 
 ### 1.3–1.6 Primary workflow, system interaction, output
+
+The arc in §1.0 makes three paid calls. They are the same handshake three times, so it is specified once here, against `POST /v1/triage`. `POST /v1/interaction-check` is identical but for the body and the handler; `POST /v1/records/summary` is the same handshake plus the payer binding, the consent read and the audit append, and is specified in full in §2.3–2.6.
 
 ```mermaid
 sequenceDiagram
@@ -103,6 +207,31 @@ sequenceDiagram
 ```
 
 70 = 35 (chest pain) + 35 (respiratory distress), capped at 100 — reconstructible by hand from `triageScorer.ts:33-34`. That reconstructibility is the point of AI-001.
+
+### 1.6a Synthesis — the step the whole journey exists for
+
+Buying three results is not the task; producing one assessment is. `agent-demo.ts` closes by combining what it bought:
+
+```
+Urgency        : EMERGENCY (score 70/100)
+Medication risk: MAJOR — warfarin + aspirin
+Known allergies: penicillin
+Comorbidities  : type 2 diabetes (controlled)
+
+$0.02  triage              …
+$0.02  interaction-check   …
+$0.05  records/summary     …
+─────
+$0.09  total, across 3 settled Algorand transactions
+```
+
+Three things are worth stating plainly about that output, because they are exactly what a hostile reader should check:
+
+- **The synthesis is the agent's, not MedRail's.** MedRail sells three results. It does not sell a combined judgement, and there is no orchestrator endpoint. Composition happens in the caller.
+- **Neither intelligence endpoint is a model.** Both are deterministic rule engines — 11 hard-coded red-flag groups and 14 curated interaction pairs. **There is no LLM, no ML model, no embeddings and no vector store anywhere in this repository**, and each response carries a `disclaimer` saying so, asserted by test (AI-002 **VALIDATED**).
+- **The record is a fixed synthetic constant.** `SYNTHETIC_RECORD` is returned regardless of `patientId` (`records.ts:17-23`). The allergies and comorbidities above are the same for every caller and every patient. There are no real patients in this system (DATA-004).
+
+What the run does demonstrate is the thing the challenge asks about: a program discovered a service it had never seen, decided which parts of it the task required, paid for each per call, checked a permission before spending on a gated one, and finished — with no account, no API key, no invoice, and no human anywhere in the loop.
 
 ### 1.7 Feedback
 
@@ -318,15 +447,17 @@ boxes                  "g"-prefixed grants, plus "s" audit-sequence and "a" audi
 
 Journey B has been walked end to end and is repeatable: `api/scripts/e2e-consent-proof.ts` performs grant → free status check → paid call → audit append against the live contract in one run. The box shapes match what the design predicts — `a` entries at `1 + 32 (patient) + 8 (itob seq)` = 41 bytes, `s` sequences at `1 + 32` = 33 bytes, `g` grants at `1 + 32 (sha256)` = 33 bytes — and the app account's minimum balance reconciles exactly against `2500 × boxes + 400 × box-bytes` (`docs/PROOF.md` §9).
 
-**What still must be said in any presentation of Journey B:** every payment in it is a self-payment from the project's own account, nothing is publicly hosted, there is no MainNet deployment and no Bazaar listing. The mechanism is proven. The adoption is not.
+**What still must be said in any presentation of Journey B:** the gated call now settles between distinct accounts — the agent `UYBTLPHS…` pays, `2WDV2J2F…` receives (`COMJ3TQO…`, round 66563944) — but that agent's TestNet USDC float came from the project's own wallet, so **no external or unrelated party has paid**; earlier runs were outright self-payments; nothing is publicly hosted; there is no MainNet deployment and no Bazaar listing. The mechanism is proven. The adoption is not.
 
 ---
 
 ## 3. Journey comparison
 
-| Dimension | Journey A — paid triage | Journey B — consent-gated read |
+Journey A's third paid call *is* Journey B's second half — the same route, seen from the agent's side rather than the patient's. The comparison below is therefore between the two **open** intelligence calls that carry Journey A's volume and the **gated** call that carries Journey B's ownership proof.
+
+| Dimension | Journey A — open intelligence calls | Journey B — consent-gated read |
 |---|---|---|
-| Price | $0.02 (20000 µUSDC) | $0.05 (50000 µUSDC) |
+| Price | $0.02 (20000 µUSDC) each | $0.05 (50000 µUSDC) |
 | Prerequisite relationship | None | An existing on-chain grant |
 | Chain reads per call | 0 | 2 simulated (`check_access`, `get_audit_count`) |
 | Chain writes per call | 0 (beyond the payment itself) | 1 (`log_access`, admin-signed) |
@@ -337,7 +468,7 @@ Journey B has been walked end to end and is repeatable: `api/scripts/e2e-consent
 | Failure with facilitator down | 503 + `Retry-After` | 503 + `Retry-After` |
 | Worst remaining failure mode | A rejected transaction on a thinly-covered chain client (G-05) | Audit append silently deferred to `auditStatus: "pending"` with no alerting (G-15) |
 
-The asymmetry is the product argument, made in [`../JUDGES.md`](../JUDGES.md) and analysed in [`./USP_Novelty.md`](./USP_Novelty.md): Journey B is the story, Journey A is the volume, and the same contract underwrites both.
+The asymmetry is the product argument, made in [`../JUDGES.md`](../JUDGES.md) and analysed in [`./USP_Novelty.md`](./USP_Novelty.md): the gated call is the story, the open calls are the volume, and the same contract underwrites both. What §1.0 adds is that **one agent, on one task, uses both** — so the split is not two products sharing a repository, it is one catalogue an agent shops from.
 
 ---
 
@@ -347,7 +478,7 @@ Resolved entries are kept rather than deleted, because a friction log that quiet
 
 | # | Friction | Journey | Status |
 |---|---|---|---|
-| F-1 | No discovery mechanism; the URL must be known already | A, B | **Open** (DOC-9). Nothing is publicly hosted, and there is no Bazaar listing |
+| F-1 | No external discovery mechanism — the URL must be known already | A, B | **Half closed.** *Self*-discovery works and is proven: `GET /` describes all eight routes with prices and gates plus the contract's App ID and ARC-56 spec URL, and `agent-demo.ts` consumes it with nothing hardcoded but the base URL (§1.1). *Finding* the URL is still unsolved — nothing is publicly hosted, there is no Bazaar listing, and `@x402/extensions` is declared but never imported (DOC-9) |
 | F-2 | No public endpoint deployed | A, B | **Partly closed.** `api/fly.toml` now sets `NETWORK = "testnet"`, `CONSENT_APP_ID = "768743428"`, a `/v1/health` check and `max_machines_running = 1`; both Dockerfiles use `npm ci` and `.dockerignore` files exist. The configuration is correct — nothing is deployed to it yet |
 | F-3 | Facilitator outage ⇒ 500, not 503 | A, B | **Closed** (G-04). 503 + `Retry-After: 30` + `PAYMENT_FACILITATOR_UNAVAILABLE` |
 | F-4 | Invalid-but-58-char address ⇒ 500 with an internal message leaked | B | **Closed** (G-10). Checksum validation in `api/src/validation.ts` ⇒ 400; `app.onError` returns a generic body with a `requestId` |

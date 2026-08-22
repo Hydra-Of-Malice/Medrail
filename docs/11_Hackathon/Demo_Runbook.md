@@ -87,14 +87,59 @@ curl -s --max-time 15 https://facilitator.goplausible.xyz/supported | head -c 60
 
 **Expected:** a JSON body listing supported payment kinds, including an `algorand:SGO1GKSzyE7IEPItTxCByw9x8FmnrCDexi9/cOUJOiI=` entry with the `exact` scheme. If this returns nothing, the priced half of your demo does not exist — see §5, the facilitator-outage row.
 
-### 1.4 Fund both accounts — ALGO **and** USDC
+### 1.4 Fund the accounts — ALGO **and** USDC
 
-Two accounts matter:
+Four accounts matter. The first three are the three separate keypairs the agent beat runs on — patient, agent, service — and no two of them are the same address:
 
 | Account | Needs | Why |
 |---|---|---|
-| **Operator** (`OPERATOR_ADDRESS` in `api/.env`, also the contract `admin`) | **ALGO only** | Signs `log_access`. Never handles USDC. |
-| **Demo wallet** (generated in-browser, `sessionStorage`) | **ALGO** *(optional — the facilitator sponsors fees)* **and USDC** | Pays for endpoint calls; signs `grant_access`/`revoke_access` (those need ALGO for fees, and are **not** fee-sponsored). |
+| **Operator / `payTo`** (`OPERATOR_ADDRESS` in `api/.env`, also the contract `admin` and the deployer — `2WDV2J2F…`) | **ALGO only** | Signs `log_access`, and receives every payment. Never *spends* USDC. |
+| **Agent** (`AGENT_MNEMONIC` in `api/.env` — `UYBTLPHS…`) | **ALGO** (min-balance + its own opt-in) **and USDC** | This is what `agent-demo.ts` pays from. It is a separate keypair from everything else here, which is the whole point of the beat; provisioned with 260,000 µALGO and a $1.00 float by `scripts/provision-agent-wallet.ts`. |
+| **Patient** (`PATIENT_MNEMONIC` / `PATIENT_ADDRESS` in `api/.env` — `56LFG5EE…`) | **ALGO only** | Signs the `grant_access` the gated beat depends on, and is neither the payer nor the payee — that separation is what makes the consent claim mean anything. It never pays for a call, so it needs only enough ALGO to exist and to sign; `scripts/provision-patient-wallet.ts` funds it with 150,000 µALGO. It holds **no USDC on purpose** — do not "fix" that. |
+| **Demo wallet** (generated in-browser, `sessionStorage`) | **ALGO** *(optional — the facilitator sponsors fees)* **and USDC** | Pays for endpoint calls in the *browser* beat; signs `grant_access`/`revoke_access` (those need ALGO for fees, and are **not** fee-sponsored). |
+
+**Check the agent first — it is the one that pays on camera.** One full run costs $0.09:
+
+```bash
+curl -s "https://testnet-idx.algonode.cloud/v2/accounts/UYBTLPHS6APCXVBDPASQMUIQCEORDIR6EMTVMNSDPSVRSR5HEPKQ5GO4YQ" \
+| python -c "
+import sys, json
+a = json.load(sys.stdin)['account']
+print('ALGO:', a['amount'])
+for asset in a.get('assets', []):
+    if asset['asset-id'] == 10458941:
+        print('USDC:', asset['amount'], '(need >= 90000 for one full agent run)')
+        break
+else:
+    print('USDC: NOT OPTED IN')
+"
+```
+
+If that account is ever lost or drained, `npx tsx scripts/provision-agent-wallet.ts` mints and funds
+a replacement, and `npx tsx scripts/grant-consent.ts <newAddress>` re-grants it consent — but the new
+address then differs from every transaction id already written into [`../PROOF.md`](../PROOF.md) §10,
+so top it up rather than replacing it if you have the choice.
+
+**Then the patient — it pays for nothing, but it signs.** ALGO only; a zero USDC balance here is correct.
+
+```bash
+curl -s "https://testnet-idx.algonode.cloud/v2/accounts/56LFG5EEHIJ4ZVMPHUMJH6BST2O3D4DMG3AWRZ2SN7Y3LLUDVUDILO66YM" \
+| python -c "
+import sys, json
+a = json.load(sys.stdin)['account']
+print('spendable ALGO:', a['amount'] - a['min-balance'], 'uALGO (need >= ~2000 to sign a grant or revoke)')
+"
+```
+
+If it ever drops to zero the agent beat still runs — the existing grant stays valid — but you lose the
+ability to re-grant or revoke on stage. `npx tsx scripts/provision-patient-wallet.ts` mints and funds a
+replacement patient, with the same caveat as the agent: a new address orphans the transaction ids
+already in [`../PROOF.md`](../PROOF.md) §10.
+
+**And the operator's own ALGO, which the API will now tell you itself** — see the `chain` block in
+`/v1/health` at §2.3. That is the cheapest funding check in this runbook: one free local call reports
+the operator's and the application account's spendable balances and how many more audit writes they
+can afford between them.
 
 **Order of operations for the demo wallet — this order is not optional:**
 
@@ -127,11 +172,11 @@ Two accounts matter:
 
 ```bash
 cd /d/MedRail/contracts && .venv/Scripts/python.exe -m pytest tests/ -q     # expect 28 passed
-cd /d/MedRail/api      && npx tsc --noEmit && npx vitest run                # expect 45 passed
+cd /d/MedRail/api      && npm run typecheck && npx vitest run               # expect 45 passed
 cd /d/MedRail/web      && npx tsc --noEmit -p tsconfig.json && npm run build
 ```
 
-**Expected:** 28 passed, 45 passed, both typechecks clean, web build succeeds. **73 total** — that is the number you quote on stage.
+**Expected:** 28 passed, 45 passed, both typechecks clean, web build succeeds. **73 total** — that is the number you quote on stage. `npm run typecheck` is `tsc -p tsconfig.all.json` and is what CI runs: it covers `scripts` and `test` as well as `src`, so a broken proof script fails here rather than on stage.
 
 > **Note:** `api/test/x402-flow.spec.ts` makes a **live call to the facilitator at module import**. If the API suite fails with "no supported payment kinds loaded from any facilitator," that is §1.3 failing, not your code. Distinguish these before you start debugging.
 
@@ -183,7 +228,7 @@ curl -s -o /dev/null -w "algod: %{http_code} in %{time_total}s\n" --max-time 15 
 
 ### 2.2 Confirm balances have not been drained by rehearsal
 
-Re-run the demo-wallet check from §1.4 step 5. Rehearsing burns USDC at $0.02–$0.07 per full run — ten rehearsals is $0.70, and a wallet that was fine yesterday can be empty today.
+Re-run **both** balance checks from §1.4 — the agent wallet first, then the demo wallet. Rehearsing burns USDC at $0.02–$0.09 per full run — ten rehearsals of the agent demo is $0.90 against a $1.00 float, and a wallet that was fine yesterday can be empty today.
 
 ### 2.3 Start the stack
 
@@ -197,17 +242,30 @@ Wait for the startup log. Then, in Terminal B:
 ```bash
 curl -s http://localhost:4021/v1/health | python -m json.tool
 ```
-**Expected:**
+**Expected** (the µALGO figures move — these were the live values on 2026-08-22):
 ```json
 {
     "ok": true,
     "service": "medrail-api",
     "network": "testnet",
     "consentAppId": 768743428,
+    "chain": {
+        "operatorAddress": "2WDV2J2FTWF535SMSUVEBOF5IGXF2OTV7ZZTLTCRBXPVS32UMLOPTI64GE",
+        "operatorSpendableMicroAlgo": 96000,
+        "appAccountAddress": "CCO26Y6Z56DDZ3OELO2UKJMIPJVSIT52I23F2MPMR52JBM3HQZZNUZNOR4",
+        "appAccountSpendableMicroAlgo": 3866300,
+        "microAlgoPerAuditWrite": 1000,
+        "estimatedAuditWritesRemaining": 96,
+        "warning": null,
+        "sampledAt": "..."
+    },
+    "chainError": null,
     "time": "..."
 }
 ```
-**Three things must be true:** `network` is `testnet` (`api/fly.toml` now sets this correctly, so a container matches a local run), `consentAppId` is `768743428` (**not `null`** — null means `CONSENT_APP_ID` is unset and the `deploy_testnet.json` fallback did not resolve, and both `/v1/records/summary` and `/v1/consent/status` will fail), and `ok` is true.
+**Four things must be true:** `network` is `testnet` (`api/fly.toml` now sets this correctly, so a container matches a local run), `consentAppId` is `768743428` (**not `null`** — null means `CONSENT_APP_ID` is unset and the `deploy_testnet.json` fallback did not resolve, and both `/v1/records/summary` and `/v1/consent/status` will fail), `ok` is true, and **`chain.warning` is `null`**.
+
+> **Read the `chain` block — it is the funding pre-flight you would otherwise do by hand.** `estimatedAuditWritesRemaining` is the smaller of what the operator can pay in fees (1,000 µALGO per `log_access`) and what the application account can pay in box MBR, so it is the number that decides whether Beat 6's audit write lands. Below 20 it fills in `warning` with what to top up; at 0 it says audit writes will fail outright. It is deliberately **stale-while-revalidate** (`api/src/services/algorand.ts:219-241`, 30-second TTL): the response never waits on algod, so a slow node cannot make your liveness probe hang. `api/src/index.ts:13` primes the first sample at boot, but if you curl faster than that round-trip you will get `"chain": null` with `chainError` saying why — usually `"not sampled yet"`. Call it again rather than debugging it.
 
 > If the API refuses to start with a message about `PAY_TO_ADDRESS`, that is deliberate: `config.ts::assertPayToConfigured()` runs at boot and refuses to launch without a checksum-valid pay-to address. Set it in `api/.env` and restart. A loud failure at boot is the intended behaviour — the alternative was a service that started fine and failed on the first paid call.
 
@@ -232,6 +290,14 @@ curl -s "http://localhost:4021/v1/consent/status?patient=<ADDR>&requester=<ADDR>
 ```
 Use any valid 58-character TestNet address for both. **Expected:** a 200 with `{"patient":...,"requester":...,"scope":"records:summary","granted":false}` (or `true` if you granted during rehearsal). Reviewer-measured cold latency: **505 ms** — two sequential algod round-trips. Budget for that pause in the demo; do not talk over it, talk *through* it.
 
+**Then the pair that actually gates the agent beat** — the patient is `56LFG5EE…`, *not* the project wallet, and `agent-demo.ts` will decline to spend if this reads `false`:
+
+```bash
+curl -s "http://localhost:4021/v1/consent/status?patient=56LFG5EEHIJ4ZVMPHUMJH6BST2O3D4DMG3AWRZ2SN7Y3LLUDVUDILO66YM&requester=UYBTLPHS6APCXVBDPASQMUIQCEORDIR6EMTVMNSDPSVRSR5HEPKQ5GO4YQ&scope=records:summary" | python -m json.tool
+```
+
+**Expected:** `"granted": true`. If it reads `false`, `npx tsx scripts/grant-consent.ts UYBTLPHS6APCXVBDPASQMUIQCEORDIR6EMTVMNSDPSVRSR5HEPKQ5GO4YQ` re-grants it — signed by `PATIENT_MNEMONIC`, so it also confirms the patient key is loaded and funded.
+
 > If this returns **400** with `{"error":"invalid request","details":{...}}` naming a checksum failure, you used a malformed address — retype it. This used to be a 500 that echoed the internal exception text (finding R-3); `api/src/validation.ts` now validates by checksum with `algosdk.isValidAddress`, so a bad address is a client error reported as one. If you *do* see a 500, its body is a generic `INTERNAL_ERROR` carrying a `requestId` — quote that id when you look in the API log, because the detail is server-side only now.
 
 ### 2.6 Pre-load every browser tab
@@ -255,7 +321,7 @@ Fast, no debugging. If something is broken here, you switch scripts — you do n
 
 | # | Check | Command / action | Pass |
 |---|---|---|---|
-| 1 | API alive | `curl -s http://localhost:4021/v1/health` | `ok:true`, `consentAppId:768743428`, `network:testnet` |
+| 1 | API alive **and funded** | `curl -s http://localhost:4021/v1/health` | `ok:true`, `consentAppId:768743428`, `network:testnet`, and `chain.warning` **null** — if it is a string, read it: the operator or the app account is nearly out of ALGO and Beat 6's audit write is what fails first |
 | 2 | Facilitator alive | `curl -s -o /dev/null -w "%{http_code}\n" --max-time 10 https://facilitator.goplausible.xyz/supported` | `200` |
 | 3 | Priced route returns 402 | `curl -s -o /dev/null -w "%{http_code}\n" -X POST http://localhost:4021/v1/triage -H "content-type: application/json" -d '{"symptoms":"chest pain"}'` | `402` (**not** 503) |
 | 4 | Web app loads | Refresh tab 3 | Network badge live, not error |
@@ -314,6 +380,31 @@ cd /d/MedRail/api && API_BASE=http://localhost:4021 npx tsx scripts/verify-g01-f
 #    contracts/artifacts/g01-verification.json.
 #    The refused attack is free (a 4xx cancels settlement); only the
 #    control call costs $0.05.
+
+# ── The machine-to-machine centrepiece ─────────────────────────────
+cd /d/MedRail/api && npx tsx scripts/agent-demo.ts
+#    Costs $0.09 from the AGENT's wallet (AGENT_MNEMONIC), not yours.
+#    Discovery from GET / -> two paid calls -> free consent check ->
+#    paid gated call. Three settled transactions, sender != receiver,
+#    against a grant signed by PATIENT_ADDRESS, which is neither.
+#    Writes contracts/artifacts/agent-run.json: both addresses, the
+#    three payment ids, the audit id, and the Lora links it prints.
+
+# ── One-time setup, already done — re-run only if a wallet is lost ──
+cd /d/MedRail/api && npx tsx scripts/provision-agent-wallet.ts
+#    Generates an independent agent wallet, funds it with 260,000 uALGO,
+#    has it opt ITSELF in to USDC ASA 10458941, and sends a $1.00 float.
+#    Prints the new mnemonic -> save as AGENT_MNEMONIC in api/.env.
+cd /d/MedRail/api && npx tsx scripts/provision-patient-wallet.ts
+#    Generates the third keypair — the patient — and funds it with
+#    150,000 uALGO. No USDC: the patient never pays for anything, it
+#    only signs grants. Prints the new mnemonic -> save as
+#    PATIENT_MNEMONIC and PATIENT_ADDRESS in api/.env. Neither script
+#    writes key material to disk.
+cd /d/MedRail/api && npx tsx scripts/grant-consent.ts <agentAddress>
+#    The PATIENT grants that agent records:summary, signed with
+#    PATIENT_MNEMONIC and submitted straight to Algorand — the backend
+#    is not in this path. Add --revoke to take it back.
 
 # ── Optional: re-prove the consent lifecycle ───────────────────────
 cd /d/MedRail/contracts && .venv/Scripts/python.exe scripts/exercise_contract.py

@@ -24,7 +24,7 @@ npm run build   # tsc, zero errors
 npx vitest run
 ```
 
-Result: **45 passed, 0 failed** — 7 tests on the triage red-flag scorer, 6 on the interaction
+Result: **93 passed, 0 failed** — 7 tests on the triage red-flag scorer, 6 on the interaction
 checker, and 5 structural tests asserting the real 402 response shape (see §3).
 
 ## 3. x402 wiring — verified live against the real facilitator

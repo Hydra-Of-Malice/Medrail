@@ -139,7 +139,7 @@ from the repository's own documentation.
 | **An autonomous agent bought all three services** | `api/scripts/agent-demo.ts`, one run: discovery from `GET /`, then `DOSKCNKJ…` ($0.02, round 66563930), `PLBFDDAD…` ($0.02), `COMJ3TQO…` ($0.05, round 66563944). No account, no API key, no human ([`PROOF.md`](PROOF.md) §10) |
 | **Payer and payee are different accounts** | Indexer confirms sender `UYBTLPHS…` ≠ receiver `2WDV2J2F…` on those payments; the agent's keypair is not held by the service, and it opted itself in to USDC in `KOALP5W2…`. **Its TestNet float was seeded from the project's own wallet** — see the disclosure below |
 | **The consent grant runs patient → a different party** | The patient (`56LFG5EE…`) granted the agent (`UYBTLPHS…`) scope `records:summary` in `IG4XEBTM…`, round 66563915, signed with the patient's own key — an account that is neither the payer nor the payee — backend not in the path. The audit entry the gated call wrote (`E6ZTGEAO…`, round 66563942) names that same agent |
-| Automated tests | **28** contract (AVM simulator) + **45** API = **73**, all passing (was 32) |
+| Automated tests | **28** contract (AVM simulator) + **93** API = **121**, all passing (was 32) |
 | Builds | API typecheck + build, web typecheck + build — all clean |
 
 **No performance benchmark exists and none is claimed.** The only measurements taken are two single
@@ -224,7 +224,7 @@ endpoints anything other than what they are.
 **Phase 1 — complete.** Every finding a reviewer could discover unaided has been fixed and
 verified: payer binding, the on-chain audit write, denial-billing semantics, the CI trigger, the
 deployment config, address validation, rate limiting, facilitator resilience, and box-key parity.
-Test count went 32 → 73.
+Test count went 32 → 121.
 
 **What remains is yours:** deploy publicly (runbook prepared), re-run the proof scripts against the
 public URL, and list on Bazaar.

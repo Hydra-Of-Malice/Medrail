@@ -107,7 +107,7 @@ This is the flow where the privacy claim lives, so it is traced statement by sta
 | Possible sink | Present? | Evidence |
 |---|---|---|
 | Algorand ledger | **no** | neither route calls `algorand.ts` at all; `log_access` is only reachable from `records.ts` |
-| Disk | **no** | the only `writeFileSync` in the repo is in `api/scripts/e2e-proof.ts`, a manual proof script, and it writes a triage *response*, never an input |
+| Disk | **no** | every `writeFileSync` in the repo sits in a manual proof script under `api/scripts/` — `e2e-proof.ts`, `e2e-consent-proof.ts`, `verify-g01-fix.ts`, `provision-agent-wallet.ts` — and each writes transaction ids and *responses* into `contracts/artifacts/`, never a request input |
 | Application logs | **no** | the only logging in the API is `console.log` at boot (`index.ts:6`) and `console.error(err)` in the error handler (`app.ts:59`). Neither prints a request body. |
 | In-memory cache | **no** | no cache exists; `patientQueues` (`algorand.ts:129`) stores promises keyed by patient address and is never touched by these routes |
 | Metrics / traces | **no** | none exist (OPS-003, OPS-004, **NOT IMPLEMENTED**) |
@@ -356,4 +356,4 @@ This is *not* a compliance claim in either direction. **No HIPAA, GDPR, SOC 2 or
 | Which of these flows can be queried, and which cannot | [`Indexing_And_Query_Strategy.md`](Indexing_And_Query_Strategy.md) |
 | **Payer binding in full, plus C-1 and the admin-key blast radius** | [`../06_Security/Threat_Model.md`](../06_Security/Threat_Model.md) |
 | Endpoint contracts and the x402 protocol flow | [`../05_API/API_Documentation.md`](../05_API/API_Documentation.md) |
-| The settled-payment proof and its self-payment caveat | [`../PROOF.md`](../PROOF.md) |
+| The settled-payment proofs, the independent-payer run, and what each does and does not establish | [`../PROOF.md`](../PROOF.md) |

@@ -41,7 +41,7 @@ Passing all 13 tests establishes that the engines faithfully implement their rul
 
 ## 3. What IS verified — the 13 automated tests
 
-Executed by the project reviewer on 2026-08-21: `cd api && npx vitest run` ⇒ **45 passed** across 6 files. Thirteen of those 45 target the intelligence layer; the remaining 32 cover the payment and consent machinery — the 402 shape against the live facilitator (`x402-flow.spec.ts`), payer recovery from the payment signature (`x402Payer.spec.ts`), the advertised-vs-mounted route set (`app.spec.ts`), and cross-language box-key parity (`boxKeyParity.spec.ts`). The repository total is **73** tests: 45 here and 28 in `contracts/tests/`.
+Executed by the project reviewer on 2026-08-21: `cd api && npx vitest run` ⇒ **93 passed** across 9 files. Thirteen of those target the intelligence layer; the remaining 32 cover the payment and consent machinery — the 402 shape against the live facilitator (`x402-flow.spec.ts`), payer recovery from the payment signature (`x402Payer.spec.ts`), the advertised-vs-mounted route set (`app.spec.ts`), and cross-language box-key parity (`boxKeyParity.spec.ts`). The repository total is **121** tests: 45 here and 28 in `contracts/tests/`.
 
 Both suites are pure-function tests: no network, no mocks, no fixtures, no fake timers, no seeded randomness. They run offline and complete in milliseconds.
 

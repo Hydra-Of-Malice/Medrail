@@ -373,7 +373,7 @@ Without these, `Incident_Response.md` §B must reconstruct the affected-payer li
 | Access control | Logs contain payer addresses and transaction ids. Public-ledger data, but still identity-linkable — restrict access | **NOT IMPLEMENTED** |
 | PHI classification | With the never-log list (§5) enforced, logs contain **no** clinical content and no PHI. **Preserve that property deliberately** — it means log retention carries no health-data obligation | — |
 | Log level in production | `info`. `debug` opt-in via a `LOG_LEVEL` env var (does not exist today) | **NOT IMPLEMENTED** |
-| Sampling | Not needed at current volume — one settled payment exists | — |
+| Sampling | Not needed at current volume — a handful of settled payments exist, none of them from an external party | — |
 
 ---
 

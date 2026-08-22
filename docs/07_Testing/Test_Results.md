@@ -13,13 +13,15 @@
 | Suite | Command | Result | Wall time |
 |---|---|---|---|
 | Contract unit | `contracts/.venv/Scripts/python.exe -m pytest tests/ -q` | **28 passed** (2 files) | **0.44 s** |
-| API | `cd api && npx vitest run` | **45 passed** (6 files) | **9.99 s** |
+| API | `cd api && npx vitest run` | **93 passed** (9 files) | **1.60 s** |
 | Frontend | — | **no tests exist** | — |
-| | **Total automated tests** | **73 passed, 0 failed, 0 skipped** | |
+| | **Total automated tests** | **121 passed, 0 failed, 0 skipped** | |
 
-Plus **9 manual proof procedures** executed against live Algorand TestNet (§5), and **0** performance, fuzzing or mutation runs — because none exist. Dependency scanning now runs in CI: `npm audit --audit-level=high` reports **0 vulnerabilities** in both `api/` and `web/`.
+Plus **9 manual proof procedures** executed against live Algorand TestNet (§5), **one autonomous-agent verification run** (§5.7), and **0** performance, fuzzing or mutation runs — because none exist. Dependency scanning now runs in CI: `npm audit --audit-level=high` reports **0 vulnerabilities** in both `api/` and `web/`.
 
-**The suite grew from 32 tests to 73.** The added 41 are not spread evenly; they are concentrated on the five things this document previously recorded as unproven. Three of them close by regression test — the payer-identity bypass, the transposed ARC-28 event, the under-reported box MBR — and **each was confirmed to fail against the pre-fix code before the fix landed**, which is what separates a regression test from a description of current behaviour. Two more close by measurement: cross-language box-key parity, and the address-validation / error-disclosure pair.
+**The eight verification scripts in `api/scripts/` are not tests and are not counted above.** `agent-demo.ts`, `e2e-proof.ts`, `e2e-consent-proof.ts`, `verify-g01-fix.ts`, `preflight.ts`, `provision-agent-wallet.ts`, `provision-patient-wallet.ts` and `grant-consent.ts` are **manual procedures**: none is invoked by a test runner, none is registered with `vitest`, and **none of them runs in CI**. They spend real TestNet USDC and depend on two third parties, which is precisely why they are not on the per-commit path. What each proves is tabulated in [`Test_Plan.md`](Test_Plan.md) §3.5.1. The number 121 counts automated tests only.
+
+**The suite grew from 32 tests to 121.** The added 89 are not spread evenly; they are concentrated on the things this document previously recorded as unproven. Three of them close by regression test — the payer-identity bypass, the transposed ARC-28 event, the under-reported box MBR — and **each was confirmed to fail against the pre-fix code before the fix landed**, which is what separates a regression test from a description of current behaviour. Two more close by measurement: cross-language box-key parity, and the address-validation / error-disclosure pair.
 
 The one figure in this document that changed without a test producing it is on-chain: `total_audit_entries` on app `768743428` moved from **0 to 5** (§5.2). That was evidence gap **E-1**, the largest in the project, and it is closed (§6).
 
@@ -96,30 +98,33 @@ npx vitest run
 | Runner | `vitest` **4.1.10** |
 | Node | 20 |
 | Config file | **none — no `vitest.config.ts` exists anywhere in the repository**; discovery uses vitest defaults |
-| Network access | **required, but only for one file of six.** Importing `../src/app.js` constructs an `HTTPFacilitatorClient` against `https://facilitator.goplausible.xyz` (`api/src/x402.ts:6`), and the 402's `asset` and `extra.feePayer` are resolved from that facilitator's `/supported`. `x402-flow.spec.ts` depends on that; the other five files do not. The suite is still **not hermetic** — defect **CI-2**, partially mitigated (§3.6). |
+| Network access | **required, but only for two files of nine.** Importing `../src/app.js` constructs an `HTTPFacilitatorClient` against `https://facilitator.goplausible.xyz` (`api/src/x402.ts`), and the 402's `asset` and `extra.feePayer` are resolved from that facilitator's `/supported`. `x402-flow.spec.ts` and `bazaar-discovery.spec.ts` both assert on a real 402 and so depend on it; the other seven files do not. The suite is still **not hermetic** — defect **CI-2**, partially mitigated (§3.6). |
 
 ### 3.2 Output summary
 
 ```
- RUN  v4.1.10 D:/MedRail/api
+ RUN  v4.1.11 D:/MedRail/api
 
- Test Files  6 passed (6)
-      Tests  45 passed (45)
-   Duration  9.99s (transform 1.01s, import 29.95s, tests 348ms)
+ Test Files  9 passed (9)
+      Tests  93 passed (93)
+   Duration  1.60s (transform 538ms, import 4.68s, tests 1.40s)
 ```
 
-**45 passed across 6 files in 9.99 s.**
+**93 passed across 9 files in 1.60 s.**
 
 | File | Tests | Kind |
 |---|---|---|
 | `api/test/triageScorer.spec.ts` | 7 | Pure function, no I/O |
 | `api/test/interactionChecker.spec.ts` | 6 | Pure function, reads `api/src/data/interactions.json` once at import |
-| `api/test/x402-flow.spec.ts` | 5 | Real Hono app via `app.request()`, **live facilitator call** |
+| `api/test/x402-flow.spec.ts` | 7 | Real Hono app via `app.request()`, **live facilitator call** |
 | `api/test/x402Payer.spec.ts` | 6 | Real `algosdk`-signed transactions wrapped in genuine x402 v2 AVM payloads; **no network** |
 | `api/test/boxKeyParity.spec.ts` | 14 | `node:crypto` + `crypto.subtle` against a shared golden-vector fixture; **no network** |
 | `api/test/app.spec.ts` | 7 | Real Hono app via `app.request()` on free routes only; **no network** |
+| `api/test/records.spec.ts` | 12 | The gated handler driven directly with `vi.mock` over `services/algorand.js`; **no network** |
+| `api/test/algorandService.spec.ts` | 26 | `checkAccess`, `getAuditCount`, `logAccess` box references, the per-patient lock's ordering, and the health sampler, all against a mocked algod; **no network** |
+| `api/test/bazaar-discovery.spec.ts` | 8 | Asserts the discovery declaration on the real 402 of all three priced routes, **live facilitator call** |
 
-Note the `tests 348ms` against a `9.99s` total: essentially all of the wall time is module import and transform, not assertion execution. **Neither number is a performance measurement**; see [`Performance_Validation.md`](Performance_Validation.md).
+Note the `tests 1.40s` against a `1.60s` total: most of the wall time is still module import and transform rather than assertion execution. **Neither number is a performance measurement**; see [`Performance_Validation.md`](Performance_Validation.md).
 
 ### 3.3 What the x402 tests actually assert
 
@@ -149,6 +154,8 @@ For completeness, the full live 402 payload captured by the reviewer on `/v1/tri
 
 Response headers observed alongside it: `cache-control: no-store`, `access-control-allow-origin: *`, `access-control-expose-headers: PAYMENT-REQUIRED,PAYMENT-RESPONSE`.
 
+That capture predates the Bazaar discovery wiring. The prices, paths, `payTo` and `extra.feePayer` are unchanged, but the 402 now also carries `resource.serviceName`, `resource.tags`, `accepts[0].extra.tag` and an `extensions.bazaar` block — the current shape is captured in [`../05_API/Bazaar_Discovery.md`](../05_API/Bazaar_Discovery.md) §6.
+
 Note that `asset` and `extra.feePayer` are **not** in MedRail's configuration — they come from the facilitator. That is exactly why the suite is non-hermetic (CI-2), and it is why a 402 cannot be constructed offline at runtime either. What the runtime does about that has changed: `api/src/app.ts` now wraps the payment middleware, recognises the two initialisation failures the SDK raises when no payment kinds can be loaded, and returns **`503` with `Retry-After: 30`** and a stable `PAYMENT_FACILITATOR_UNAVAILABLE` code instead of an opaque 500. Free routes are untouched either way. Finding **G-04 / R-1 is closed** in the code; the automated guard for it (TC-170) is still absent, because it needs the same facilitator stub as CI-2.
 
 ### 3.4 Assertion quality — the test count still overstates the assurance
@@ -172,7 +179,7 @@ Root causes, both in source:
 
 Missing tests: **TC-180** (1-character false positives), **TC-185** (2-character false positives), **TC-186** (negation). All three are written to be implementable as-is in [`Test_Cases.md`](Test_Cases.md) §C.8.
 
-**The point for a reviewer:** "73 tests, 73 passing" is an accurate statement about this repository and a poor proxy for its assurance level. Growing the suite from 32 to 73 did not touch this weakness at all — G-21 and G-26 remain open, TC-180, TC-185 and TC-186 remain unwritten, and the green run above still issues a call that produces five spurious severe-interaction warnings. Nothing here is measured about assertion strength: there is no mutation testing (precisely the technique that surfaces this class of weakness) and no coverage measurement at all.
+**The point for a reviewer:** "121 tests, 121 passing" is an accurate statement about this repository and a poor proxy for its assurance level. Growing the suite from 32 to 121 did not touch this weakness at all — G-21 and G-26 remain open, TC-180, TC-185 and TC-186 remain unwritten, and the green run above still issues a call that produces five spurious severe-interaction warnings. Coverage is now measured (§6, **E-2**) and it does not help here either: `interactionChecker.ts` is fully covered by line, and the defect survives, which is the cleanest available demonstration that coverage is not assurance. What remains unmeasured is assertion strength, and the technique for that — mutation testing — still does not exist here.
 
 What the added tests *do* establish is narrower and should be claimed narrowly: five specific defects now have a test that fails without the fix (§2.4). That is a statement about five behaviours, not about the suite.
 
@@ -204,7 +211,7 @@ cat /d/MedRail/contracts/artifacts/e2e-proof.json
 
 ### 3.6 Hermeticity — CI-2, partially mitigated
 
-Five of the six spec files now run with no outbound request: `triageScorer`, `interactionChecker`, `x402Payer`, `boxKeyParity` and `app` are all offline. **40 of the 45 tests are hermetic.** `x402-flow.spec.ts` and its five cases are not, and there is no `msw`/`nock` stub, so **CI-2 is not closed**.
+Seven of the nine spec files now run with no outbound request: `triageScorer`, `interactionChecker`, `x402Payer`, `boxKeyParity`, `app`, `records` and `algorandService` are all offline. **78 of the 93 tests are hermetic.** `x402-flow.spec.ts` (7) and `bazaar-discovery.spec.ts` (8) are not — both assert on a real 402, which cannot be constructed without the facilitator — and there is still no `msw`/`nock` stub, so **CI-2 is not closed**.
 
 Two things did change the shape of the risk:
 
@@ -223,16 +230,18 @@ Every job the CI workflow runs passes locally, and the workflow now actually fir
 |---|---|---|
 | API typecheck | `cd api && npx tsc --noEmit` | **PASS** — 0 errors (NFR-005, `strict: true`) |
 | API build | `cd api && npm run build` (`tsc -p tsconfig.json`) | **PASS** |
-| API tests | `cd api && npx vitest run` | **PASS** — 45 passed, 9.99 s |
+| API tests | `cd api && npx vitest run` | **PASS** — 93 passed across 9 files, 1.60 s |
 | API dependency audit | `cd api && npm audit --audit-level=high` | **PASS** — **found 0 vulnerabilities** |
 | Contract compile | `python -m puyapy smart_contracts/consent/contract.py --out-dir artifacts` | run by CI step `Compile` with `puyapy==5.9.0`, followed by `cp smart_contracts/consent/artifacts/* artifacts/` — puyapy resolves `--out-dir` relative to the source file, so the output must be copied to where consumers read it (**G-28**, still open as a documentation defect) |
-| Committed artifacts match source | `git diff --exit-code -- contracts/artifacts/` | CI gate — the build is byte-reproducible, so any drift between `contract.py` and the ARC-56 spec the deploy script uses fails the build instead of diverging silently |
+| Committed artifacts match source | `git diff --exit-code -- contracts/artifacts/current/` | CI gate — the build is byte-reproducible, so `contract.py` cannot change without `contracts/artifacts/current/` changing with it. Note the directory: **`contracts/artifacts/` itself is pinned to the deployed program** and is *expected* to differ from source while the C-1/C-2 redeploy is held (E-7). CI asserts that pinned set was **not** regenerated, as a separate step |
 | Contract tests | `contracts/.venv/Scripts/python.exe -m pytest tests/ -q` | **PASS** — 28 passed, 0.44 s |
 | Web typecheck | `cd web && npx tsc --noEmit -p tsconfig.json` | **PASS** — 0 errors |
 | Web dependency audit | `cd web && npm audit --audit-level=high` | **PASS** — **found 0 vulnerabilities** |
 | Web build | `cd web && next build` (Next.js 16.3.0, Turbopack) | **PASS** — compiled in 6.3 s; **2 static routes** (`/` and `/_not-found`), both prerendered `○ (Static)` |
 
 The web build producing exactly two routes is itself a fact worth recording: the demo application has **one** real route. Any diagram or document showing more is wrong.
+
+The API typecheck row records `npx tsc --noEmit`, which resolves `api/tsconfig.json` and therefore covers `src` only — the same set `npm run build` compiles, because `src` is all that ships. CI now runs a wider one: `npm run typecheck` is `tsc -p tsconfig.all.json`, which extends the build config with `noEmit` and `"include": ["src", "scripts", "test"]`. That matters here specifically, because `scripts/` is what produces the on-chain evidence quoted throughout §5 and nothing typechecked it until that config existed.
 
 The two audit results close **G-16** and **G-27**. The `nanoid` advisory GHSA-2v37-7h3g-55p8, previously reported against the web dependency tree, no longer appears in either package.
 
@@ -245,9 +254,9 @@ The two audit results close **G-16** and **G-27**. The `nanoid` advisory GHSA-2v
 | Does CI run on a push? | **Yes.** Triggers are `push: branches: [main, master]`, `pull_request`, and `workflow_dispatch`. The repository's branch is `main`. **CI-1 / G-06 is closed** — the earlier workflow listed only `main` while the only branch was `master`, so no push ever fired it. Both are listed now, and `workflow_dispatch` allows a manual run regardless. |
 | Dependency caching? | **Yes.** `cache: pip` keyed on `contracts/requirements-dev.txt`; `cache: npm` keyed on each package's `package-lock.json` (**CI-4** closed) |
 | Security scan produced? | **Partially.** `npm audit --audit-level=high` gates both Node jobs (SEC-014, **G-16 / G-27** closed). No `pip-audit`, CodeQL, Dependabot or SAST — TC-204 |
-| Artifact-freshness gate? | **Yes.** The contract job recompiles and fails on any diff under `contracts/artifacts/` |
-| Coverage produced? | **No.** No `--coverage` flag, no threshold, no report (**CI-3**, E-2) |
-| Container image built? | **No.** Neither Dockerfile is exercised, so NFR-007 remains **UNVALIDATED** — TC-203 |
+| Artifact-freshness gate? | **Yes, and pointed at the right directory.** The contract job recompiles today's source into `contracts/artifacts/current/` and fails on any diff there; a second step fails if the pinned `contracts/artifacts/*.teal` / `*.arc56.json` were regenerated by accident |
+| Coverage produced? | **Locally, not in CI.** `npm run coverage` (`vitest run --coverage`) reports whole-suite **83.05%** statements / **65.85%** branches — measured, quotable, and recorded under **E-2**. No CI step runs it and no threshold gates a merge, so it can regress silently (**CI-3**, TC-202) |
+| Container image built? | **Not by CI.** Both images have now been built and booted **by hand** (2026-08-22), which is what moved NFR-007 to **VALIDATED**; the pipeline still has no `docker` step, so nothing prevents a regression — TC-203 |
 
 ---
 
@@ -324,7 +333,7 @@ Method selectors verified on-chain: `request_access` = `d84debd0`, `grant_access
 | Recorded to | `contracts/artifacts/e2e-proof.json` by `api/scripts/e2e-proof.ts` |
 | Test case | TC-056 |
 
-**Disclosure, stated plainly:** sender and receiver are the same address. The deployer paid itself. It is a genuine, facilitator-settled x402 v2 `exact`-scheme payment — the `fee: 0` and the group membership confirm it went through the facilitator's sponsored settlement path — but it is a self-payment. There is no third-party payment volume to report, and none is claimed. This is disclosed in `docs/PROOF.md` and is repeated here so the limitation travels with the evidence.
+**Disclosure, stated plainly:** in *this* payment, sender and receiver are the same address — the deployer paid itself. It is a genuine, facilitator-settled x402 v2 `exact`-scheme payment — the `fee: 0` and the group membership confirm it went through the facilitator's sponsored settlement path — but it is a self-transfer. The agent run in §5.7 settles between independent accounts instead, on a float seeded from this same wallet. What neither run has is an *external* payer: no unrelated party has paid for this service, and no payment volume is claimed. This is disclosed in `docs/PROOF.md` and is repeated here so the limitation travels with the evidence.
 
 ### 5.5 Settled payment on the consent-gated route — the composition proof
 
@@ -344,7 +353,7 @@ Produced by `api/scripts/e2e-consent-proof.ts` (TC-057). This is the run that cl
 
 The script is repeatable — it detects an existing grant and skips straight to the paid call — and it aborts before paying if the grant did not take effect, so it cannot spend money to prove nothing.
 
-**Disclosure:** patient, requester and payer are the same address. The identity binding of §5.6 is what makes that distinction meaningful rather than incidental.
+**Disclosure:** in this run the patient, the requester and the payer are the same address — `e2e-consent-proof.ts` drives all three from the project's own key. The agent run in §5.7 separates all three onto their own keypairs: a patient (`56LFG5EE…`) that is neither the payer nor the payee, granting an agent (`UYBTLPHS…`) whose keypair this service does not hold. The identity binding of §5.6 is what makes that distinction meaningful rather than incidental.
 
 ### 5.6 The G-01 impersonation attempt, executed and rejected
 
@@ -360,6 +369,52 @@ Produced by `api/scripts/verify-g01-fix.ts` (TC-058). The script performs the ac
 **The control leg is what makes the result meaningful.** A 403 on its own proves nothing — a broken endpoint returns 403 too. Pairing the rejection with a successful call from the same payer, against the same app, seconds apart, is what shows the endpoint discriminates rather than simply refuses.
 
 **The mechanism is worth stating, because it is the more interesting half.** `api/src/x402Payer.ts` decodes the verified `PAYMENT-SIGNATURE` header, reads the AVM `exact` payload's `paymentGroup` / `paymentIndex`, and recovers the address that signed the payment transaction. `api/src/routes/records.ts` then requires `payer === requesterAddress`. No new credential, no session, no key exchange: **the payment is the authentication.** The caller already proved possession of that private key in order to pay at all, so binding the consent check to it costs nothing and closes the bypass entirely. Six unit tests pin the recovery (`api/test/x402Payer.spec.ts`, §A.6 of [`Test_Cases.md`](Test_Cases.md)); this is the end-to-end confirmation.
+
+### 5.7 The autonomous agent run — discovery through settlement, unattended
+
+Produced by `api/scripts/agent-demo.ts`, executed on **2026-08-22** with separately provisioned agent and patient wallets. **This is a manual verification script, not an automated test.** Nothing asserts on its output, no runner invokes it, and it does **not** run in CI — it exits non-zero only if a call throws. Recorded here because it produced three public transaction ids, and those are evidence whatever the harness around them is.
+
+A clinical triage agent was given one task and one base URL. It held no MedRail account, no API key and no prior relationship with the service.
+
+**Three separate accounts with three separate keypairs, established before the run.** `api/scripts/provision-agent-wallet.ts` generated the agent's keypair — `UYBTLPHS6APCXVBDPASQMUIQCEORDIR6EMTVMNSDPSVRSR5HEPKQ5GO4YQ`, which this service does not hold — funded it with 260,000 µALGO (`YKGXFTZU75TWIKUWO35TEHCSND5TFOFE3BKWTFTZD3LA65TGZUIA`), had it opt **itself** in to USDC ASA `10458941` (`KOALP5W2EDFXU5DRDOTUZYQBLWBOJZVKVOXBG6Y7YZYCSPAQM5PA`), and sent it a $1.00 float (`3ODGZ44ZUMQAGUYTX7763FZH2U3A5MN3KQTYMXZ5I4RPGRACJGXA`). `api/scripts/provision-patient-wallet.ts` generated a third keypair for the patient — `56LFG5EEHIJ4ZVMPHUMJH6BST2O3D4DMG3AWRZ2SN7Y3LLUDVUDILO66YM`, funded with 150,000 µALGO (`GCYA23PHR2J43WBOXOXZ7IWCCI2VFSCTUXV7ZQHBLIA54TSTFWLA`) — an account that is neither the payer nor the `payTo`, and which never pays for anything. That patient then granted `records:summary` to *that specific agent* with `api/scripts/grant-consent.ts`: signed by the patient's own key and submitted straight to Algorand, with the backend nowhere in the path (`IG4XEBTMRCKI724ZVHSYUN4ECTYBXAGZM5N35NP4Y3ZVWECG7WUQ`, confirmed round **66563915**).
+
+| Step | Call | Price | Observed result | Transaction |
+|---|---|---|---|---|
+| 1 | `GET /` | free | 8 endpoints with prices and gates; App `768743428`; network and CAIP-2 id; ARC-56 spec URL; x402 v2 / `exact` / facilitator | — |
+| 2 | `POST /v1/triage` | **$0.02** | `band=EMERGENCY score=70` | **`DOSKCNKJRXIMY2UDSDZ377LKPZQIZJW5JHCGUAGKOYV6KUCFYKIA`** |
+| 3 | `POST /v1/interaction-check` | **$0.02** | `MAJOR: warfarin + aspirin` | **`PLBFDDADW576IUCH62HGGYI4AJQNO3QXSENNDIBKAORWVMP7NVHQ`** |
+| 4 | `GET /v1/consent/status` | **free** | `granted=true` — checked *before* committing to step 5 | — (`simulate`, nothing submitted) |
+| 5 | `POST /v1/records/summary` | **$0.05** | consent verified on-chain, access audited | **`COMJ3TQOGTKP6LXDJS7HZY7B45QZJQWXXJ23HQ3IDDQYD7GRK36A`** |
+| | **Total** | **$0.09** | across **3 settled Algorand transactions** — zero accounts created, zero API keys issued | |
+
+Each id resolves at `https://lora.algokit.io/testnet/transaction/<TXID>`; the loop in §7.5 checks them against the indexer. Step 5 also produced an audit append — `E6ZTGEAOTLJQDYOUVBYJYL7LKTXHBGXGVTBKN3SR2NUPWJ2PIGQA`, confirmed round **66563942**, sent by the operator and naming `56LFG5EE…` as patient and `UYBTLPHS…` as requester — which the script records alongside the three payments in `contracts/artifacts/agent-run.json`.
+
+**Re-verified against the public indexer**, not quoted from the script's own output:
+
+| Transaction | `asset-id` | `amount` | `fee` | Confirmed round | Sender → receiver |
+|---|---|---|---|---|---|
+| `DOSKCNKJ…CFYKIA` | `10458941` | **20 000** = $0.02 | `0` — fee-sponsored | **66563930** | `UYBTLPHS…5GO4YQ` → `2WDV2J2F…TI64GE` |
+| `COMJ3TQO…GRK36A` | `10458941` | **50 000** = $0.05 | `0` — fee-sponsored | **66563944** | `UYBTLPHS…5GO4YQ` → `2WDV2J2F…TI64GE` |
+
+**Sender ≠ receiver on both**, which is the property the earlier runs in this document do not have: the agent paid from its own keypair into the service's `payTo`. `PLBFDDAD…` is the third settlement of the same run and was not separately re-read from the indexer.
+
+**The earlier run of the same script, kept for the record.** Before the agent wallet existed, `agent-demo.ts` performed the identical sequence paying from the project's own account: `POAQNSOPPW6TB5DU76VHYZTS7X2SJQRUNVCNR55GRO7TYXOKUF4Q` ($0.02, round 66562629), `W3Z55BZYCALOFZFSXI75MR22OVVEX7JRSK7T2NRATKBDU7Y4OL5A` ($0.02, round 66562637) and `5CO5XV7M5H6WLFI2D5M7UODUOF2IUQNM3FOSKH5VA66SVQTLBBDQ` ($0.05, round 66562647), with audit append `5HYV5B2LO5DVHTTAOZMQKJNEYK6VICRVAINAZ5YBVW3QUR64TBKA`. On all three of those, sender and receiver were the same address — `2WDV2J2F…TI64GE`. They are real transactions from a real run and are recorded as such; they are **not** part of the run tabulated above, and the two sets must not be quoted as one. Two further runs sit between the two — the agent paying from its own keypair while the *patient* was still the service account — and are catalogued in [`../PROOF.md`](../PROOF.md) §10.
+
+**What this adds that §5.4 and §5.5 do not.** Those runs proved that a payment settles and that the paid/consent/audit composition completes. Both were driven by a script that already knew the endpoint, the price and the shape of the request. What is new here is that **the caller was told none of those things**: it read the catalogue at runtime from `GET /`, took the prices it paid out of that response (`agent-demo.ts:157-158`), noticed from the `gate` field that one route had a precondition, and evaluated that precondition for free before spending on it. The only MedRail-specific value in the script is `API_BASE`.
+
+**The pre-flight branch is real code, not narration.** `agent-demo.ts:194-197` returns early and reports on the two findings it has already paid for if `granted` is `false`. In this run the grant was active, so the branch was not taken — which is worth stating plainly: **the decline path was not exercised by this run.** What was exercised is the free check that decides it.
+
+**Relation to the counters in §5.2.** Those global-state figures were read on 2026-08-21, *before* these runs. The patient's grant to the agent creates one further `g`-prefixed box, and each paid `/v1/records/summary` appends one further audit entry, so `total_grants_active`, `total_audit_entries` and the count of `a`-prefixed boxes are all **higher** than the values recorded in §5.2, which should now be read as a floor rather than a current figure. Re-run the query in §7.4 for a live value.
+
+**Disclosures, in the same terms as §5.4 and §5.5.**
+
+- **Not hosted.** The agent called `http://localhost:4021`. There is no public HTTPS endpoint, so no agent has ever discovered this service from a public URL.
+- **An independent payer, on a float that came from here.** The agent signs with its own keypair (`AGENT_MNEMONIC`, `agent-demo.ts:37`), which this service does not control, so the settlements above are genuine account-to-account transfers and the indexer says so. Its TestNet USDC float was nonetheless seeded from the project's own wallet (`3ODGZ44Z…`), because TestNet USDC has no other practical source. **No external or unrelated party has paid for this service**, and no payment volume is claimed. What these ids close is the payment *mechanics*; the absence of external demand is untouched by them.
+- **Three separate accounts, all three provisioned from here.** The patient who granted consent, `56LFG5EE…VUDILO66YM`, is a third keypair — neither the payer nor the `payTo` (`agent-demo.ts:50` reads it from `PATIENT_ADDRESS`) — so no two roles in this run share an address. What that does *not* make them is independent parties: this project generated the patient's key and funded it, exactly as it did the agent's. And because the agent asserts its own address as `requesterAddress`, the payer binding passes here by construction: §5.6 is still the run that shows it *discriminates*.
+- **Nothing sits behind the gate.** `SYNTHETIC_RECORD` is a fixed constant returned regardless of `patientId`, and neither compute endpoint contains a model. The payments, the authorisation read and the audit entry are real; the clinical content is not.
+- **The evidence file is self-reported.** The run writes `contracts/artifacts/agent-run.json` — the agent and patient addresses, the three payment ids with explorer links, the audit id, and the total. Like every artefact under `contracts/artifacts/`, it is written *by the script being evidenced*, so it indexes the evidence rather than being it. The indexer readings tabulated above are what actually settle the question.
+
+Message-level sequence: [`../03_Architecture/Sequence_Diagrams.md`](../03_Architecture/Sequence_Diagrams.md) §10. Integration guide built from the same script: [`../05_API/API_Documentation.md`](../05_API/API_Documentation.md) §1.1.
 
 ---
 
@@ -435,7 +490,7 @@ Listing both branch names is deliberate belt-and-braces: the failure mode was a 
 | Fly.io deployment config | `api/fly.toml` now sets `NETWORK = "testnet"`, `CONSENT_APP_ID = "768743428"`, a `/v1/health` check, and `max_machines_running = 1`. **G-07, G-13, G-14 closed.** The config is correct and has never been applied |
 | MainNet deployment | **Does not exist.** No `MedRailConsent` app on MainNet and no `contracts/artifacts/deploy_mainnet.json` |
 | Public HTTPS endpoint | **Does not exist** — pending user hosting per `docs/COMPLIANCE.md` |
-| Bazaar discovery listing / leaderboard presence | **Do not exist** — pending user action per `docs/COMPLIANCE.md` |
+| Bazaar discovery listing / leaderboard presence | **Do not exist.** The discovery extension itself is now wired — `api/src/x402.ts` registers `bazaarResourceServerExtension` and every priced route declares its input/output shape and the `x402-global-challenge` tag ([`../05_API/Bazaar_Discovery.md`](../05_API/Bazaar_Discovery.md)) — but the catalogue is keyed on the resource URL, and listing happens only when a paid call lands against a *publicly reachable* one. While the API answers on `localhost` there is nothing listable |
 
 ### E-7 — the deployed bytecode predates the contract fixes
 
@@ -475,6 +530,11 @@ cd /d/MedRail/web && npm audit --audit-level=high
 
 ```bash
 cd /d/MedRail/api  && npx tsc --noEmit && npm run build
+
+# What CI actually runs for the API typecheck: tsconfig.all.json, which is the
+# build config plus noEmit and "include": ["src", "scripts", "test"].
+cd /d/MedRail/api  && npm run typecheck
+
 cd /d/MedRail/web  && npx tsc --noEmit -p tsconfig.json && npm run build
 cd /d/MedRail/contracts && ./.venv/Scripts/python.exe -m puyapy smart_contracts/consent/contract.py --out-dir artifacts
 ```
@@ -524,13 +584,26 @@ for TX in \
   4YLKLQKKWXXFW3UT5APJVYKXI7T7A6OACTAWCC5YBAN3XGOGHRVQ \
   PCPVK3FLKP55L3FHCFIIF7QBYUPV5BHKSKYJTUIL6J4Q23HKNFDQ \
   QZIQWHN553Q3QYJ4NJ5GP3QIROP6BE2DD45P3IUSHUOGEB7VLVSQ \
-  OYNWBHJTS4LCIW2KQKOM2CEZGIFPRCZLVBVCDDG3GGNWKWDKNBGA ; do
+  OYNWBHJTS4LCIW2KQKOM2CEZGIFPRCZLVBVCDDG3GGNWKWDKNBGA \
+  POAQNSOPPW6TB5DU76VHYZTS7X2SJQRUNVCNR55GRO7TYXOKUF4Q \
+  W3Z55BZYCALOFZFSXI75MR22OVVEX7JRSK7T2NRATKBDU7Y4OL5A \
+  5CO5XV7M5H6WLFI2D5M7UODUOF2IUQNM3FOSKH5VA66SVQTLBBDQ \
+  5HYV5B2LO5DVHTTAOZMQKJNEYK6VICRVAINAZ5YBVW3QUR64TBKA \
+  IG4XEBTMRCKI724ZVHSYUN4ECTYBXAGZM5N35NP4Y3ZVWECG7WUQ \
+  DOSKCNKJRXIMY2UDSDZ377LKPZQIZJW5JHCGUAGKOYV6KUCFYKIA \
+  PLBFDDADW576IUCH62HGGYI4AJQNO3QXSENNDIBKAORWVMP7NVHQ \
+  COMJ3TQOGTKP6LXDJS7HZY7B45QZJQWXXJ23HQ3IDDQYD7GRK36A \
+  E6ZTGEAOTLJQDYOUVBYJYL7LKTXHBGXGVTBKN3SR2NUPWJ2PIGQA ; do
   echo "== $TX"
   curl -s "https://testnet-idx.algonode.cloud/v2/transactions/$TX" | python -m json.tool
 done
 ```
 
-For the `/v1/triage` payment, confirm: `"asset-transfer-transaction"."amount": 20000`, `"asset-transfer-transaction"."asset-id": 10458941`, `"fee": 0`, `"confirmed-round": 66091768`, and that `sender` equals the asset receiver.
+`POAQNSOP…`, `W3Z55BZY…`, `5CO5XV7M…` and `5HYV5B2L…` are the **earlier** agent run of §5.7: expect `"amount": 20000` on the first two, `"amount": 50000` on the third, and an `application-transaction` against app `768743428` invoking `log_access` on the fourth.
+
+The last five are the **three-account** agent run of §5.7. `IG4XEBTM…` is the patient's `grant_access` to the agent — expect a `sender` of `56LFG5EE…`, which is neither the payer nor the payee. On `DOSKCNKJ…`, `PLBFDDAD…` and `COMJ3TQO…` expect `"amount": 20000`, `20000` and `50000`, `"fee": 0`, a `sender` of `UYBTLPHS…` and a receiver of `2WDV2J2F…` — **not** the same address, which is the point of reading them. `E6ZTGEAO…` is the audit append the gated call produced: an `application-transaction` against app `768743428` invoking `log_access`, sent by the operator, whose decoded arguments name `56LFG5EE…` as patient and `UYBTLPHS…` as requester.
+
+For the `/v1/triage` payment of §5.4, confirm: `"asset-transfer-transaction"."amount": 20000`, `"asset-transfer-transaction"."asset-id": 10458941`, `"fee": 0`, `"confirmed-round": 66091768`, and that `sender` equals the asset receiver — that one is the self-transfer.
 
 For the consent-gated payment `5DKFUULW…`, expect `"amount": 50000` — the $0.05 price of `/v1/records/summary` — and for `4YLKLQKK…` an `application-transaction` against app `768743428` invoking `log_access`.
 
@@ -578,6 +651,28 @@ cat /d/MedRail/contracts/artifacts/e2e-consent-proof.json
 # (to a freshly generated third-party address) and one audit entry via the control leg.
 cd /d/MedRail/api && API_BASE=http://localhost:4021 npx tsx scripts/verify-g01-fix.ts
 cat /d/MedRail/contracts/artifacts/g01-verification.json
+
+# §5.7 setup, step 1 — provision the INDEPENDENT agent wallet. Generates a keypair, funds it
+# with 260,000 uALGO, opts it in to USDC ASA 10458941, and sends it a $1.00 float from the
+# project's own wallet. Prints the mnemonic; save it to api/.env as AGENT_MNEMONIC.
+# Writes contracts/artifacts/agent-wallet.json. TestNet play money throughout.
+cd /d/MedRail/api && npx tsx scripts/provision-agent-wallet.ts
+
+# §5.7 setup, step 2 — the PATIENT grants that agent access, signing with their own key and
+# submitting straight to Algorand; the backend is not in the path. PATIENT_MNEMONIC (falls
+# back to PROOF_MNEMONIC, then DEPLOYER_MNEMONIC). Append --revoke to reverse it.
+cd /d/MedRail/api && npx tsx scripts/grant-consent.ts <agentAddress> records:summary
+
+# §5.7 — the autonomous agent: discover -> decide -> pay -> free consent check -> paid gated call.
+# NOT A TEST. Nothing asserts on the output; it exits non-zero only if a call throws.
+# Spends $0.09 of TestNet USDC per run and appends one audit entry.
+# Needs AGENT_MNEMONIC funded with USDC ASA 10458941 (the wallet from step 1 — it does fall
+# back to PROOF_MNEMONIC, then DEPLOYER_MNEMONIC, and that fallback is what makes the run a
+# self-payment), PATIENT_ADDRESS set to the granting patient, and an ALREADY ACTIVE grant
+# from that patient to the agent on scope "records:summary" — the script checks the grant,
+# it does not create one. Run step 2 first, or the agent will decline at step 4.
+# Writes no artefact file: the evidence is the console output and the transaction ids.
+cd /d/MedRail/api && API_BASE=http://localhost:4021 npx tsx scripts/agent-demo.ts
 ```
 
 ### 7.8 Confirming the absences
@@ -610,7 +705,8 @@ cd /d/MedRail && grep -n "npm ci\|npm install" api/Dockerfile web/Dockerfile
 # No .env tracked by git — the gitignore discipline is real (SEC-005)
 cd /d/MedRail && git ls-files | grep -i "\.env"   # -> only .env.example entries
 
-# @x402/extensions is declared but imported nowhere (DOC-9)
+# @x402/extensions is now imported and wired, not merely declared (DOC-9 / G-17)
+# -> api/src/x402.ts imports bazaarResourceServerExtension from @x402/extensions/bazaar
 cd /d/MedRail && grep -rn "@x402/extensions" api/src web/lib web/components api/scripts ; echo "exit=$?"
 ```
 
@@ -620,17 +716,18 @@ cd /d/MedRail && grep -rn "@x402/extensions" api/src web/lib web/components api/
 
 | Question | Answer |
 |---|---|
-| Do the tests that exist pass? | **Yes — 73/73, reproducibly.** |
-| Does "73 passing" mean 73 behaviours are verified? | **No.** At least one test still runs directly over a live defect and asserts nothing about it (§3.4, measured). Assertion strength remains unmeasured — no mutation testing, no coverage. |
+| Do the tests that exist pass? | **Yes — 121/121, reproducibly.** |
+| Does "121 passing" mean 121 behaviours are verified? | **No.** At least one test still runs directly over a live defect and asserts nothing about it (§3.4, measured). Assertion strength remains unmeasured — no mutation testing, no coverage. |
 | Do the builds pass? | **Yes — API and web, typecheck and build, zero errors; both dependency audits clean.** |
 | Is there real on-chain evidence? | **Yes** — a live, undeleted application; the lifecycle and funding transactions; two genuine facilitator-settled x402 payments (`/v1/triage` and `/v1/records/summary`); and five `log_access` appends. |
 | Is the system's headline feature proven? | **Yes, on-chain.** `total_audit_entries = 5`; the full grant → pay → verify → append composition has executed against TestNet and its transaction ids are public (**E-1 closed**). |
 | Is the consent gate proven to restrict access? | **Yes.** The payer is recovered from the payment signature and must equal `requesterAddress`; the impersonation was executed against the live deployment and rejected with a 403 while the control call returned 200 (§5.6, TC-110, TC-058). |
 | Was a settled payment ever at risk on an error path? | **No — and it never was.** `@x402/hono` settles only on a sub-400 response, so REL-002 is satisfied structurally by the SDK. The 500 that G-03 described cost MedRail the sale, never the caller's money, and it is now degraded to `200 { auditStatus: "pending" }`. |
 | Are consent-denied calls charged? | **No.** A 403 cancels settlement; the response says `charged: false` and points at the free status endpoint. The residual cost is MedRail's — one chain fee for the denial audit write — and is bounded by rate limiting. |
+| Can a machine integrate without being told anything about MedRail? | **Yes — once, by hand.** `api/scripts/agent-demo.ts` discovered the catalogue from `GET /`, priced three calls out of that response, checked the free consent oracle before spending on the gated route, and paid **$0.09 across three settled Algorand transactions** with no account and no API key (§5.7). It is a **manual verification script, not an automated test**, it does not run in CI, and the API it called was a local process. |
 | Has CI ever verified a commit? | **Yes** (**CI-1 / E-5 closed**) — `push` on `[main, master]`, `pull_request`, `workflow_dispatch`, with caching, dependency audits and an artifact-freshness gate. |
 | Has either container image ever been built? | **No.** NFR-007 remains **UNVALIDATED** (**E-6**), though both Dockerfiles and `fly.toml` are now correct. |
-| Is anything publicly hosted? | **No.** No public HTTPS endpoint, no MainNet deployment, no Bazaar listing. Every payment recorded here is a self-payment from the project's own account. |
+| Is anything publicly hosted? | **No.** No public HTTPS endpoint, no MainNet deployment, no Bazaar listing. The agent run of §5.7 settles between independent accounts — the payer's keypair is not held by this service — but that agent's float was seeded from the project's own wallet, and **no external party has ever paid for this service**. |
 | Can a coverage number be quoted? | **No** (**E-2**). |
 | Can a latency or throughput number be quoted? | **No**, beyond two disclosed single observations (**E-3**). G-24 is open. |
 

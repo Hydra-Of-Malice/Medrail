@@ -550,7 +550,7 @@ Two consequences follow from the omission, and they pull in opposite directions:
 
 ### 4.3 Route-to-price mapping
 
-One object literal holds all pricing (`api/src/app.ts:50-60`), with the comment at `:48-49` recording the intent: pricing is in one place so a judge or an integrator can audit it at a glance.
+One object literal holds all pricing (`api/src/app.ts:58-175`), with the comment at `:48-49` recording the intent: pricing is in one place so a judge or an integrator can audit it at a glance.
 
 | Route key | Price string | Base units | Description advertised in the 402 |
 |---|---|---|---|

@@ -2,7 +2,7 @@
 
 **Purpose:** Specify, in a single verifiable format, every use case the implemented system supports — including the abuse case it now rejects — with the evidence and status for each.
 
-**Status of this document:** Authored 2026-08-21 against the verified fact ledger and source at commit `3b387df`. Each use case carries the ledger's status vocabulary. **UC-006, UC-007 and UC-011 have all since been executed against the deployed contract**: the audit-append step common to UC-006 and UC-007 has now run on Algorand TestNet (`total_audit_entries = 5` on App `768743428`), and UC-011's control was verified live by `api/scripts/verify-g01-fix.ts`. Requirement IDs are taken verbatim from the canonical registry; two new IDs are allocated here from the reserved `FR-100…FR-119` block and are marked as such.
+**Status of this document:** Authored 2026-08-21 against the verified fact ledger and source at commit `3b387df`, with **UC-013 added and specified first** once `api/scripts/agent-demo.ts` had been run against live TestNet. Each use case carries the ledger's status vocabulary. **UC-006, UC-007, UC-011 and UC-013 have all been executed against the deployed contract**: the audit-append step common to UC-006 and UC-007 has run on Algorand TestNet (`total_audit_entries = 5` on App `768743428`), UC-011's attack *and* its control were verified live by `api/scripts/verify-g01-fix.ts`, and UC-013 walked discovery → selection → pre-flight → three paid calls → synthesis in one unassisted run. Requirement IDs are taken verbatim from the canonical registry; two new IDs are allocated here from the reserved `FR-100…FR-119` block and are marked as such, and UC-013 deliberately allocates none.
 
 **Format.** Every use case uses the same eight fields: **Actor → Precondition → Action → System Behaviour → Expected Outcome → Postcondition → Evidence → Status**.
 
@@ -14,6 +14,7 @@
 
 | UC | Title | Primary requirements | Status |
 |---|---|---|---|
+| [**UC-013**](#uc-013--composite--autonomous-agent-completes-a-multi-service-clinical-task) | **[COMPOSITE] Autonomous agent completes a multi-service clinical task** | FR-017, FR-001…FR-003, FR-013, FR-010, FR-012, FR-025, FR-039 | **VALIDATED** |
 | [UC-001](#uc-001--unpaid-request-to-a-priced-route-yields-a-402-challenge) | Unpaid request to a priced route yields a 402 challenge | FR-001, FR-002 | **VALIDATED** |
 | [UC-002](#uc-002--agent-pays-for-a-triage-score) | Agent pays for a triage score | FR-003, FR-004, FR-005, FR-006, FR-009 | **VALIDATED** |
 | [UC-003](#uc-003--agent-pays-for-a-medication-interaction-check) | Agent pays for a medication interaction check | FR-003, FR-007, FR-008, FR-009 | **VALIDATED** (settlement by shared mechanism) |
@@ -35,6 +36,47 @@ Allocated from the `FR-100…FR-119` block reserved for Product / Use Cases.
 |---|---|---|---|
 | **FR-100** *(new, added by `docs/01_Product/Use_Cases.md`)* | The deployment script shall fund the application account at creation with sufficient ALGO to cover box minimum-balance requirements, and shall be idempotent across re-runs — neither re-creating nor re-funding an application that already exists. | **IMPLEMENTED** | `contracts/scripts/deploy_testnet.py:99-137`; funding tx `KYH3H5CG2CCUPUUTJIBX47WD4RWSUV3QWTEUJQRQFYLWO5YAO3QA` round 66088626; app account balance 5,000,000 µALGO |
 | **FR-101** *(new, added by `docs/01_Product/Project_Vision.md`)* | All priced endpoints shall settle to a single configured `payTo` address, so the submission classifies as a Composite entry. | **IMPLEMENTED** | `api/src/app.ts:37-50`; `api/src/x402.ts:26`; `api/src/config.ts:53` |
+
+**UC-013 allocates no new requirement ID.** It is a composite: every obligation it places on the system is already registered, and the use case exists to assert that they hold *in sequence, unassisted, in one run*. That is a different claim from each of them holding individually, and it is the claim the challenge actually asks about.
+
+---
+
+## UC-013 — [COMPOSITE] Autonomous agent completes a multi-service clinical task
+
+> Specified first because it is the use case the product exists for. It **composes** UC-001, UC-002, UC-003, UC-008 and UC-006 into one unassisted run by a single caller — and the composition is the claim, since each of those is already proven individually below.
+
+| Field | Content |
+|---|---|
+| **Actor** | P-1 — an autonomous agent. **No MedRail account, no API key, no prior relationship, and no human in the loop.** It knows exactly one thing about the service: a base URL. |
+| **Precondition** | `medrail-api` is running and the facilitator is reachable. The agent holds an Algorand account opted in to ASA `10458941` with ≥ 90000 base units of USDC. **No ALGO is required** — the facilitator sponsors fees via `extra.feePayer`. A currently-valid grant exists for `(patient, agent, "records:summary")` — or does not, in which case see the alternate flow A1, which is the more interesting branch. |
+| **Action** | The agent is handed one task: *"Sudden crushing chest pain and shortness of breath since this morning"*, medications `["warfarin", "aspirin 81mg"]`. It must produce an assessment. `API_BASE=… npx tsx api/scripts/agent-demo.ts`. |
+| **System Behaviour** | **1. Discover.** `GET /` returns the catalogue: eight routes with `method`, `path`, `price` and `gate`; a `contract` block with `appId` `768743428`, the network, the CAIP-2 id and `arc56SpecUrl`; and an `x402` block with `version: 2`, `scheme: "exact"` and the facilitator (`api/src/app.ts:149-177`). **2. Select.** The agent filters the catalogue to the priced routes, reads each price out of the index rather than hard-coding it (`priceOf`), and reads `gate` to learn which route needs more than money. **3. Pay for triage** — UC-002. **4. Pay for the interaction check** — UC-003. **5. Pre-flight, free.** Because `gate` on `/v1/records/summary` reads `"x402 + on-chain consent"`, the agent calls `GET /v1/consent/status` first — UC-008, zero cost, `check_access` via `simulate()`, nothing submitted. **6. Spend or decline.** On `granted: true` it pays $0.05 for the gated read — UC-006, which binds the payer to the asserted requester (UC-011), evaluates consent on-chain and appends to the patient's audit trail. On `false` it declines and spends nothing (flow A1). **7. Synthesise** one assessment and report the ledger of what it spent. |
+| **Expected Outcome** | One assessment, and an itemised spend: **$0.09 total across 3 settled Algorand transactions**. `band=EMERGENCY`, `score=70`, flags *possible cardiac chest pain · respiratory distress*; `MAJOR: warfarin + aspirin`; `consentVerifiedOnChain: true` with `auditStatus: "recorded"`. |
+| **Postcondition** | USDC has moved three times. One new `"a"`-prefixed audit box on the patient's trail; `audit_seq[patient]` and `total_audit_entries` incremented once. **Zero accounts created, zero API keys issued, zero invoices, and no MedRail-side state of any kind** — there is no datastore to hold any (NFR-001). |
+| **Evidence** | `api/scripts/agent-demo.ts`, run against live TestNet from an **independent agent keypair**, `UYBTLPHS6APCXVBDPASQMUIQCEORDIR6EMTVMNSDPSVRSR5HEPKQ5GO4YQ`, which this service does not control. Settled payments to `payTo` `2WDV2J2F…`: `DOSKCNKJRXIMY2UDSDZ377LKPZQIZJW5JHCGUAGKOYV6KUCFYKIA` (20000 µUSDC, `fee: 0`, round 66563930), `PLBFDDADW576IUCH62HGGYI4AJQNO3QXSENNDIBKAORWVMP7NVHQ`, `COMJ3TQOGTKP6LXDJS7HZY7B45QZJQWXXJ23HQ3IDDQYD7GRK36A` (50000 µUSDC, `fee: 0`, round 66563944) — **sender ≠ receiver on every one**, confirmable on any public Algorand indexer. The grant the third call evaluates is `IG4XEBTMRCKI724ZVHSYUN4ECTYBXAGZM5N35NP4Y3ZVWECG7WUQ` (round 66563915), in which the patient `56LFG5EEHIJ4ZVMPHUMJH6BST2O3D4DMG3AWRZ2SN7Y3LLUDVUDILO66YM` — a third account, neither the payer nor the payee — signed `grant_access(UYBTLPHS…, "records:summary")` on App `768743428`; the audit entry the call wrote (`E6ZTGEAO…`, round 66563942) names that patient and that agent. The earlier self-paid run (`POAQNSOP…`, `W3Z55BZY…`, `5CO5XV7M…`, audit `5HYV5B2L…`), and the two after it in which the service still stood in as the patient, are retained rather than replaced. The catalogue the agent reads is asserted against the mounted route set by `api/test/app.spec.ts`, so it cannot drift from reality. |
+| **Status** | **VALIDATED**, with one disclosure that must travel with it ([`../PROOF.md`](../PROOF.md) §10). The three roles are three separate accounts with three separate keypairs — patient `56LFG5EE…`, agent `UYBTLPHS…`, service `2WDV2J2F…` — but all three are the project's own: the agent's TestNet USDC float was seeded from the project's own wallet and the patient wallet was funded the same way, because TestNet ALGO and USDC have no other practical source, so **no external or unrelated party has paid for this service.** These are genuine facilitator-settled x402 payments between independent keypairs and a genuine unassisted run. They are **not** payment volume. |
+
+**Nothing about MedRail is hard-coded in the agent except the base URL.** Endpoint paths, prices, gates, the App ID and the ARC-56 spec URL all come from the `GET /` response at runtime. That is the testable form of "an agent can discover it": if the claim were false, the script would need a constant it does not have.
+
+**Alternate flow A1 — no grant exists, and the agent declines to spend.** `GET /v1/consent/status` returns `granted: false`. The agent does **not** call the gated endpoint. It reports the assessment it can make from the two open calls and records `Record access: declined — no consent grant, so no spend` (`agent-demo.ts`, the `if (!status.granted)` branch). This is the sharpest step in the use case: **the agent refuses to pay to be told no.** The free consent oracle exists so that the spend decision can be made before the spend, and the 403 body on the gated route names that endpoint in its `hint` for exactly this reason (UC-007). Note the honest boundary — a paid call that *is* refused costs nothing either, because a 403 cancels settlement (REL-002); what the pre-flight saves is a round trip and a decision, not a refund. The difference it makes is the agent reasoning about cost rather than discovering it.
+
+**Alternate flow A2 — the agent is not the requester it names.** Out of scope for the honest path and specified in full as UC-011: the payer is recovered from the payment signature and a mismatch is a **403** before consent is ever consulted. An agent can only act as an address it can sign as.
+
+**Exception flow E1 — facilitator unavailable mid-task.** Any priced leg returns **503** with `Retry-After: 30` and `{"error":{"code":"PAYMENT_FACILITATOR_UNAVAILABLE","retryable":true}}` (UC-001 A1). The free legs — `GET /` and `GET /v1/consent/status` — stay up (REL-005 **VALIDATED**), so discovery and the pre-flight survive an outage that stops the buying. An agent can branch on the code and back off on the header rather than treating the service as broken.
+
+**Exception flow E2 — a leg fails after earlier legs were paid.** There is no transaction across the three calls and none is claimed: each is independently settled and independently useful. A failure on leg 3 leaves the agent holding legs 1 and 2, which is precisely what `agent-demo.ts` reports in flow A1. There is no refund mechanism and none is needed, because settlement is unreachable on any status ≥ 400 (REL-002 **VALIDATED**, satisfied by the SDK).
+
+**What this use case does *not* demonstrate — stated here rather than left to be found.**
+
+| # | Not demonstrated | Detail |
+|---|---|---|
+| 1 | **Finding the URL.** | The agent is given a base URL. Nothing is publicly hosted, there is no Bazaar listing, and `@x402/extensions` is declared in `api/package.json` but imported nowhere in `api/src` (DOC-9). Self-description is proven; external discoverability is not. |
+| 2 | **Third-party money.** | Payments settle between distinct accounts — the agent's keypair is independent of the service, and the patient's is independent of both — but the agent's TestNet USDC float was seeded from the project's own wallet, and the patient wallet was funded the same way. No external or unrelated party has paid. |
+| 3 | **Intelligence.** | Both open endpoints are deterministic rule engines — 11 hard-coded red-flag groups and 14 curated interaction pairs. **There is no LLM, no ML model, no embeddings and no vector store anywhere in this repository** (AI-005 **NOT IMPLEMENTED**, and no such claim is made). |
+| 4 | **A real record.** | `summary` is the fixed `SYNTHETIC_RECORD`, returned regardless of `patientId` (`records.ts:17-23`). There are no real patients (DATA-004). |
+| 5 | **Orchestration by MedRail.** | The synthesis happens in the caller. MedRail sells three results and does not sell a combined judgement; there is no orchestrator endpoint and none is claimed ([`../COMPLIANCE.md`](../COMPLIANCE.md)). |
+
+**Requirements:** FR-017 (catalogue), FR-001, FR-002, FR-003 (402 and settlement), FR-004…FR-009 (the two engines), FR-013 + SEC-009 (free pre-flight), FR-010, FR-012, FR-025 (gated read, consent evaluation, audit append), FR-039 + SEC-007 + SEC-008 (payer binding), REL-001, REL-002, REL-005, NFR-001.
 
 ---
 
@@ -68,7 +110,7 @@ Allocated from the `FR-100…FR-119` block reserved for Product / Use Cases.
 | **Expected Outcome** | HTTP **200**, `{score, band, matchedFlags, disclaimer}`, plus a `PAYMENT-RESPONSE` header carrying the settled transaction. Recorded example (`contracts/artifacts/e2e-proof.json`): `{"score":70,"band":"emergency","matchedFlags":["possible cardiac chest pain","respiratory distress"],"disclaimer":"…"}` — 35 + 35, reconstructible by hand from `triageScorer.ts:33-34`. |
 | **Postcondition** | USDC has moved from payer to `payTo` on Algorand. **No MedRail-side state changed** — no session, no record, no on-chain audit entry. The open endpoints are pure compute and deliberately write nothing: `docs/ARCHITECTURE.md` says "Both categories write to the same audit log" and then corrects itself in the same sentence — the correction is the accurate half. Only the consent-gated category appends to the audit trail (UC-006). |
 | **Evidence** | Settled tx `OYRQRKYA7WUKBVLWTOFJSJMZFBW7VCNGP5VGH5EBUJGRCVFQFJRQ` — `axfer`, asset `10458941`, amount **20000**, round **66091768**, `fee: 0`, group `XQzhbjBAqt0AjC5AByQsCxGbMdEuca3ZZFMyFBTb7K4=`, note `x402-payment-v2-1786140083822`. `api/test/triageScorer.spec.ts` (7 cases). `api/scripts/e2e-proof.ts` (manual, not in CI). |
-| **Status** | **VALIDATED** — with the disclosure that **every settled payment recorded to date is a self-payment from the project's own account** (`2WDV2J2F…` paying itself; `docs/PROOF.md` §6). They are genuine facilitator-settled x402 payments. They are **not** payment volume, and must never be described as such. |
+| **Status** | **VALIDATED** — with the disclosure that **the transaction cited above is a self-payment from the project's own account** (`2WDV2J2F…` paying itself; `docs/PROOF.md` §6). This route has since also been paid from an independent keypair by the agent in UC-013 (`DOSKCNKJ…`, sender ≠ receiver), but that agent's TestNet float was seeded from the project's own wallet, so **no external or unrelated party has paid**. These are genuine facilitator-settled x402 payments. They are **not** payment volume, and must never be described as such. |
 
 **Requirements:** FR-003, FR-004, FR-005, FR-006, FR-009, AI-001, AI-002, AI-003, NFR-009.
 
@@ -248,8 +290,8 @@ Allocated from the `FR-100…FR-119` block reserved for Product / Use Cases.
 
 ## UC-011 — [ABUSE] Paying stranger attempts to impersonate an authorised requester
 
-> ### Status: **MITIGATED — verified live on TestNet**
-> This was finding **S-1 / G-01**, the most serious defect in the system. It is **CLOSED**. **SEC-006, SEC-007, SEC-008 and FR-039 are IMPLEMENTED and VALIDATED.**
+> ### Status: **MITIGATED — verified live on TestNet, with a control**
+> This was finding **S-1 / G-01**, the most serious defect in the system. It is **CLOSED**. **SEC-006, SEC-007, SEC-008 and FR-039 are IMPLEMENTED and VALIDATED.** The attack has been executed against the deployed service and rejected (403), and a matched control call was admitted (200) — both recorded in `contracts/artifacts/g01-verification.json`. The mitigation is not a claim; it is a run.
 
 | Field | Content |
 |---|---|
@@ -260,7 +302,9 @@ Allocated from the `FR-100…FR-119` block reserved for Product / Use Cases.
 | **Expected Outcome (attacker's view)** | HTTP **403** with `{"error":"requesterAddress must match the address that signed the payment","requesterAddress":"…","payer":"…"}`. The body names both addresses, because there is nothing to hide: an honest client with a mismatched signer needs to see exactly which two identities failed to line up. |
 | **Postcondition** | 1. No gated resource released. 2. **Nothing written to the patient's audit trail** — the trail records accesses, not rejected impersonations, so it cannot be polluted by an attacker who never got past the door. 3. No settlement. |
 | **Evidence** | **Verified live against TestNet** by `api/scripts/verify-g01-fix.ts` (`contracts/artifacts/g01-verification.json`): it grants consent to a genuine third-party requester (`NHUPYHPA22HG…`, grant tx `PCPVK3FLKP55L3FHCFIIF7QBYUPV5BHKSKYJTUIL6J4Q23HKNFDQ`), then pays from a **different** key while asserting that third party's address — and receives **403**. The same script runs a control in which payer and asserted requester match, which returns **200** with the record, settled tx `QZIQWHN553Q3QYJ4NJ5GP3QIROP6BE2DD45P3IUSHUOGEB7VLVSQ` and audit tx `OYNWBHJTS4LCIW2KQKOM2CEZGIFPRCZLVBVCDDG3GGNWKWDKNBGA`. The control matters as much as the attack: a gate that rejects everything is not a fix. Six unit cases in `api/test/x402Payer.spec.ts` cover the recovery itself, including a group with facilitator fee-payer legs ahead of the payment, a merely-asserted address, an absent header, a malformed header, and an out-of-range `paymentIndex`. |
-| **Status** | **MITIGATED** |
+| **Status** | **MITIGATED — the attack returns 403 against the live service, and the control returns 200** |
+
+**What this means for the agent in UC-013.** An off-the-shelf agent gets this protection without doing anything for it. It does not present a credential, does not hold a key MedRail issued, and does not run any MedRail-specific code — it signs its own payment, as every x402 client already does, and that signature *is* the credential. The consequence is a boundary an agent can reason about: it may act as any address it can sign as, and no other. A stranger's agent cannot borrow an authorised requester's identity by naming it, no matter how much it is willing to pay.
 
 **Why this use case is retained rather than deleted.** The attack is the clearest statement of what the consent layer is for. A grant registry that is publicly enumerable — as this one deliberately is — creates the impersonation opportunity by construction, and a paywall that only proves *somebody* paid does nothing about it. Keeping the abuse case documented, with the control and its live verification attached, is how a reader can tell that the gate was designed against a specific adversary rather than assumed to be safe.
 
@@ -301,27 +345,27 @@ Allocated from the `FR-100…FR-119` block reserved for Product / Use Cases.
 
 | Requirement | Use cases | Status |
 |---|---|---|
-| FR-001, FR-002 | UC-001 | **VALIDATED** |
-| FR-003 | UC-002, UC-003 | **VALIDATED** |
-| FR-004, FR-005, FR-006 | UC-002 | **VALIDATED** |
-| FR-007, FR-008 | UC-003 | **VALIDATED** |
+| FR-001, FR-002 | UC-001, **UC-013** | **VALIDATED** |
+| FR-003 | UC-002, UC-003, **UC-013** | **VALIDATED** |
+| FR-004, FR-005, FR-006 | UC-002, **UC-013** | **VALIDATED** |
+| FR-007, FR-008 | UC-003, **UC-013** | **VALIDATED** |
 | FR-009 | UC-002, UC-003 | **VALIDATED** |
-| FR-010, FR-012 | UC-006 | **VALIDATED** |
+| FR-010, FR-012 | UC-006, **UC-013** | **VALIDATED** |
 | FR-011 | UC-007 | **VALIDATED** |
-| FR-013 | UC-008 | **IMPLEMENTED** |
+| FR-013 | UC-008, **UC-013** (free pre-flight) | **IMPLEMENTED** |
 | FR-014, FR-015 | UC-009 | **IMPLEMENTED** |
-| FR-016, FR-017 | UC-001 (discovery) | **VALIDATED** / **IMPLEMENTED** |
+| FR-016, FR-017 | UC-001 (discovery), **UC-013** (consumed unassisted) | **VALIDATED** / **IMPLEMENTED** |
 | FR-018, FR-019, FR-022 | UC-004 | **VALIDATED** |
 | FR-020, FR-021 | UC-005 | **VALIDATED** |
 | FR-023 | UC-006, UC-008 | **VALIDATED** |
 | FR-024 | UC-004 (related) | **IMPLEMENTED in source** (C-1 / G-20 fixed; deployed app retains the defect) |
-| FR-025, FR-027, FR-028 | UC-006 | **VALIDATED on-chain** |
+| FR-025, FR-027, FR-028 | UC-006, **UC-013** | **VALIDATED on-chain** |
 | FR-026 | UC-006 | **VALIDATED** |
 | FR-029, FR-031 | UC-010 | **VALIDATED** / **PARTIALLY IMPLEMENTED** |
 | FR-030, FR-032 | UC-012 | **IMPLEMENTED** / **IMPLEMENTED in source** (C-2 / G-20 fixed; deployed app retains the old constant) |
 | FR-033…FR-037 | UC-002 (browser), UC-004, UC-005, UC-008 | **IMPLEMENTED**, no frontend tests exist |
 | FR-038 | UC-001 A2, UC-007 E2 | **IMPLEMENTED** |
-| **FR-039** | **UC-011** | **VALIDATED** |
+| **FR-039** | **UC-011**, UC-013 A2 | **VALIDATED** |
 | FR-040 | UC-002 | **IMPLEMENTED** |
 | **FR-100** *(new)* | UC-012 | **IMPLEMENTED** |
 | **FR-101** *(new)* | UC-001, UC-002, UC-003, UC-006 | **IMPLEMENTED** |
@@ -334,11 +378,11 @@ Allocated from the `FR-100…FR-119` block reserved for Product / Use Cases.
 | SEC-010, SEC-011 | UC-007 E2 | **IMPLEMENTED** |
 | SEC-012 | UC-010 | **NOT IMPLEMENTED** |
 | SEC-013 | UC-008 A1 | **IMPLEMENTED** |
-| REL-001 | UC-001 A1 | **IMPLEMENTED** |
-| REL-002 | UC-006 E1 | **VALIDATED** — settlement is structurally unreachable on a status ≥ 400; satisfied by the SDK |
+| REL-001 | UC-001 A1, **UC-013 E1** | **IMPLEMENTED** |
+| REL-002 | UC-006 E1, **UC-013 E2** | **VALIDATED** — settlement is structurally unreachable on a status ≥ 400; satisfied by the SDK |
 | REL-003 | UC-006 E2 | **NOT IMPLEMENTED** |
 | REL-004 | UC-006 E3 | **PARTIALLY IMPLEMENTED** |
-| REL-005 | UC-001 A1 | **VALIDATED** |
+| REL-005 | UC-001 A1, **UC-013 E1** | **VALIDATED** |
 | REL-006 | UC-012 | **PARTIALLY IMPLEMENTED** |
 | PERF-001 | UC-001 | **IMPLEMENTED** |
 | PERF-002, PERF-003, PERF-004 | UC-006, UC-008 | **NOT IMPLEMENTED** |
