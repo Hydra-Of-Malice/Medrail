@@ -42,7 +42,7 @@ All items were implemented and verified on 2026-08-21. Test count went **32 → 
 | Action | Owner | Reference |
 |---|---|---|
 | Deploy the API publicly and the frontend to Vercel | **You** — needs your accounts | [`08_Deployment/GO_LIVE_RUNBOOK.md`](08_Deployment/GO_LIVE_RUNBOOK.md) §1–2 |
-| Re-run both proof scripts against the public URL and paste the tx IDs into `PROOF.md` | **You** | Runbook §1.6 |
+| Re-run the proof scripts (`e2e-proof.ts`, `e2e-consent-proof.ts`, `agent-demo.ts`) against the public URL and paste the tx IDs into `PROOF.md` | **You** | Runbook §1.6 |
 | Bazaar listing with the `x402-global-challenge` tag | **You** — competition entry action | Runbook §3 |
 | Rehearse the demo | **You** | [`11_Hackathon/Demo_Runbook.md`](11_Hackathon/Demo_Runbook.md) |
 
@@ -54,9 +54,9 @@ facilitator resilience, box-key parity). What remains:
 | # | Action | Gap | Effort | Value |
 |---|---|---|---|---|
 | 2.1 | **Graceful facilitator degradation** | G-04 | ~3 h | Cache `/supported` at startup and serve the 402 from cache on failure; otherwise return `503` + `Retry-After`, never `500`. Removes a third-party service from the demo's critical path *and* from CI. |
-| 2.2 | **Test `records.ts` and `algorand.ts`** | G-05 | ~4 h | The two modules that can lose money or mis-authorise have zero coverage. Cover the happy, denied, and audit-failure paths, plus `checkAccess`. |
+| 2.2 | **Test `records.ts` and `algorand.ts`** | G-05 | ✅ **Done 2026-08-22.** `api/test/records.spec.ts` (12) and `api/test/algorandService.spec.ts` (26). `src/services` branch coverage 50% → 93.18%, `src/routes` 9.09% → 63.63%, whole suite 40.65% → 65.85%. `npm run coverage`. |
 | 2.3 | **Box-key derivation golden vectors** | G-08 | ~2 h | One fixture, three assertions (Python, Node, browser). Cheap insurance against the worst-diagnosed failure mode in the system: consent silently returning `false`. |
-| 2.4 | **`withPatientLock` concurrency test** | G-05, G-11 | ~1 h | N concurrent `logAccess` calls for one patient must yield N distinct sequence numbers. Proves the documented mitigation actually works. |
+| 2.4 | **`withPatientLock` concurrency test** | G-05, G-11 | ✅ **Done 2026-08-22.** Covered in `api/test/algorandService.spec.ts`: concurrent `logAccess` calls for one patient serialise, and calls for different patients do not. |
 | 2.5 | **Deploy the API to a public HTTPS URL** | — | ~2 h | Required by the challenge rules and currently the largest single "pending" item. Everything needed is committed; it needs a hosting account. Pin to one machine until 3.1 lands (G-11). |
 | 2.6 | **Add per-IP rate limiting on the free routes** | G-09 | ~1 h | `/v1/consent/status` makes two algod calls per unauthenticated request. Necessary before a public URL exists. |
 | 2.7 | **Minimal observability** | G-15 | ~3 h | Request-id middleware, structured JSON logs with an explicit never-log list, and a chain-native canary polling the operator balance and `total_audit_entries`. Without this, item 1.4's failure mode is undetectable in production. |

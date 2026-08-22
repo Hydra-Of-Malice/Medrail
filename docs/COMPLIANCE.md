@@ -1,75 +1,196 @@
-# MedRail — Compliance with the Global x402 Challenge Official Rules
+# MedRail — Compliance with the Global x402 Challenge Submission Requirements
 
-This document maps every requirement in the Algorand Foundation's Global x402 Challenge official
-rules to exactly how MedRail satisfies it, and states plainly which parts are complete versus
-which require the team's own MainNet wallet to finish (see "Status" column). Sources: the
-official challenge page (`algorand.co/global-x402-challenge`) and Official Rules PDF, both
-fetched and read directly during planning — see `docs/IMPLEMENTATION_PLAN.md` §1 for the full
-verification table.
+This document maps every item on the organisers' **official submission requirement list** to
+exactly how MedRail satisfies it, and states plainly which two items are **not satisfied yet**.
+Sources: the official challenge page (`algorand.co/global-x402-challenge`), the Official Rules PDF,
+and the submission requirements published by the organisers. Every "✅ Done" below is
+independently checkable by running the referenced command or opening the referenced link.
+
+**Repository:** <https://github.com/Hydra-Of-Malice/Medrail>
+
+---
+
+## ⛔ What is still missing — read this first
+
+Two requirements are **hard blockers**. Neither is partially done. Without them the submission is
+incomplete regardless of how strong everything else is.
+
+| # | Blocker | Current reality | Who unblocks it | Est. |
+|---|---|---|---|---|
+| **2** | **Live and working project, deployed and accessible** | **Nothing is publicly hosted.** MedRail runs on `localhost:4021` only. `api/fly.toml`, `api/Dockerfile` and `web/Dockerfile` are committed and corrected, but `fly deploy` has never been run. There is no public URL a judge can open. | The team — needs a Fly.io account and a Vercel account | ~25 min API + ~10 min web |
+| **3** | **MVP demo video, max 3 minutes, YouTube or public Google Drive link** | **No video exists.** The shot-by-shot script is written and rehearsed-timed ([`11_Hackathon/Demo_Video_Script.md`](11_Hackathon/Demo_Video_Script.md)); nothing has been recorded, edited, uploaded, or made public. | The team | ~60–90 min including a backup take |
+
+Both are walked step by step in [`GO_LIVE_CHECKLIST.md`](GO_LIVE_CHECKLIST.md), with commands in
+[`08_Deployment/GO_LIVE_RUNBOOK.md`](08_Deployment/GO_LIVE_RUNBOOK.md).
+
+Three further things are **not required by the new submission list** but are still not true, and
+must not be claimed anywhere:
+
+- **No MainNet deployment.** The contract exists only on TestNet (App `768743428`).
+- **No Bazaar listing yet.** The discovery extension *is* implemented as of 2026-08-22 —
+  `api/src/x402.ts:4-8, 50-52` imports and registers `bazaarResourceServerExtension` from
+  `@x402/extensions/bazaar`, every priced route declares its real input/output shape, and the
+  `x402-global-challenge` tag is emitted in both `resource.tags` and `accepts[].extra.tag`. But
+  listing is a *side effect of a paid call against a publicly reachable URL*, not a registration
+  API, so nothing appears in the catalogue while the service runs only on `localhost`. Confirmed
+  absent 2026-08-22 from a 500-record sample of the live catalogue. One paid call against the
+  deployed URL is all that is outstanding — see
+  [`05_API/Bazaar_Discovery.md`](05_API/Bazaar_Discovery.md) §7.
+- **No external party has paid for this service.** Payments now settle between *independent*
+  accounts — patient `56LFG5EE…`, agent `UYBTLPHS…` and service `2WDV2J2F…` are three distinct
+  keypairs — but both of those wallets were funded from the project's own account, because TestNet
+  ALGO and USDC have no other practical source. Real, settled, on a public ledger, between separate
+  parties; still not external revenue, and never described as such.
+
+---
+
+## Submission requirements
+
+| # | Requirement | Status | Evidence |
+|---|---|---|---|
+| 1 | **Public GitHub repository with a proper README** | ✅ Done | <https://github.com/Hydra-Of-Malice/Medrail> — public, with a full `README.md`. Requirement-by-requirement README breakdown in the next table. |
+| 2 | **Live and working project, deployed and accessible** | ⛔ **NOT DONE — hard blocker** | Nothing is hosted. Configs are ready (`api/fly.toml`, `api/Dockerfile`, `web/Dockerfile`); the deploy has never been executed. See the blocker table above and [`08_Deployment/GO_LIVE_RUNBOOK.md`](08_Deployment/GO_LIVE_RUNBOOK.md) §1–§2. |
+| 3 | **MVP demo video, max 3 minutes (YouTube or public Google Drive)** | ⛔ **NOT DONE — hard blocker** | Script written and timed to 3:00 — [`11_Hackathon/Demo_Video_Script.md`](11_Hackathon/Demo_Video_Script.md). No recording exists. No link exists. |
+| 4 | **x402 payment flow live on Algorand TestNet** | ✅ Done | Multiple real settled TestNet USDC payments through the live flow. Asset `10458941` (TestNet USDC), scheme `exact`, x402 v2. Full log: [`PROOF.md`](PROOF.md) §6 and §9. Reproduce with `cd api && npx tsx scripts/e2e-proof.ts`. |
+| 5 | **Demonstrate an actual x402 transaction on Lora** | ✅ Done, multiple | [$0.02 triage](https://lora.algokit.io/testnet/transaction/POAQNSOPPW6TB5DU76VHYZTS7X2SJQRUNVCNR55GRO7TYXOKUF4Q) · [$0.02 interaction](https://lora.algokit.io/testnet/transaction/W3Z55BZYCALOFZFSXI75MR22OVVEX7JRSK7T2NRATKBDU7Y4OL5A) · [$0.05 record](https://lora.algokit.io/testnet/transaction/5CO5XV7M5H6WLFI2D5M7UODUOF2IUQNM3FOSKH5VA66SVQTLBBDQ) · [the audit entry that paid call produced](https://lora.algokit.io/testnet/transaction/5HYV5B2LO5DVHTTAOZMQKJNEYK6VICRVAINAZ5YBVW3QUR64TBKA) · plus the earlier [`OYRQRKYA…`](https://lora.algokit.io/testnet/transaction/OYRQRKYA7WUKBVLWTOFJSJMZFBW7VCNGP5VGH5EBUJGRCVFQFJRQ) settlement and the [full consent composition](https://lora.algokit.io/testnet/transaction/5DKFUULWLTNGKLYLH3TT44F22MHKOFRCEO6K4JVEPOPETFBYOESA). Plus the autonomous agent run, paid from an **independent** wallet: [$0.02 triage](https://lora.algokit.io/testnet/transaction/DOSKCNKJRXIMY2UDSDZ377LKPZQIZJW5JHCGUAGKOYV6KUCFYKIA) · [$0.02 interaction](https://lora.algokit.io/testnet/transaction/PLBFDDADW576IUCH62HGGYI4AJQNO3QXSENNDIBKAORWVMP7NVHQ) · [$0.05 record](https://lora.algokit.io/testnet/transaction/COMJ3TQOGTKP6LXDJS7HZY7B45QZJQWXXJ23HQ3IDDQYD7GRK36A), sender ≠ receiver on the indexer. Contract itself: [App `768743428`](https://lora.algokit.io/testnet/application/768743428). |
+| 6 | **Payment flow through the GoPlausible facilitator** | ✅ Done | `api/src/x402.ts:1-17` constructs `HTTPFacilitatorClient` against `https://facilitator.goplausible.xyz` — no mock, no local stub. Verified live: the facilitator's `/supported` reports Algorand **TestNet and MainNet**, scheme `exact`, x402 **v2**, with fee sponsorship. Settled payments carry `fee: 0` because the facilitator sponsors them — the agent needs USDC, not ALGO. Decoded `PAYMENT-REQUIRED` header in [`PROOF.md`](PROOF.md) §3 matches the facilitator's own `/supported` response field for field. |
+| 7 | **`@x402-avm` dependencies in `package.json`** | ✅ Done | `api/package.json`: `@x402/avm`, `@x402/core`, `@x402/extensions`, `@x402/fetch`, `@x402/hono` — all `2.21.0`. `web/package.json`: `@x402/avm`, `@x402/core`, `@x402/fetch`. All five are genuinely imported and executed, including `@x402/extensions` — `api/src/x402.ts:4-8, 50-52` registers `bazaarResourceServerExtension` from the `@x402/extensions/bazaar` subpath, and the extension's `enrichDeclaration` hook is observable in the live 402 challenge (`extensions.bazaar.info.input.method`). See [`05_API/Bazaar_Discovery.md`](05_API/Bazaar_Discovery.md). |
+| 8 | **Judges review the code to verify x402 is genuinely integrated, not just mentioned** | ✅ Done | `api/src/app.ts:48-72` gates **three** routes behind `paymentMiddleware` from `@x402/hono`, prices declared in one place. `api/src/x402.ts` registers `ExactAvmScheme` from `@x402/avm/exact/server` against the real facilitator. Client side: `api/scripts/agent-demo.ts` uses `@x402/fetch`'s `wrapFetchWithPayment` and `@x402/avm/exact/client` to actually sign and settle. **Delete x402 from this repo and MedRail has no access control, no rate ceiling, and no monetisation — the payment call *is* the product's core flow, not a paywall in front of a free API.** |
+
+## README requirements
+
+| Required in the README | Status | Where in [`README.md`](../README.md) |
+|---|---|---|
+| Problem + solution | ✅ Done | "The agent problem this solves" and "Why it matters" |
+| Local run / test instructions | ✅ Done | "Quick start" — contract, API, web, each with the exact command; "Testing" for the suites |
+| Architecture diagram | ✅ Done | "Architecture" — Mermaid flowchart, renders inline on GitHub |
+| ≥1 Algorand TestNet x402 transaction link | ✅ Done | Four Lora links in "Watch an agent actually do it", more in "What is actually proven" |
+| The product's USP | ✅ Done | "USP — what makes this different" — five numbered differentiators, plus an explicit "What is *not* novel, stated plainly" |
+
+The README's "Known limitations" block has been corrected to match: it now reads *"No external
+party has paid for this service. Payments settle between independent accounts, but the agent's
+TestNet float was seeded from our own wallet."* That is the precise claim, and the only one this
+project can make about payments today.
+
+---
 
 ## Entry type
 
-The rules recognize three entry types:
+The rules recognise three entry types:
 
 | Type | Definition | MedRail |
 |---|---|---|
 | Standard | One paid endpoint | — |
-| **Composite** | **Several endpoints sharing one `payTo` address** | **✅ This is MedRail: `/v1/triage`, `/v1/interaction-check`, `/v1/records/summary` — three priced routes, one `payTo` address (see `api/.env` `PAY_TO_ADDRESS`, wired in `api/src/x402.ts`).** |
-| Orchestrator | A service that itself pays other x402 endpoints | Deliberately not claimed for this submission — see `docs/ARCHITECTURE.md` "What a v2 Orchestrator layer would add." Not built, not pretended to be built. |
+| **Composite** | **Several endpoints sharing one `payTo` address** | **✅ This is MedRail: `/v1/triage` ($0.02), `/v1/interaction-check` ($0.02), `/v1/records/summary` ($0.05) — three priced routes, one `payTo` address (`PAY_TO_ADDRESS`, wired in `api/src/x402.ts`, all three gated in `api/src/app.ts:48-72`).** |
+| Orchestrator | A service that itself pays other x402 endpoints | Deliberately not claimed — see [`ARCHITECTURE.md`](ARCHITECTURE.md) "What a v2 Orchestrator layer would add." Not built, not pretended to be built. |
 
-## Entry requirements checklist
+---
 
-| Requirement | Status | Where |
-|---|---|---|
-| Build and test on TestNet | ✅ Done | `contracts/tests/test_consent.py` (14 tests, AVM-simulated) + `api/test/*.spec.ts` (18 tests) + a **real deployed TestNet App ID** (`768743428`), a full consent lifecycle proven live on-chain, and **a real settled x402 payment** — see `docs/PROOF.md` §5–6 |
-| Deploy to Algorand Mainnet | ⏳ Pending — user action | Requires the team's own funded MainNet wallet. Script is ready and now TestNet-*proven for real*, not just dry-run-verified: `contracts/scripts/deploy_testnet.py` parameterized by network; MainNet run documented step-by-step in `docs/DEPLOYMENT.md`. Not something this build performs autonomously — see `docs/IMPLEMENTATION_PLAN.md` §5 for why. |
-| Public HTTPS endpoint using the GoPlausible facilitator | ✅ Wired and proven, ⏳ hosting pending | `api/src/x402.ts` registers the real facilitator (`https://facilitator.goplausible.xyz`); `docs/PROOF.md` §6 shows a real payment settling through it. Deployment configs ready (`api/Dockerfile`, `api/fly.toml`); standing up the *public* URL needs the team's own hosting account (see `docs/IMPLEMENTATION_PLAN.md` §5). |
-| Enable Bazaar discovery, tag `x402-global-challenge` | ⏳ Pending — user action | The backend's route/price/description metadata is already in the shape Bazaar's discovery extension expects — each priced route declares `description` and `mimeType` alongside its `accepts[]` (`api/src/x402.ts:19-33`). **Correction (2026-08-21 review): `@x402/extensions` is declared in `api/package.json` but is not imported anywhere in the codebase, so the discovery extension is NOT wired up — only the metadata shape is compatible.** The tag itself is applied when submitting the live MainNet endpoint through Bazaar's own UI — a competition-entry action tied to the team's identity, deliberately left as a documented manual step in `docs/DEPLOYMENT.md` rather than something performed on the team's behalf. |
-| Complete ≥1 real payment confirming USDC receipt | ✅ Done on TestNet (multiple), ⏳ MainNet pending | `docs/PROOF.md` §6 and §9 — including the consent-gated composition (grant → paid call → on-chain audit entry, three real transactions) — a real settled TestNet USDC transaction, independently confirmed on the public indexer. The MainNet equivalent needs only the MainNet deployment above; `api/scripts/e2e-proof.ts` runs unmodified against MainNet given a funded account and `ALGOD_URL` pointed at `mainnet-api.algonode.cloud`. |
-| Endpoint appears in Bazaar and the leaderboard | ⏳ Automatic once the above are done | GoPlausible's leaderboard tracks facilitator payment volume automatically — no separate registration beyond the Bazaar tag. |
+## x402 is machine-to-machine — the evidence, executed rather than asserted
+
+The organisers stress that x402 is a **machine-to-machine** protocol, not human-to-machine. MedRail's
+strongest single artefact is the one that demonstrates exactly that:
+
+```bash
+cd api && npx tsx scripts/agent-demo.ts
+```
+
+`api/scripts/agent-demo.ts` is an autonomous clinical-triage agent with **no MedRail account, no API
+key, and nothing about MedRail hardcoded except the base URL**. In one run it:
+
+1. **Discovers** the service by reading `GET /` — the eight endpoints, their prices, which are gated,
+   the consent contract's App ID, and its ARC-56 spec URL.
+2. **Decides** which of the discovered services the clinical case actually requires.
+3. **Pays** per call in USDC over x402, settling on Algorand each time.
+4. **Checks the free consent oracle before spending** on the gated endpoint — it refuses to pay to
+   be told no. That single decision is what separates an agent reasoning about cost from a script.
+5. **Reports** exactly what it spent.
+
+Verified run: **$0.09 total across 3 settled Algorand transactions — zero accounts, zero API keys,
+zero invoices**, plus a fourth transaction writing the access to the patient's on-chain audit trail.
+
+| Step | Call | Cost | Transaction |
+|---|---|---|---|
+| Discover | `GET /` | $0.00 | — (free service index) |
+| Triage | `POST /v1/triage` | $0.02 | [`DOSKCNKJ…`](https://lora.algokit.io/testnet/transaction/DOSKCNKJRXIMY2UDSDZ377LKPZQIZJW5JHCGUAGKOYV6KUCFYKIA) |
+| Interaction check | `POST /v1/interaction-check` | $0.02 | [`PLBFDDAD…`](https://lora.algokit.io/testnet/transaction/PLBFDDADW576IUCH62HGGYI4AJQNO3QXSENNDIBKAORWVMP7NVHQ) |
+| Consent oracle | `GET /v1/consent/status` | **$0.00** | — (free, and checked *before* spending) |
+| Record summary | `POST /v1/records/summary` | $0.05 | [`COMJ3TQO…`](https://lora.algokit.io/testnet/transaction/COMJ3TQOGTKP6LXDJS7HZY7B45QZJQWXXJ23HQ3IDDQYD7GRK36A) |
+| Audit append | (produced by that paid call) | — | [`E6ZTGEAO…`](https://lora.algokit.io/testnet/transaction/E6ZTGEAOTLJQDYOUVBYJYL7LKTXHBGXGVTBKN3SR2NUPWJ2PIGQA) — names the **agent** as requester |
+
+**Three roles, three accounts.** The agent (`UYBTLPHS…`) pays; the patient (`56LFG5EE…`) granted
+that specific agent access in a [transaction the patient signed
+themselves](https://lora.algokit.io/testnet/transaction/IG4XEBTMRCKI724ZVHSYUN4ECTYBXAGZM5N35NP4Y3ZVWECG7WUQ),
+with the backend nowhere in that path; the service (`2WDV2J2F…`) receives. Three separate keypairs,
+and the indexer shows sender ≠ receiver on every one of the three payments. The one thing this does
+**not** show is external demand: both the agent's and the patient's wallets were funded from the
+project's own account, because TestNet ALGO and USDC have no other practical source. Separate
+parties, not external revenue.
+
+What this proves is the *protocol path*: discovery → decision → 402 challenge → signed payment →
+facilitator settlement → served resource, with no human in the loop at any step — and now with a
+payer whose key the service does not hold. Full evidence: [`PROOF.md`](PROOF.md) §10.
+
+---
 
 ## Judging criteria
 
-> Real usage, use-case quality, technical execution, and long-term potential.
+> The organisers weigh **working implementation and overall quality over idea and presentation.**
 
-**Real usage.** MedRail's two open endpoints (`/v1/triage`, `/v1/interaction-check`) are
-deliberately priced at $0.02, require no account, no API key, and no prior relationship with
-MedRail — any x402 client, including another hackathon team's own agent, can call and pay in one
-round trip. This is the whole reason the endpoint catalog is split into open-vs-consent-gated
-(see `docs/ARCHITECTURE.md`): a consent-gated-only design cannot generate leaderboard volume by
-construction, since it requires a pre-existing patient/requester relationship.
+**Working implementation.** This is where blocker #2 hurts most and where the rest is strongest:
 
-**Use-case quality.** Payment is not a paywall bolted in front of an otherwise-free product —
-remove x402 and MedRail has no rate-limiting, no monetization, and no mechanism at all; the
-payment call *is* the product's core flow. The consent-gated endpoint additionally demonstrates
-a genuinely new pattern the rules call out for bonus consideration: an x402 payment and an
-on-chain consent check composed together, where the same paid call is simultaneously "pay for
-compute" and "prove you were allowed to see this."
-
-**Technical execution.** Concretely, not by assertion:
-- A real Algorand Python smart contract, compiled with the current `puyapy` 5.9.0 compiler,
-  14 passing unit tests against the official AVM simulator (`algorand-python-testing`).
-- A real backend verified against the *live* GoPlausible facilitator during development — the
-  exact `PAYMENT-REQUIRED` header decoded in `docs/PROOF.md` shows the real TestNet USDC asset
-  ID, the real fee-sponsorship address, and the correct `$0.02 → 20000` unit conversion, all
-  matching the facilitator's own `/supported` response.
+- A real Algorand Python smart contract, compiled with `puyapy` 5.9.0, deployed and live on TestNet
+  as App `768743428`, with a **full consent lifecycle proven on-chain** — request → grant →
+  `check_access=true` → revoke → `check_access=false`, every step a confirmed transaction
+  ([`PROOF.md`](PROOF.md) §5).
+- **Source-to-chain verification**: `contract.py` → reproducible compile → committed TEAL → algod
+  assemble → **byte-identical** to the bytecode running at App `768743428` ([`PROOF.md`](PROOF.md) §7).
+  The deployed program *is* this repository's source, provably.
+- A backend verified against the *live* GoPlausible facilitator, not a mock — the decoded
+  `PAYMENT-REQUIRED` header carries the real TestNet USDC asset id, the real fee-sponsorship address,
+  and an SDK-computed `$0.02 → 20000` conversion, all matching the facilitator's `/supported`.
 - A real browser-side payment flow: the Next.js demo constructs, signs, and submits an actual
-  Algorand transaction group client-side using the SDK's `ClientAvmSigner` interface — verified
-  working end-to-end through to a facilitator settlement attempt (see `docs/PROOF.md`).
-- 73 automated tests total across contract and API, all passing, all runnable with a single
-  command (see `docs/DEPLOYMENT.md` "Verify everything").
+  Algorand transaction group client-side through the SDK's `ClientAvmSigner` interface.
+- **28 contract tests** (official AVM simulator, `algorand-python-testing`) + **45 API tests**
+  = **73**, all passing; API and web both typecheck and build. One command each, in
+  [`08_Deployment/GO_LIVE_RUNBOOK.md`](08_Deployment/GO_LIVE_RUNBOOK.md) §0.
+- Nothing is publicly hosted. Until that changes, a judge can verify all of the above only by
+  cloning and running it, or by reading the chain — not by opening a URL.
 
-**Long-term potential.** The consent layer is deliberately generic (scope is a free-form
-string, not hardcoded to "records:summary"), so the same contract supports the full endpoint
-catalog sketched in the earlier strategy document without a redesign. The Composite-to-
-Orchestrator upgrade path is a real, scoped, described next step, not a vague aspiration — see
-`docs/ARCHITECTURE.md`.
+**Overall quality.** The engineering review that produced
+[`ENGINEERING_GAP_REPORT.md`](ENGINEERING_GAP_REPORT.md) found 34 issues in this project's own code
+and closed 22, including an impersonation vulnerability (G-01) that let a caller pay with their own
+key while claiming to be a different, authorised requester. The fix — recovering the payment signer's
+address and refusing any mismatch — is demonstrated as a live attack-and-rejection by
+`api/scripts/verify-g01-fix.ts`. The 12 findings still open are listed with severities rather than
+quietly dropped.
+
+**Real usage.** The two open endpoints are priced at $0.02, need no account, no API key, and no prior
+relationship — any off-the-shelf x402 client, including another team's agent, can call and pay in one
+round trip. `api/scripts/agent-demo.ts` is exactly that client, run from an independent wallet. That
+is why the catalogue is split open-vs-consent-gated: a consent-gated-only design cannot generate
+external volume by construction, since it presupposes a patient relationship.
+
+**Use-case quality.** The consent-gated endpoint composes an x402 payment with an on-chain
+authorisation check, so one paid call is simultaneously *"pay for compute"*, *"prove you were allowed
+to see this"*, and *"write it to the patient's audit trail."* The payment authenticates the caller;
+the ledger authorises them.
+
+**Long-term potential.** The consent scope is a free-form string, not hardcoded to
+`records:summary`, so the same contract carries a much wider endpoint catalogue without redesign.
+The Composite → Orchestrator upgrade is a scoped, described next step in
+[`ARCHITECTURE.md`](ARCHITECTURE.md), not a vague aspiration.
+
+---
 
 ## What this document does not claim
 
-No MainNet transaction has been made by this build process, and none will be — see
-`docs/IMPLEMENTATION_PLAN.md` §5 for the specific, principled reasons (real money, and it is
-literally the act of entering the competition under the team's own identity). Every "✅ Done"
-above is independently verifiable by running the referenced tests or reading the referenced
-proof artifacts; every "⏳ Pending" above is a specific, bounded action described step-by-step in
-`docs/DEPLOYMENT.md`.
+No MainNet transaction has been made. Nothing is deployed to a public URL. Nothing is listed on
+Bazaar. No demo video exists. No external party has paid for this service — the agent's TestNet
+float came from the project's own wallet, so the payments are between independent accounts but are
+not external revenue.
+
+Every ✅ above is verifiable by running the referenced command or opening the referenced Lora link.
+Every ⛔ above is a specific, bounded action with commands in
+[`08_Deployment/GO_LIVE_RUNBOOK.md`](08_Deployment/GO_LIVE_RUNBOOK.md) and an ordered plan in
+[`GO_LIVE_CHECKLIST.md`](GO_LIVE_CHECKLIST.md).

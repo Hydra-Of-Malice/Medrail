@@ -116,8 +116,12 @@ info:
       it by hand.
     - **No observability.** No metrics, tracing, or alerting (G-15). Structured error
       logs exist; nothing consumes them.
-    - **Not deployed.** There is no public HTTPS instance, no MainNet deployment, and
-      every payment settled to date is a self-payment from the project's own account.
+    - **Not deployed.** There is no public HTTPS instance and no MainNet deployment.
+    - **No external payer.** Payments settle between independent accounts — the agent
+      pays from its own keypair (`UYBTLPHS…`), which this service does not control, to
+      the `payTo` address (`2WDV2J2F…`) — but that agent's TestNet USDC float was seeded
+      from the project's own wallet, because TestNet USDC has no other practical source.
+      No external or unrelated party has paid for this service.
   contact:
     name: MedRail repository documentation
     url: https://lora.algokit.io/testnet/application/768743428
@@ -667,6 +671,11 @@ paths:
         `/v1/health` is fully compatible with all three priced endpoints returning
         503 `PAYMENT_FACILITATOR_UNAVAILABLE`.
 
+        The `chain` block reports the two balances that keep the audit trail alive, read
+        stale-while-revalidate so the response never waits on algod. `chain.warning` is the
+        signal worth watching before a demo: once audit writes become unaffordable, paid
+        calls still return 200 and quietly degrade to `auditStatus: "pending"`.
+
         `api/fly.toml` wires it as the platform health check on exactly that understanding
         — a 30-second interval with a 10-second grace period. That closes defect D-6 for
         liveness; readiness remains unaddressed (requirement OPS-001).
@@ -674,8 +683,11 @@ paths:
       x-medrail-requirements: [FR-016, OPS-001, REL-005]
       x-medrail-evidence: |-
         api/test/x402-flow.spec.ts "health check is free and unpaid" asserts 200 and
-        body.ok === true. The reviewer also confirmed it stays 200 with the facilitator
-        unreachable (requirement REL-005, VALIDATED).
+        body.ok === true; "reports chain-account health without ever blocking on the
+        network" asserts the response returns in under a second, and "populates exactly one
+        of chain / chainError" pins that invariant. api/test/algorandService.spec.ts covers
+        the sampler itself across 11 cases. The reviewer also confirmed it stays 200 with
+        the facilitator unreachable (requirement REL-005, VALIDATED).
       x-medrail-sideEffects: none
       x-medrail-idempotent: true
       x-medrail-rateLimited: false
@@ -695,7 +707,17 @@ paths:
                 service: medrail-api
                 network: testnet
                 consentAppId: 768743428
-                time: '2026-08-21T09:14:02.115Z'
+                chain:
+                  operatorAddress: 2WDV2J2FTWF535SMSUVEBOF5IGXF2OTV7ZZTLTCRBXPVS32UMLOPTI64GE
+                  operatorSpendableMicroAlgo: 96000
+                  appAccountAddress: CCO26Y6Z56DDZ3OELO2UKJMIPJVSIT52I23F2MPMR52JBM3HQZZNUZNOR4
+                  appAccountSpendableMicroAlgo: 3866300
+                  microAlgoPerAuditWrite: 1000
+                  estimatedAuditWritesRemaining: 96
+                  warning: null
+                  sampledAt: '2026-08-22T16:32:19.279Z'
+                chainError: null
+                time: '2026-08-22T16:32:22.481Z'
 
   /:
     get:
@@ -1298,7 +1320,7 @@ components:
 
     HealthResponse:
       type: object
-      required: [ok, service, network, consentAppId, time]
+      required: [ok, service, network, consentAppId, chain, chainError, time]
       properties:
         ok:
           type: boolean
@@ -1311,10 +1333,70 @@ components:
           $ref: '#/components/schemas/NetworkName'
         consentAppId:
           type: [integer, 'null']
+        chain:
+          oneOf:
+            - $ref: '#/components/schemas/ChainAccountHealth'
+            - type: 'null'
+          description: |-
+            The last successful sample of the two accounts that fund the audit trail, or
+            `null` if none has landed. Exactly one of `chain` and `chainError` is non-null.
+        chainError:
+          type: [string, 'null']
+          description: Why there is no sample yet. Non-null only when `chain` is null.
         time:
           type: string
           format: date-time
           description: Server wall clock, `new Date().toISOString()` — ISO-8601 UTC with milliseconds.
+
+    ChainAccountHealth:
+      type: object
+      description: |-
+        `log_access` is signed by the operator, which pays the fee, while the audit box it
+        writes lives under the application account, which pays the box MBR. Either running
+        dry stops audit writes — and the caller cannot tell, because the paid call still
+        returns 200 and degrades to `auditStatus: "pending"`.
+
+        Sampled stale-while-revalidate and primed at boot, so reading this never waits on
+        algod. A liveness endpoint that blocks on a third-party network call is not a
+        liveness endpoint.
+      required:
+        - operatorAddress
+        - operatorSpendableMicroAlgo
+        - appAccountAddress
+        - appAccountSpendableMicroAlgo
+        - microAlgoPerAuditWrite
+        - estimatedAuditWritesRemaining
+        - warning
+        - sampledAt
+      properties:
+        operatorAddress:
+          $ref: '#/components/schemas/AlgorandAddress'
+        operatorSpendableMicroAlgo:
+          type: integer
+          minimum: 0
+          description: Balance minus minimum balance. What is actually spendable on fees.
+        appAccountAddress:
+          oneOf:
+            - $ref: '#/components/schemas/AlgorandAddress'
+            - type: 'null'
+          description: Null when no `CONSENT_APP_ID` is configured.
+        appAccountSpendableMicroAlgo:
+          type: [integer, 'null']
+          minimum: 0
+        microAlgoPerAuditWrite:
+          type: integer
+          const: 1000
+          description: The operator's fee per `log_access`. Box MBR is charged to the app account, not this one.
+        estimatedAuditWritesRemaining:
+          type: integer
+          minimum: 0
+          description: The smaller of what each account can still fund. Deliberately conservative.
+        warning:
+          type: [string, 'null']
+          description: Non-null below 20 remaining writes, and again at zero with a different message.
+        sampledAt:
+          type: string
+          format: date-time
 
     ServiceIndexResponse:
       type: object

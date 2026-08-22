@@ -124,8 +124,35 @@ needing this repository.
 ## `GET /v1/health` — free
 
 ```json
-{ "ok": true, "service": "medrail-api", "network": "testnet", "consentAppId": 12345, "time": "..." }
+{
+  "ok": true,
+  "service": "medrail-api",
+  "network": "testnet",
+  "consentAppId": 768743428,
+  "chain": {
+    "operatorAddress": "2WDV2J2F…",
+    "operatorSpendableMicroAlgo": 96000,
+    "appAccountAddress": "CCO26Y6Z…",
+    "appAccountSpendableMicroAlgo": 3866300,
+    "microAlgoPerAuditWrite": 1000,
+    "estimatedAuditWritesRemaining": 96,
+    "warning": null,
+    "sampledAt": "2026-08-22T16:32:19.279Z"
+  },
+  "chainError": null,
+  "time": "..."
+}
 ```
+
+The `chain` block is the operational signal that matters: `log_access` is paid for by the operator,
+and the audit box it writes is paid for by the application account. If either runs dry, audit writes
+stop — and the caller never sees it, because the paid call still returns 200 and degrades to
+`auditStatus: "pending"`. `warning` is non-null once fewer than 20 writes are affordable.
+
+The read is stale-while-revalidate: it is served from the last sample and **never waits on algod**,
+because a liveness endpoint that blocks on a third-party network call is not a liveness endpoint.
+`chainError` appears instead of `chain` when no sample has landed yet — which is why exactly one of
+the two is ever populated.
 
 ## On-chain, not through this API
 

@@ -3,7 +3,29 @@
 
 **Purpose:** analyse `api/Dockerfile` and `web/Dockerfile` line by line, state exactly what lands in each image, document defects D-1…D-6, and supply corrected files that can be committed as-is.
 
-**Status of this document:** authored 2026-08-21 against commit `32ffd73`. **Neither image has ever been built.** `.github/workflows/ci.yml` contains no `docker build` step, and no container registry is referenced anywhere in the repo. Both images are therefore **UNVALIDATED** (NFR-007), and **no image size, build time, or layer count is stated below** — none has ever been measured. Everything in §1–§4 is derived by reading the Dockerfiles against `api/src/config.ts`, `api/src/app.ts`, `api/src/services/interactionChecker.ts` and `api/tsconfig.json`. Everything in §5–§8 is marked **RECOMMENDED** and is not in the repo.
+**Status of this document:** authored 2026-08-21 against commit `32ffd73`; both images **built and run on 2026-08-22**, which is what changed the status below from analysis to measurement.
+
+| Image | Build command | Size | Layers | Boots? |
+|---|---|---|---|---|
+| `medrail-api` | `docker build -f api/Dockerfile -t medrail-api .` (context = **repo root**) | **109.4 MB** | 12 | yes |
+| `medrail-web` | `docker build -f web/Dockerfile -t medrail-web ./web` (context = **`web/`**) | **285.0 MB** | 10 | yes |
+
+The two contexts differ, and getting it wrong fails immediately: the API image needs the repo root so
+it can copy `contracts/artifacts/MedRailConsent.arc56.json`, while the web image's `COPY` paths have
+no `web/` prefix, so building it from the root fails on `"/package.json": not found`. Both
+Dockerfiles now carry that instruction as a header comment.
+
+Verified inside the running API container: `/v1/health` returns `consentAppId: 768743428` with a live
+`chain` block; `GET /` advertises all 8 endpoints; `/v1/consent/arc56` returns 200; and
+`POST /v1/triage` returns a 402 carrying `resource.tags` including `x402-global-challenge`,
+`accepts[0].extra.tag`, and `extensions.bazaar.info.input.method: "POST"`. The web container serves
+the page on port 3000 with HTTP 200.
+
+**Still true:** `.github/workflows/ci.yml` contains no `docker build` step and no container registry
+is referenced anywhere in the repo, so nothing *automatically* checks that these keep building —
+NFR-007 is validated by hand, once, not by the pipeline. Everything in §1–§4 is derived by reading
+the Dockerfiles against `api/src/config.ts`, `api/src/app.ts`, `api/src/services/interactionChecker.ts`
+and `api/tsconfig.json`. Everything in §5–§8 is marked **RECOMMENDED** and is not in the repo.
 
 ---
 
@@ -129,7 +151,7 @@ Note the asymmetry that makes this hard to catch: the health endpoint reports `c
 17  CMD ["npm", "start"]
 ```
 
-Build context here is `web/` (paths are context-relative with no `web/` prefix), so the command is `docker build -t medrail-web ./web`.
+Build context here is `web/` (paths are context-relative with no `web/` prefix), so the command is `docker build -f web/Dockerfile -t medrail-web ./web`. Confirmed 2026-08-22: building from the repo root fails on `"/package.json": not found`.
 
 | Line | What it does | Assessment |
 |---|---|---|

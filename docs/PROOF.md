@@ -144,7 +144,8 @@ This proof run paid from and to the same account (the deployer, used as both `PR
 payer and the API's configured `PAY_TO_ADDRESS`) — a deliberate choice to avoid needing a second
 funded account, not a shortcut in the payment logic itself: the facilitator verified and settled
 this exactly as it would any other `exact`-scheme Algorand payment, with no special-casing for
-same-account transfers.
+same-account transfers. That constraint has since been lifted: §10 records an independently
+provisioned agent wallet paying `PAY_TO_ADDRESS` from a keypair the service does not hold.
 
 **The script is repeatable, and was re-run during the 2026-08-21 review to confirm the flow still
 works today rather than only historically.** That run settled
@@ -342,6 +343,130 @@ that gap and makes the proof **repeatable**, not a one-off.
 
 ---
 
+## 10. An autonomous agent paying as a third party — three separate accounts
+
+Run 2026-08-22 against `http://localhost:4021`. Artefact: `contracts/artifacts/agent-run.json`.
+
+Every payment before this one came from the account that also receives them. The x402 mechanics are
+identical either way — the facilitator does not special-case a self-transfer — but it is a fair
+thing for a reviewer to discount, so two independent wallets were provisioned.
+
+| Role | Account | Holds its own key? |
+|---|---|---|
+| **Patient** | [`56LFG5EE…`](https://lora.algokit.io/testnet/account/56LFG5EEHIJ4ZVMPHUMJH6BST2O3D4DMG3AWRZ2SN7Y3LLUDVUDILO66YM) | yes — signs its own grants |
+| **Agent** (payer) | [`UYBTLPHS…`](https://lora.algokit.io/testnet/account/UYBTLPHS6APCXVBDPASQMUIQCEORDIR6EMTVMNSDPSVRSR5HEPKQ5GO4YQ) | yes — the service cannot sign for it |
+| **Service** (`payTo`, operator) | [`2WDV2J2F…`](https://lora.algokit.io/testnet/account/2WDV2J2FTWF535SMSUVEBOF5IGXF2OTV7ZZTLTCRBXPVS32UMLOPTI64GE) | yes |
+
+Three distinct accounts, three distinct keypairs. Earlier runs had the patient and the service
+sharing one account — three *roles* across two accounts — which is why they were re-done.
+
+### Provisioning
+
+| Step | Transaction |
+|---|---|
+| Fund the agent: 260,000 µALGO | [`YKGXFTZU…`](https://lora.algokit.io/testnet/transaction/YKGXFTZU75TWIKUWO35TEHCSND5TFOFE3BKWTFTZD3LA65TGZUIA) |
+| Agent opts **itself** in to USDC (ASA `10458941`) | [`KOALP5W2…`](https://lora.algokit.io/testnet/transaction/KOALP5W2EDFXU5DRDOTUZYQBLWBOJZVKVOXBG6Y7YZYCSPAQM5PA) |
+| $1.00 USDC float for the agent | [`3ODGZ44Z…`](https://lora.algokit.io/testnet/transaction/3ODGZ44ZUMQAGUYTX7763FZH2U3A5MN3KQTYMXZ5I4RPGRACJGXA) |
+| Fund the patient: 150,000 µALGO (it never pays for anything — this covers signing) | [`GCYA23PH…`](https://lora.algokit.io/testnet/transaction/GCYA23PHR2J43WBOXOXZ7IWCCI2VFSCTUXV7ZQHBLIA54TSTFWLA) |
+
+Scripts: `api/scripts/provision-agent-wallet.ts`, `api/scripts/provision-patient-wallet.ts`. Neither
+writes key material to disk.
+
+### The patient grants that specific agent access
+
+```bash
+npx tsx scripts/grant-consent.ts UYBTLPHS6APCXVBDPASQMUIQCEORDIR6EMTVMNSDPSVRSR5HEPKQ5GO4YQ
+```
+
+Signed by the patient's own key, submitted straight to Algorand — the backend is not in this path:
+[`IG4XEBTM…`](https://lora.algokit.io/testnet/transaction/IG4XEBTMRCKI724ZVHSYUN4ECTYBXAGZM5N35NP4Y3ZVWECG7WUQ)
+(round 66563915). Decoded from the indexer:
+
+```
+signer    : 56LFG5EEHIJ4ZVMPHUMJH6BST2O3D4DMG3AWRZ2SN7Y3LLUDVUDILO66YM   ← the patient
+requester : UYBTLPHS6APCXVBDPASQMUIQCEORDIR6EMTVMNSDPSVRSR5HEPKQ5GO4YQ   ← the agent
+scope     : records:summary
+duration  : 0   (never expires)
+```
+
+`check_access` then reports `granted=true`.
+
+### The run
+
+```bash
+npx tsx scripts/agent-demo.ts
+```
+
+The agent discovers the catalogue from `GET /` — 8 endpoints with prices and gates, the App ID, and
+the ARC-56 spec URL — with nothing hardcoded but the base URL. It then decides what the case needs:
+
+| Step | Cost | Result | Transaction | Round |
+|---|---|---|---|---|
+| `POST /v1/triage` | $0.02 | `EMERGENCY`, score 70 | [`DOSKCNKJ…`](https://lora.algokit.io/testnet/transaction/DOSKCNKJRXIMY2UDSDZ377LKPZQIZJW5JHCGUAGKOYV6KUCFYKIA) | 66563930 |
+| `POST /v1/interaction-check` | $0.02 | `MAJOR: warfarin + aspirin` | [`PLBFDDAD…`](https://lora.algokit.io/testnet/transaction/PLBFDDADW576IUCH62HGGYI4AJQNO3QXSENNDIBKAORWVMP7NVHQ) | 66563934 |
+| `GET /v1/consent/status` | **$0.00** | `granted=true` | — free, no transaction | — |
+| `POST /v1/records/summary` | $0.05 | consent verified on-chain, access audited | [`COMJ3TQO…`](https://lora.algokit.io/testnet/transaction/COMJ3TQOGTKP6LXDJS7HZY7B45QZJQWXXJ23HQ3IDDQYD7GRK36A) | 66563944 |
+
+**$0.09 total, three settled Algorand transactions**, plus a fourth the last call produced by itself:
+the [audit entry](https://lora.algokit.io/testnet/transaction/E6ZTGEAOTLJQDYOUVBYJYL7LKTXHBGXGVTBKN3SR2NUPWJ2PIGQA)
+written into the patient's on-chain trail at round 66563942. Its decoded arguments:
+
+```
+patient   : 56LFG5EEHIJ4ZVMPHUMJH6BST2O3D4DMG3AWRZ2SN7Y3LLUDVUDILO66YM
+requester : UYBTLPHS6APCXVBDPASQMUIQCEORDIR6EMTVMNSDPSVRSR5HEPKQ5GO4YQ   ← the agent, not the service
+scope     : records:summary
+endpoint  : /v1/records/summary
+action    : consent_checked
+```
+
+So the patient can see, on a public ledger, that *this specific agent* read their record.
+
+Note the ordering: the audit write confirms at round 66563942 and the payment at 66563944, because
+`@x402/hono` settles only after the handler has returned a success.
+
+The free consent check before the paid gated call is the design point worth noticing: the agent does
+not spend money to be told no.
+
+### Independently verified: sender ≠ receiver
+
+```bash
+curl https://testnet-idx.algonode.cloud/v2/transactions/COMJ3TQOGTKP6LXDJS7HZY7B45QZJQWXXJ23HQ3IDDQYD7GRK36A
+```
+
+| Field | Value |
+|---|---|
+| sender (agent) | `UYBTLPHS6APCXVBDPASQMUIQCEORDIR6EMTVMNSDPSVRSR5HEPKQ5GO4YQ` |
+| receiver (`payTo`) | `2WDV2J2FTWF535SMSUVEBOF5IGXF2OTV7ZZTLTCRBXPVS32UMLOPTI64GE` |
+| amount | 50000 base units = $0.05 |
+| asset | `10458941` (TestNet USDC) |
+| fee | 0 — facilitator-sponsored |
+| confirmed round | 66563944 |
+
+The same holds for both $0.02 payments.
+
+### What this does and does not establish
+
+**It does establish** that payments settle between genuinely independent accounts, that the payer's
+keypair is not controlled by the service, and that the consent grant runs from a patient account
+that is neither the payer nor the payee — which is the arrangement the product is actually about.
+
+**It does not establish external demand.** Both wallets were funded from the project's own account,
+because TestNet ALGO and USDC have no other practical source. No unrelated party has paid for this
+service. That remains the honest gap, and it is not one a TestNet deployment can close.
+
+### Earlier runs, superseded but still on-chain
+
+Kept for the record, since they are cited in older commits and are real settlements:
+
+| Run | Payer | Patient | Transactions |
+|---|---|---|---|
+| First agent run | service | service | `POAQNSOP…` · `W3Z55BZY…` · `5CO5XV7M…` · audit `5HYV5B2L…` |
+| Independent payer, patient = service | agent | service | `CY5H7GEY…` · `EWEUG2OF…` · `AQ3MJ77L…` · audit `CO3RPD2H…` · grant `CKZ5WYED…` |
+| Same, with the Bazaar declaration attached | agent | service | `DYVJBRFU…` · `L6T2XVHR…` · `2KCFQTZC…` · audit `HTBBNNRV…` |
+
+
+---
+
 ## Summary
 
 | Stage | Status | Evidence |
@@ -356,6 +481,7 @@ that gap and makes the proof **repeatable**, not a one-off.
 | **Deployed bytecode = this repo's source** | **VALIDATED** | reproducible compile + byte-identical assembly (§7) |
 | **On-chain audit-log write** | **VALIDATED** | tx `4YLKLQKK…`, `total_audit_entries = 1` (§9) |
 | **Full consent-gated composition** | **VALIDATED** | grant → check → pay → audit, 3 real txns (§9) |
+| **Autonomous agent, third-party payer** | **VALIDATED** | discovery → 3 paid calls → audit across **three separate accounts** (§10) |
 
 Every stage of the pipeline — contract deployment, the full consent lifecycle, and a real x402
 payment settling in TestNet USDC through the live GoPlausible facilitator — is now independently

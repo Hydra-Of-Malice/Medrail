@@ -346,7 +346,7 @@ Reference result already in the repo (`contracts/artifacts/e2e-proof.json`), ind
 | Fee | `0` — fee-sponsored by the facilitator's `extra.feePayer` |
 | Endpoint | `/v1/triage`, HTTP 200 |
 
-That run was a **self-payment** — sender and receiver are both the deployer address `2WDV2J2FTWF535SMSUVEBOF5IGXF2OTV7ZZTLTCRBXPVS32UMLOPTI64GE`, disclosed in `docs/PROOF.md` §6. It is a genuine facilitator-settled x402 payment, and it is the **only** one that exists. Do not describe it as payment volume.
+That run was a **self-payment** — sender and receiver are both the deployer address `2WDV2J2FTWF535SMSUVEBOF5IGXF2OTV7ZZTLTCRBXPVS32UMLOPTI64GE`, disclosed in `docs/PROOF.md` §6. It is a genuine facilitator-settled x402 payment, and it is no longer the only one. `scripts/provision-agent-wallet.ts` creates an **independent agent account** — `UYBTLPHS6APCXVBDPASQMUIQCEORDIR6EMTVMNSDPSVRSR5HEPKQ5GO4YQ`, whose key lives in `AGENT_MNEMONIC` and which the service does not control — and `scripts/agent-demo.ts` then settles from it to `payTo`, so sender ≠ receiver: `DOSKCNKJRXIMY2UDSDZ377LKPZQIZJW5JHCGUAGKOYV6KUCFYKIA` (round 66563930), `PLBFDDADW576IUCH62HGGYI4AJQNO3QXSENNDIBKAORWVMP7NVHQ`, `COMJ3TQOGTKP6LXDJS7HZY7B45QZJQWXXJ23HQ3IDDQYD7GRK36A` (round 66563944). That agent's TestNet USDC float was seeded from the project's own wallet, because TestNet USDC has no other practical source, so **no external party has paid for this service**. Do not describe any of it as payment volume.
 
 ### 9.3 What you cannot prove this way, and should know
 
@@ -462,7 +462,7 @@ Every entry below is either documented in the repo or was reproduced during revi
 
 ## 11. Verification checklist
 
-Run top to bottom. Every expected result below was actually observed by the reviewer on 2026-08-21.
+Run top to bottom. Every expected result below was actually observed by the reviewer — steps 1–12 on 2026-08-21, steps 13–15 on 2026-08-22.
 
 | # | Command | Expected | Requires funds? |
 |---|---|---|---|
@@ -478,6 +478,9 @@ Run top to bottom. Every expected result below was actually observed by the revi
 | 10 | `cd contracts && $PY scripts/deploy_testnet.py` | App ID + `deploy_testnet.json` | **ALGO** |
 | 11 | `cd contracts && $PY scripts/exercise_contract.py` | `Full cycle verified on real TestNet.` | **ALGO** |
 | 12 | `cd api && npx tsx scripts/e2e-proof.ts` | HTTP 200 + settled txid in `e2e-proof.json` | **ALGO + USDC** |
+| 13 | `cd api && npx tsx scripts/provision-agent-wallet.ts` | a new agent address + fund/opt-in/float txids, `agent-wallet.json` written; save the printed mnemonic to `api/.env` as `AGENT_MNEMONIC` | **ALGO + USDC** |
+| 14 | `cd api && npx tsx scripts/grant-consent.ts <agent address>` | patient-signed `grant_access` txid; the backend is not in the path | **ALGO** |
+| 15 | `cd api && npx tsx scripts/agent-demo.ts` | `$0.09` across 3 settled transactions, sender ≠ receiver on each | **agent's ALGO + USDC** |
 
 Steps 1–8 are the complete CI-equivalent verification and need no wallet at all. **Every one of them passes today** — the pipeline problem is CI-1 (wrong branch trigger), not a broken build.
 

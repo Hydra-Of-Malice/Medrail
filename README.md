@@ -34,6 +34,9 @@ prices, decides which services the case needs, checks the **free** consent oracl
 the gated endpoint, and pays for what it uses:
 
 ```
+  Agent wallet : UYBTLPHS…5GO4YQ
+  Patient      : 56LFG5EE…LO66YM   (a different party — granted this agent access on-chain)
+
 [1] DISCOVER — reading the service index at GET /
       MedRail: 8 endpoints advertised · x402 v2 · scheme "exact"
       consent contract: App 768743428 on testnet
@@ -47,11 +50,25 @@ the gated endpoint, and pays for what it uses:
   Zero accounts created. Zero API keys issued. Zero invoices.
 ```
 
-Every one of those payments is a real transaction on a public ledger.
-[$0.02 triage](https://lora.algokit.io/testnet/transaction/POAQNSOPPW6TB5DU76VHYZTS7X2SJQRUNVCNR55GRO7TYXOKUF4Q) ·
-[$0.02 interaction](https://lora.algokit.io/testnet/transaction/W3Z55BZYCALOFZFSXI75MR22OVVEX7JRSK7T2NRATKBDU7Y4OL5A) ·
-[$0.05 record](https://lora.algokit.io/testnet/transaction/5CO5XV7M5H6WLFI2D5M7UODUOF2IUQNM3FOSKH5VA66SVQTLBBDQ) ·
-[the on-chain audit entry it produced](https://lora.algokit.io/testnet/transaction/5HYV5B2LO5DVHTTAOZMQKJNEYK6VICRVAINAZ5YBVW3QUR64TBKA)
+**Three separate accounts, three separate keypairs.** The patient
+([`56LFG5EE…`](https://lora.algokit.io/testnet/account/56LFG5EEHIJ4ZVMPHUMJH6BST2O3D4DMG3AWRZ2SN7Y3LLUDVUDILO66YM))
+granted *that specific agent* access in a transaction
+[they signed themselves](https://lora.algokit.io/testnet/transaction/IG4XEBTMRCKI724ZVHSYUN4ECTYBXAGZM5N35NP4Y3ZVWECG7WUQ),
+with the backend nowhere in that path. The agent
+([`UYBTLPHS…`](https://lora.algokit.io/testnet/account/UYBTLPHS6APCXVBDPASQMUIQCEORDIR6EMTVMNSDPSVRSR5HEPKQ5GO4YQ))
+pays. MedRail receives, and can sign for neither of the others. The indexer confirms sender ≠ receiver
+on every payment:
+[$0.02 triage](https://lora.algokit.io/testnet/transaction/DOSKCNKJRXIMY2UDSDZ377LKPZQIZJW5JHCGUAGKOYV6KUCFYKIA) ·
+[$0.02 interaction](https://lora.algokit.io/testnet/transaction/PLBFDDADW576IUCH62HGGYI4AJQNO3QXSENNDIBKAORWVMP7NVHQ) ·
+[$0.05 record](https://lora.algokit.io/testnet/transaction/COMJ3TQOGTKP6LXDJS7HZY7B45QZJQWXXJ23HQ3IDDQYD7GRK36A)
+
+That last call also wrote an
+[audit entry](https://lora.algokit.io/testnet/transaction/E6ZTGEAOTLJQDYOUVBYJYL7LKTXHBGXGVTBKN3SR2NUPWJ2PIGQA)
+into the patient's on-chain trail naming the agent — so the patient can see who read their record.
+
+*Stated precisely:* both wallets were funded from our own account, because TestNet ALGO and USDC have
+no other practical source. So these are genuine account-to-account settlements between independent
+keypairs — **not** external revenue. No unrelated party has paid for this service yet.
 
 ## What this is
 
@@ -252,17 +269,27 @@ Full setup including TestNet funding, the USDC opt-in step, and deployment:
 
 ```bash
 cd api && npx tsx src/index.ts &          # start the API
+npm run preflight                         # eight checks; exits 1 if anything blocks the run
 npx tsx scripts/agent-demo.ts             # the agent discovers, decides, and pays
 ```
 
 Needs a TestNet account holding ALGO and USDC (see `docs/08_Deployment/Environment_Setup.md`).
-Two more scripts prove specific properties:
+Other scripts prove specific properties:
 
 | Script | Proves |
 |---|---|
 | `scripts/agent-demo.ts` | An agent completes a clinical task across 3 paid services for $0.09 |
 | `scripts/e2e-consent-proof.ts` | grant → consent check → payment → on-chain audit entry, in one call |
 | `scripts/verify-g01-fix.ts` | An impersonation attack against the consent gate is rejected with 403 |
+| `scripts/preflight.ts` | The service, both funding accounts, the facilitator, the Bazaar declaration, the agent's USDC and the consent grant are all in the state the demo needs |
+| `scripts/provision-agent-wallet.ts` | — creates and funds an independent payer wallet |
+| `scripts/provision-patient-wallet.ts` | — creates and funds an independent patient wallet |
+| `scripts/grant-consent.ts` | — the patient signs a grant to a named requester |
+
+The pre-flight is worth running before any demo. Each of its checks maps to a failure that is
+*silent* rather than loud: an unfunded operator degrades a successful paid call to
+`auditStatus: "pending"` with no error, and a missing consent grant turns the agent run into a
+polite decline.
 
 ### See the payment flow without any setup
 
@@ -328,7 +355,7 @@ Stated plainly, because a reviewer will find them anyway:
 - `services/algorand.ts` still has thin direct test coverage, though the box-key derivation it owns
   is now pinned by golden vectors asserted from both TypeScript and Python (G-05).
 - Nothing is publicly hosted; there is no MainNet deployment and no Bazaar listing.
-- Exactly one payment has ever settled, and it was a self-payment.
+- No *external* party has paid for this service. Payments settle between independent accounts, but the agent's TestNet float was seeded from our own wallet.
 - The record summary is a fixed synthetic constant; there are no real patients in this system.
 - Audit sequencing is serialised in-process only, so the deployment is pinned to one machine (G-11).
 - There is no observability: no metrics, no tracing, no alerting (G-15).
@@ -357,6 +384,7 @@ Every document is linked below. Click any row to open it.
 | [Executive Summary](docs/00_EXECUTIVE_SUMMARY.md) | The project in two minutes: problem, solution, evidence, maturity, roadmap |
 | [For Judges](docs/JUDGES.md) | The pitch, the evidence table, and a 2-minute demo script |
 | [Evidence Log](docs/PROOF.md) | Every claim with a transaction ID and a command to reproduce it |
+| [Agent Run Facts](docs/AGENT_RUN_FACTS.md) | The canonical machine-to-machine run: the three accounts, every transaction ID, and what may and may not be claimed |
 | [Engineering Gap Report](docs/ENGINEERING_GAP_REPORT.md) | 34 findings — 22 closed, 12 open — with evidence, severities and fixes |
 | [Winning Roadmap](docs/WINNING_ROADMAP.md) | Four-phase remediation plan; Phase 1 complete |
 | [Compliance](docs/COMPLIANCE.md) | Rule-by-rule mapping to the Global x402 Challenge requirements |
@@ -448,6 +476,7 @@ Every document is linked below. Click any row to open it.
 | [API Documentation](docs/05_API/API_Documentation.md) | All eight routes plus the 13-method on-chain ABI |
 | [OpenAPI Specification](docs/05_API/OpenAPI.yaml) | OpenAPI 3.1, authored from the implementation |
 | [API Error Catalogue](docs/05_API/API_Error_Catalog.md) | Every error the API can produce, with cause and retryability |
+| [Bazaar Discovery](docs/05_API/Bazaar_Discovery.md) | How the service declares itself to the x402 Bazaar catalogue, and what still has to happen before it is listed |
 
 </details>
 

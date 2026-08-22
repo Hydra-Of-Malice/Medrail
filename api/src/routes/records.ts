@@ -52,9 +52,14 @@ recordsRoute.post(ENDPOINT, async (c) => {
 
   const allowed = await checkAccess(patientId, requesterAddress, SCOPE);
   if (!allowed) {
-    // Logged as a denied attempt on the patient's own on-chain audit trail —
-    // the fee already paid covers this on-chain verification regardless of
-    // outcome, the same way a paid lookup API charges for a "not found".
+    // Logged as a denied attempt on the patient's own on-chain audit trail: a
+    // patient should be able to see who *tried*, not only who succeeded.
+    //
+    // Note what this costs us. The 403 below cancels x402 settlement, so the
+    // caller pays nothing — while this write costs the operator a fee. A denial
+    // is therefore a small, unbilled drain, which is why /v1/records/summary is
+    // rate-limited (see rateLimit.ts) and why the free consent oracle exists:
+    // an agent that checks first never gets here.
     await logAccess(patientId, requesterAddress, SCOPE, ENDPOINT, "consent_denied").catch(() => undefined);
     return c.json(
       {

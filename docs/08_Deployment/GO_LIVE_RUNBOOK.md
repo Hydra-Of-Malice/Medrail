@@ -3,11 +3,47 @@
 **Purpose:** The exact commands to put MedRail on a public HTTPS URL. Every step you run yourself;
 nothing here needs anything from the reviewer.
 
-**Status of this document:** Prepared 2026-08-21. The configs are committed and corrected; the
-commands below have not been executed because they require your accounts. Anything not yet verified
-is marked so.
+**Status of this document:** Prepared 2026-08-21, re-verified against the repository 2026-08-22 —
+`api/fly.toml`, `api/Dockerfile` and the health-check path all match what is written below.
 
-**Time:** ~25 minutes for the API, ~10 for the frontend.
+**The API image has been built and run locally, and it works.** That is the part of §1 that could
+have surprised you, and it no longer can:
+
+```
+docker build -f api/Dockerfile -t medrail-api .        # from the repo root
+docker run -p 4031:4021 -e NETWORK=testnet -e CONSENT_APP_ID=768743428   -e PAY_TO_ADDRESS=… -e OPERATOR_MNEMONIC=… medrail-api
+```
+
+Verified in that container on 2026-08-22: `/v1/health` returns `consentAppId: 768743428` with a live
+`chain` block, `GET /` advertises all 8 endpoints, `/v1/consent/arc56` returns 200, and
+`POST /v1/triage` returns a 402 carrying `resource.tags` with `x402-global-challenge`,
+`accepts[0].extra.tag`, and `extensions.bazaar.info.input.method: "POST"`.
+
+What remains unexecuted is only what needs *your* accounts: `fly auth login`, `fly deploy`, and the
+Vercel steps. Anything else not yet verified is marked so below.
+
+---
+
+## ⛔ Why this runbook is urgent today
+
+**Sections 1 and 2 below are one of the two hard blockers on the submission.** Requirement 2 of the
+organisers' list — *"live and working project, deployed and accessible"* — is **not met**. MedRail
+runs on `localhost:4021` and nowhere else. There is no URL a judge can open.
+
+| Blocker | This runbook | Estimated time |
+|---|---|---|
+| **Requirement 2 — API not deployed** | **§1 · API → Fly.io** | **~25 min** |
+| **Requirement 2 — frontend not deployed** | **§2 · Frontend → Vercel** | **~10 min** |
+| **Requirement 3 — no demo video** | Not this document → [`../11_Hackathon/Demo_Video_Script.md`](../11_Hackathon/Demo_Video_Script.md) | **~60–90 min** including a backup take |
+
+Do §1 and §2 **before** recording. The video is materially stronger when it shows a public URL
+instead of localhost, and the deploy is the step more likely to surprise you.
+
+**§3 (Bazaar listing)** and **§4 (MainNet)** are *not* on the organisers' submission requirement
+list and are **not** for today. Sections 0–2 and 5–6 are.
+
+Ordered plan for the whole day: [`../GO_LIVE_CHECKLIST.md`](../GO_LIVE_CHECKLIST.md).
+Requirement-by-requirement status: [`../COMPLIANCE.md`](../COMPLIANCE.md).
 
 ---
 
@@ -18,11 +54,62 @@ and the two values from `api/.env` — `PAY_TO_ADDRESS` and `OPERATOR_MNEMONIC`.
 
 **Never put either into `fly.toml`, a Dockerfile, or git.** They go in as secrets, below.
 
+### Top up the operator account first — 30 seconds, and it prevents a live failure
+
+Every `log_access` costs the operator 1,000 µALGO. At the last check the operator
+(`2WDV2J2F…`) held **101,000 µALGO spendable — about 101 more audit writes**. That is enough for a
+demo and not much more, and if it reaches zero the symptom is not an error: the paid call still
+returns 200 and silently degrades to `auditStatus: "pending"`.
+
 ```bash
-# Sanity check before deploying anything — all four must pass.
+# What it holds right now
+curl -s "https://testnet-api.algonode.cloud/v2/accounts/<PAY_TO_ADDRESS>"   | jq '{amount, min: .["min-balance"], spendable: (.amount - .["min-balance"])}'
+```
+
+Top it up at the TestNet dispenser — <https://lora.algokit.io/testnet/fund> — which needs a browser
+and is free. Do the same for the application account `CCO26Y6Z56DDZ3OELO2UKJMIPJVSIT52I23F2MPMR52JBM3HQZZNUZNOR4`
+if its spendable balance drops below about 25,000 µALGO, since that is what pays for each new box.
+
+Once the API is running, `/v1/health` reports both figures and warns for you — see §1.5.
+
+`api/.env` also holds `AGENT_MNEMONIC`, the independent wallet the agent demo pays from. **That one
+stays local.** It is a client-side key belonging to the caller, not to the service — the server has
+no use for it, and shipping it as a deploy secret would hand the service control of the account whose
+independence is the point (see [`../PROOF.md`](../PROOF.md) §10).
+
+```bash
+# Sanity check before deploying anything — all of these must pass.
 cd contracts && .venv/Scripts/python.exe -m pytest tests/ -q     # 28 passed
-cd ../api    && npx tsc --noEmit && npx vitest run               # 45 passed
+cd ../api    && npm run typecheck && npx vitest run              # typecheck covers src, scripts and test
 cd ../web    && npx tsc --noEmit -p tsconfig.json && npm run build
+```
+
+### `npm run preflight` — run this before you record, and again after deploying
+
+```bash
+cd api && npm run dev              # in one terminal
+npm run preflight                  # in another
+API_BASE=https://medrail-api.fly.dev npm run preflight   # after §1
+```
+
+Eight checks, exit code 1 if any of them blocks you. Every one corresponds to something that has
+actually gone wrong here, and — this is the point — each fails *quietly* on camera rather than
+loudly: an unfunded operator turns a 200 into `auditStatus: "pending"` with no error, a missing
+consent grant turns the flagship agent run into a polite decline, an unreachable facilitator turns
+every priced route into a 503. None of those look like infrastructure. They look like the product
+not working.
+
+```
+  [PASS] API reachable                      testnet
+  [PASS] Consent contract configured        App 768743428
+  [PASS] Audit trail affordable             ~96 writes left (operator 96000 µALGO, app 3866300 µALGO)
+  [PASS] Service index                      8 endpoints advertised
+  [PASS] Facilitator reachable              https://facilitator.goplausible.xyz
+  [PASS] 402 challenge                      HTTP 402 · challenge tag present · bazaar declaration present
+  [PASS] Agent wallet funded                $0.71 USDC — about 7 full runs
+  [PASS] Consent grant active               56LFG5EE… → UYBTLPHS… for records:summary
+
+  Ready to record.
 ```
 
 ---
@@ -61,6 +148,13 @@ fly status --config api/fly.toml
 curl -s https://medrail-api.fly.dev/v1/health | jq
 ```
 
+`/v1/health` also returns a `chain` block — the operator's spendable µALGO, the application
+account's spendable µALGO, and `estimatedAuditWritesRemaining`. **Read it before you record
+anything.** If `warning` is non-null, the audit trail is about to stop working: the paid call will
+still return 200 and quietly degrade to `auditStatus: "pending"`, which is exactly the failure you
+do not want on camera. The read is stale-while-revalidate, so it never delays the health check; a
+`chainError` instead of a `chain` just means no sample has landed yet.
+
 **`/v1/health` must return `consentAppId: 768743428`.** If it returns `null`, `CONSENT_APP_ID` did
 not reach the container — set it explicitly (`fly secrets set CONSENT_APP_ID=768743428`). The
 service now refuses to boot at all without a valid `PAY_TO_ADDRESS`, so a boot failure there is the
@@ -77,11 +171,43 @@ curl -i -X POST https://medrail-api.fly.dev/v1/triage \
 cd api
 API_BASE=https://medrail-api.fly.dev npx tsx scripts/e2e-proof.ts
 API_BASE=https://medrail-api.fly.dev npx tsx scripts/e2e-consent-proof.ts
+
+# The machine-to-machine centrepiece — an agent that discovers the service from
+# GET /, checks the FREE consent oracle before spending, and pays for three
+# services. $0.09 across 3 settled transactions. Now against a public URL.
+API_BASE=https://medrail-api.fly.dev npx tsx scripts/agent-demo.ts
 ```
 
-Both write proof artifacts under `contracts/artifacts/`. **Paste the resulting transaction IDs into
+These write proof artifacts under `contracts/artifacts/`. **Paste the resulting transaction IDs into
 [`../PROOF.md`](../PROOF.md)** — a settled payment against a *public* URL is materially stronger
 evidence than one against localhost.
+
+Two different payers are involved here, and the distinction matters when you write the results up.
+`e2e-proof.ts` and `e2e-consent-proof.ts` pay from `PROOF_MNEMONIC`, which is the project's own
+account and also owns `PAY_TO_ADDRESS` — those runs are **self-payments**. `agent-demo.ts` pays from
+`AGENT_MNEMONIC`, an independently generated wallet (`UYBTLPHS…`) that the service does not control,
+so those settlements move between **distinct accounts**; the indexer will show sender ≠ receiver.
+Either way they are real, settled, on a public ledger — and **neither is external revenue**: the
+agent's TestNet USDC float was seeded from the project's own wallet, because TestNet USDC has no
+other practical source. No unrelated party has paid for this service, and nothing here should be
+described as if one had.
+
+The agent and patient wallets and the consent grant between them are one-time setup and already
+done — recorded in [`../PROOF.md`](../PROOF.md) §10 and [`../AGENT_RUN_FACTS.md`](../AGENT_RUN_FACTS.md).
+Re-run these only if a wallet is lost or drained, and note that new addresses invalidate every
+transaction ID currently cited in the documentation:
+
+```bash
+npx tsx scripts/provision-agent-wallet.ts            # mints, funds and USDC-opts-in a new agent wallet
+npx tsx scripts/provision-patient-wallet.ts          # mints and funds a new patient wallet (ALGO only)
+npx tsx scripts/grant-consent.ts <newAgentAddress>   # the patient grants that agent records:summary
+```
+
+Also confirm the discovery surface, since it is what an agent — and a judge — hits first:
+
+```bash
+curl -s https://medrail-api.fly.dev/ | jq '.endpoints, .x402'
+```
 
 ---
 
@@ -106,7 +232,7 @@ proves the browser is talking to your real API.
 
 Already handled. `api/src/app.ts` sets `origin: "*"` and leaves `allowHeaders` unset so Hono
 reflects whatever the browser's preflight requests — which is what a payment-signing client needs.
-A hand-maintained allowlist previously broke every browser paid call; the comment at `app.ts:19-30`
+A hand-maintained allowlist previously broke every browser paid call; the comment at `app.ts:22-35`
 records that.
 
 ---
@@ -192,7 +318,20 @@ fee-drain vector where denied calls cost the caller nothing and cost you a chain
 
 ## Cross-references
 
+- [`../GO_LIVE_CHECKLIST.md`](../GO_LIVE_CHECKLIST.md) — **the ordered plan for submission day**
+- [`../COMPLIANCE.md`](../COMPLIANCE.md) — requirement-by-requirement status, including what is still missing
+- [`../11_Hackathon/Demo_Video_Script.md`](../11_Hackathon/Demo_Video_Script.md) — **the other blocker:** shot-by-shot script for the 3-minute video
 - [`Environment_Setup.md`](Environment_Setup.md) — local setup and troubleshooting
 - [`Docker.md`](Docker.md) — image analysis
 - [`../PROOF.md`](../PROOF.md) — where to record your live transaction IDs
-- [`../GO_LIVE_CHECKLIST.md`](../GO_LIVE_CHECKLIST.md) — competition entry checklist
+
+## After §1 and §2 land
+
+Update the documents that currently say nothing is hosted — a deploy nobody links to does not
+count as submitted:
+
+- `README.md` — add the live API and web URLs near the top; the "Known limitations" line *"Nothing
+  is publicly hosted"* becomes false. Leave the neighbouring lines alone: no MainNet, no Bazaar
+  listing, synthetic record data, single-machine pinning and no observability are all still true.
+- [`../COMPLIANCE.md`](../COMPLIANCE.md) — flip requirement 2 from ⛔ to ✅ with the real URL.
+- [`../GO_LIVE_CHECKLIST.md`](../GO_LIVE_CHECKLIST.md) — tick §B and §C.

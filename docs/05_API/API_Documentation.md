@@ -25,6 +25,117 @@ This document supersedes [`../API.md`](../API.md), which remains accurate but in
 
 Entry classification for the Algorand Foundation Global x402 Challenge: **Composite** — three priced endpoints behind a single `payTo` address (per [`../COMPLIANCE.md`](../COMPLIANCE.md); competition-rule claims are not independently re-verified in this review).
 
+### 1.1 Integrating as an agent
+
+The intended consumer of this API is a program, not a person. There is **no sign-up, no API key, no account and no session** to obtain — which means there is also no onboarding document to read: everything an integrator needs is served by the API itself. This section is the whole integration in the order a machine would perform it.
+
+**The complete worked reference is [`api/scripts/agent-demo.ts`](../../api/scripts/agent-demo.ts)** — a single-file clinical triage agent that receives one task and one base URL, discovers the catalogue, decides which services the task needs, pays for three of them, and reports what it spent. Run it with `API_BASE=http://localhost:4021 npx tsx scripts/agent-demo.ts` from `api/`. The output of a real run, with transaction ids, is at the end of this section.
+
+#### Step 1 — Discover the catalogue
+
+One unauthenticated `GET` with no headers. Everything else follows from its response.
+
+```ts
+const index = await (await fetch(`${API_BASE}/`)).json();
+// index.endpoints[]  -> { method, path, price, gate }  for all 8 routes
+// index.contract     -> { appId, network, networkCaip2, arc56SpecUrl }
+// index.x402         -> { version: 2, scheme: "exact", facilitator }
+
+const priceOf = (path: string) =>
+  Number((index.endpoints.find((e) => e.path === path)?.price ?? "$0").replace("$", ""));
+```
+
+Full response shape in §5.5. Three fields do real work:
+
+| Field | Use it for |
+|---|---|
+| `endpoints[].price` | Budgeting. Read the price rather than hardcoding it — the authoritative µUSDC amount still arrives in the `402`, but this lets an agent decide *whether* to call before it spends a round trip. |
+| `endpoints[].gate` | Deciding whether a call has a **precondition**. `"x402"` means payment is the only gate. `"x402 + on-chain consent"` means there is a second gate you can evaluate for free first — see step 3. |
+| `contract.appId` + `contract.arc56SpecUrl` | Verifying MedRail's answers against the chain yourself instead of trusting them — see step 4. |
+
+After this call, the only MedRail-specific constant your client needs is the base URL. `agent-demo.ts` is written to that rule literally: nothing about MedRail appears in it except `API_BASE`.
+
+#### Step 2 — Pay per call with `@x402/fetch` and `ExactAvmScheme`
+
+Register the Algorand scheme once, wrap `fetch`, and call normally. The wrapper performs the `402` → sign → retry round trip internally, so a paid call is one `await` at the call site.
+
+```ts
+import { x402Client, wrapFetchWithPayment, x402HTTPClient } from "@x402/fetch";
+import { ExactAvmScheme } from "@x402/avm/exact/client";
+
+const client = new x402Client();
+client.register("algorand:*", new ExactAvmScheme(signer, { algodUrl: ALGOD_URL }));
+const payingFetch = wrapFetchWithPayment(fetch, client);
+
+const res = await payingFetch(`${API_BASE}/v1/triage`, {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ symptoms: "Sudden crushing chest pain and shortness of breath" }),
+});
+const body = await res.json();
+```
+
+To recover the settled Algorand transaction id — the receipt your agent can hand to anyone for verification:
+
+```ts
+const http = new x402HTTPClient(client);
+const settle = http.getPaymentSettleResponse((name) => res.headers.get(name));
+settle?.transaction; // e.g. "DOSKCNKJRXIMY2UDSDZ377LKPZQIZJW5JHCGUAGKOYV6KUCFYKIA"
+```
+
+Four things to know before your first paid call:
+
+- **You need TestNet USDC (ASA `10458941`). You do not need ALGO.** The facilitator supplies `extra.feePayer` and sponsors the network fee (§3).
+- **`algorand:*` is a client-side wildcard, not a server-side one.** MedRail registers only its configured CAIP-2 network, so a payment signed for the other network is rejected (NFR-002).
+- **There is no idempotency.** A retried paid call is a second payment (§2). Wrap retries in your own guard.
+- **An unpaid malformed body returns `402`, not `400`** (§2.1). Validate your payload locally first, or you will pay to discover a schema mistake.
+
+#### Step 3 — Use the free consent pre-flight before a gated call
+
+`POST /v1/records/summary` costs $0.05 and is gated by an on-chain grant. `GET /v1/consent/status` answers whether that grant exists, against the same contract state, for **$0.00**:
+
+```ts
+const status = await (await fetch(
+  `${API_BASE}/v1/consent/status` +
+  `?patient=${patient}&requester=${requester}&scope=records:summary`,
+)).json();
+
+if (!status.granted) return reportWithoutTheRecord(); // decline — spend nothing
+```
+
+**The `requester` you check must be the address that will sign the payment.** The gated route recovers the payer from the verified `PAYMENT-SIGNATURE` header and returns `403` unless it equals the `requesterAddress` in the body (§7.1), so a pre-flight for any other address answers a question about somebody else.
+
+Be precise about what this saves, because a denial is already free: a `403` cancels settlement and the response carries `charged: false` (§3.2.1). What the pre-flight avoids is a wasted round trip, a chain fee that **MedRail** pays to write the `consent_denied` audit entry, and a permanent record on the patient's own audit trail of an attempt that was never going to succeed. It is also the only branch in which your agent can act on a refusal *before* committing to it. Use it — that is what it is there for, and it is rate-limited at 60/min rather than priced.
+
+#### Step 4 — Fetch the ARC-56 spec and read the chain yourself
+
+`GET /v1/consent/arc56` serves the compiled application spec for `MedRailConsent` — 13 methods, their selectors and the state schema (§5.3, §6.1). Combined with `contract.appId` and `contract.networkCaip2` from step 1, that is everything needed to build an ABI client and call the `readonly` methods directly through `simulate`, for free and with MedRail entirely out of the path:
+
+```bash
+curl -s "$API_BASE/"                    # -> contract.appId, contract.arc56SpecUrl
+curl -s "$API_BASE/v1/consent/arc56"    # -> the ARC-56 spec
+curl -s https://testnet-api.algonode.cloud/v2/applications/768743428   # -> global state
+```
+
+Two caveats an integrator must carry: the spec's `networks` object is **empty**, so take the App ID from `GET /` or `/v1/consent/app-info` and not from the spec; and the deployed application still carries the two ABI defects in §6.2 (`AccessRequested` event fields transposed, `get_grant_box_mbr()` reporting 22 100 where the true cost is 22 500).
+
+#### What a real run looks like
+
+`agent-demo.ts`, executed against a locally-running API and Algorand TestNet:
+
+| Step | Call | Cost | Result |
+|---|---|---|---|
+| 1 | `GET /` | free | 8 endpoints, App `768743428`, ARC-56 URL |
+| 2 | `POST /v1/triage` | **$0.02** | `band=EMERGENCY score=70` · [`DOSKCNKJ…FYKIA`](https://lora.algokit.io/testnet/transaction/DOSKCNKJRXIMY2UDSDZ377LKPZQIZJW5JHCGUAGKOYV6KUCFYKIA) |
+| 3 | `POST /v1/interaction-check` | **$0.02** | `MAJOR: warfarin + aspirin` · [`PLBFDDAD…7NVHQ`](https://lora.algokit.io/testnet/transaction/PLBFDDADW576IUCH62HGGYI4AJQNO3QXSENNDIBKAORWVMP7NVHQ) |
+| 4 | `GET /v1/consent/status` | **free** | `granted=true` — the spend on step 5 is justified |
+| 5 | `POST /v1/records/summary` | **$0.05** | `consentVerifiedOnChain: true`, `auditStatus: "recorded"` · payment [`COMJ3TQO…RK36A`](https://lora.algokit.io/testnet/transaction/COMJ3TQOGTKP6LXDJS7HZY7B45QZJQWXXJ23HQ3IDDQYD7GRK36A) |
+| | | **$0.09** | across **3 settled Algorand transactions**, zero accounts, zero API keys |
+
+**Read that with the same caveats as every other figure in this set.** It is a **manual verification script, not an automated test**, and it does not run in CI ([`../07_Testing/Test_Results.md`](../07_Testing/Test_Results.md) §5.7). The API it called was a local process, because no public HTTPS endpoint exists (§2). **All three settlements moved between distinct accounts** — the agent pays from its own keypair `UYBTLPHS…5GO4YQ`, which this service does not control, to `payTo` `2WDV2J2F…TI64GE`, and the indexer confirms sender ≠ receiver at rounds 66563930 and 66563944 (§3.4). The patient is a third account again — `56LFG5EE…LO66YM`, holding its own keypair and being neither the payer nor the payee — and it granted *that* agent access in [`IG4XEBTM…G7WUQ`](https://lora.algokit.io/testnet/transaction/IG4XEBTMRCKI724ZVHSYUN4ECTYBXAGZM5N35NP4Y3ZVWECG7WUQ), signing for itself. Stated precisely, though: the agent's TestNet USDC float and the patient's TestNet ALGO were seeded from the project's own wallet, because TestNet assets have no other practical source, so **no external or unrelated party has paid for this service**. And what sits behind the gate is a fixed synthetic constant (§4.3) scored by rule engines with no model in them (§8.4) — the money, the authorisation and the audit trail are real; the clinical content is not.
+
+Message-level sequence: [`../03_Architecture/Sequence_Diagrams.md`](../03_Architecture/Sequence_Diagrams.md) §10. Why the discovery surface is treated as architecture rather than convenience: [`../03_Architecture/System_Architecture.md`](../03_Architecture/System_Architecture.md) §2.3.
+
 ---
 
 ## 2. Conventions that apply to every route
@@ -170,9 +281,9 @@ Decoded `PAYMENT-REQUIRED`:
 
 ### 3.4 The settled payments on record
 
-Seven facilitator-settled x402 payments exist against `payTo` on TestNet, all carrying an `x402-payment-v2-…` note: **two at 20 000 base units** ($0.02, `/v1/triage`) and **five at 50 000** ($0.05, `/v1/records/summary` — one per audit entry, matching `total_audit_entries = 5`).
+Facilitator-settled x402 payments against `payTo` on TestNet fall into two groups, all carrying an `x402-payment-v2-…` note. The **earlier runs are self-payments** — sender and receiver are the same project-controlled account; seven were catalogued in detail, **two at 20 000 base units** ($0.02, `/v1/triage`) and **five at 50 000** ($0.05, `/v1/records/summary` — one per audit entry, matching `total_audit_entries = 5`). The **three-party agent run** settles between distinct accounts.
 
-The first, and the one dissected in [`../PROOF.md`](../PROOF.md) §6:
+The first of the earlier group, and the one dissected in [`../PROOF.md`](../PROOF.md) §6:
 
 | Field | Value |
 |---|---|
@@ -185,7 +296,17 @@ The first, and the one dissected in [`../PROOF.md`](../PROOF.md) §6:
 | Note | decodes to `x402-payment-v2-1786140083822` |
 | Sender / receiver | **both** `2WDV2J2FTWF535SMSUVEBOF5IGXF2OTV7ZZTLTCRBXPVS32UMLOPTI64GE` |
 
-These are genuine facilitator-settled x402 payments, and **every one of them is a self-payment** — sender and receiver are the same project-controlled account in all seven cases. **There is no third-party payment volume and none should be claimed.** What the five 50 000-unit settlements do demonstrate is that the priced, consent-gated path completes end to end on real infrastructure, since a settlement only occurs when the handler returns below 400 (§3.2).
+The three settlements of the agent run are the ones where **payer and payee are different accounts**. `api/scripts/agent-demo.ts` pays from an agent holding its own keypair — `UYBTLPHS6APCXVBDPASQMUIQCEORDIR6EMTVMNSDPSVRSR5HEPKQ5GO4YQ`, which this service does not control — to `payTo` `2WDV2J2FTWF535SMSUVEBOF5IGXF2OTV7ZZTLTCRBXPVS32UMLOPTI64GE`, and the indexer confirms sender ≠ receiver on each:
+
+| Endpoint | Amount | Transaction | Round |
+|---|---|---|---|
+| `POST /v1/triage` | 20 000 | [`DOSKCNKJ…FYKIA`](https://lora.algokit.io/testnet/transaction/DOSKCNKJRXIMY2UDSDZ377LKPZQIZJW5JHCGUAGKOYV6KUCFYKIA) | 66563930 |
+| `POST /v1/interaction-check` | 20 000 | [`PLBFDDAD…7NVHQ`](https://lora.algokit.io/testnet/transaction/PLBFDDADW576IUCH62HGGYI4AJQNO3QXSENNDIBKAORWVMP7NVHQ) | 66563934 |
+| `POST /v1/records/summary` | 50 000 | [`COMJ3TQO…RK36A`](https://lora.algokit.io/testnet/transaction/COMJ3TQOGTKP6LXDJS7HZY7B45QZJQWXXJ23HQ3IDDQYD7GRK36A) | 66563944 |
+
+Fee `0` on all three, sponsored by the facilitator's fee payer. The agent was provisioned by `api/scripts/provision-agent-wallet.ts` and the patient wallet `56LFG5EE…LO66YM` by `api/scripts/provision-patient-wallet.ts`, and that patient — neither the payer nor the payee — granted the agent access with `api/scripts/grant-consent.ts` ([`IG4XEBTM…G7WUQ`](https://lora.algokit.io/testnet/transaction/IG4XEBTMRCKI724ZVHSYUN4ECTYBXAGZM5N35NP4Y3ZVWECG7WUQ)) — the patient signs, the backend is never in the path.
+
+All of these are genuine facilitator-settled x402 payments, and the honest reading is precise on both halves: payments now settle between **independent accounts**, but the agent's TestNet USDC float and the patient's TestNet ALGO were both seeded from the project's own wallet, because TestNet assets have no other practical source. **No external or unrelated party has paid for this service, and no payment volume should be claimed.** What the 50 000-unit settlements do demonstrate is that the priced, consent-gated path completes end to end on real infrastructure, since a settlement only occurs when the handler returns below 400 (§3.2).
 
 Note also that the transaction note records no resource URL, so **payments cannot be attributed to an endpoint** from ledger data (see [`../04_Data/Indexing_And_Query_Strategy.md`](../04_Data/Indexing_And_Query_Strategy.md) §4, N6) — the split above is inferred from the amounts, which happen to be distinct per route.
 
@@ -201,6 +322,8 @@ const res = await fetchWithPayment(`${API_BASE}/v1/triage`, { method: "POST", ..
 ```
 
 The browser equivalent is `web/lib/x402Client.ts`, which deliberately skips `getPaymentSettleResponse` on a non-200 (a `402` means signed-but-unsettled, so there is no `PAYMENT-RESPONSE` header to parse — the comment in that file explains it).
+
+For a client that also **discovers** the catalogue rather than being told about it, and that reads the free consent oracle before spending on the gated route, see `api/scripts/agent-demo.ts` and §1.1.
 
 ---
 
@@ -865,7 +988,8 @@ Stated plainly so the closures above are not read as a clean bill of health:
 - **A `"pending"` audit entry is never replayed** (§7.3).
 - **The rate limiter is in-memory and per-process**, keyed on a spoofable client IP — a courtesy guard, not a security boundary.
 - **`services/algorand.ts` has no dedicated unit test file** (G-05), and the frontend has no automated tests at all.
-- **Nothing is publicly hosted.** There is no MainNet deployment, no Bazaar listing, and every payment to date is a self-payment from the project's own account.
+- **Nothing is publicly hosted.** There is no MainNet deployment and no Bazaar listing.
+- **No external party has paid for this service.** Payments settle between independent accounts — the agent pays from its own keypair (§3.4) — but that agent's TestNet float was seeded from the project's own wallet.
 
 ---
 
@@ -930,5 +1054,5 @@ No HIPAA, GDPR, SOC 2 or ISO work has been performed, no assessment exists, and 
 | Lineage, retention, public visibility, the consent-graph exposure | [`../04_Data/Data_Flow.md`](../04_Data/Data_Flow.md) |
 | What can and cannot be queried | [`../04_Data/Indexing_And_Query_Strategy.md`](../04_Data/Indexing_And_Query_Strategy.md) |
 | Payer binding, C-1, admin-key blast radius, residual risk | [`../06_Security/Threat_Model.md`](../06_Security/Threat_Model.md) |
-| The settled payment and its self-payment caveat | [`../PROOF.md`](../PROOF.md) |
+| The settled payments and the seeded-float caveat | [`../PROOF.md`](../PROOF.md) |
 | The original hand-written reference | [`../API.md`](../API.md) |

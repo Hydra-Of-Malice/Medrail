@@ -1,3 +1,11 @@
+# Build from THIS directory, not the repo root — the opposite of api/Dockerfile,
+# which needs the root so it can reach contracts/artifacts:
+#   docker build -f web/Dockerfile -t medrail-web ./web
+# Building from the root fails on "/package.json": not found.
+#
+# The two NEXT_PUBLIC_* variables are inlined at build time, so changing either
+# means rebuilding the image, not just restarting the container.
+
 FROM node:20-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json* ./

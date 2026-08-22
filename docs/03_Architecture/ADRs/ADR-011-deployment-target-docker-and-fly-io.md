@@ -96,7 +96,7 @@ The context also carries `contracts/.venv/` and both `node_modules/` trees, whic
 
 **Negative**
 - NFR-004 **IMPLEMENTED (breaks in container)** — D-1.
-- NFR-007 **UNVALIDATED** — D-2, D-4, CI-3. The committed production config is broken and has never been built.
+- NFR-007 **VALIDATED by hand, not by CI** — D-2 and D-4 are fixed (`npm ci`, `.dockerignore` at both contexts) and both images were built and booted on 2026-08-22. CI-3 stands: the pipeline still has no docker step, so nothing stops this regressing.
 - SEC-015 **NOT IMPLEMENTED** — D-3.
 - OPS-001 **IMPLEMENTED but not wired** — D-6.
 - OPS-006 **PARTIALLY IMPLEMENTED** — CI-1.

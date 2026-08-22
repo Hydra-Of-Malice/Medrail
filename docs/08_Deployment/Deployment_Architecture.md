@@ -17,8 +17,8 @@
 | `MedRailConsent` on Algorand MainNet | **NOT IMPLEMENTED** | no MainNet app exists; `docs/COMPLIANCE.md` lists it as pending user action |
 | `medrail-api` public HTTPS service | **NOT IMPLEMENTED** | no host, no URL, no TLS certificate, no DNS |
 | `MedRail Web` public site | **NOT IMPLEMENTED** | no Vercel project, no `web/vercel.json`, no host |
-| `api/Dockerfile` image | **UNVALIDATED** | file exists; never built in CI (`.github/workflows/ci.yml` has no build step) |
-| `web/Dockerfile` image | **UNVALIDATED** | same |
+| `api/Dockerfile` image | **VALIDATED by hand** | built and booted 2026-08-22 — 109.4 MB, 12 layers; `/v1/health`, `GET /`, `/v1/consent/arc56` and the 402 all verified inside the container. Still not built in CI (`.github/workflows/ci.yml` has no build step) |
+| `web/Dockerfile` image | **VALIDATED by hand** | built and booted 2026-08-22 — 285.0 MB, 10 layers, HTTP 200 on port 3000. Context is `./web`, not the repo root. Still not built in CI |
 | `api/fly.toml` Fly.io app | **UNVALIDATED** and **misconfigured** | `api/fly.toml:10` sets `NETWORK = "mainnet"`; no `CONSENT_APP_ID` anywhere in the file |
 | Container registry / image tags | **NOT IMPLEMENTED** | no registry referenced anywhere in the repo |
 

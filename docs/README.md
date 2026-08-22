@@ -15,9 +15,9 @@ endpoints. Live on TestNet as App [`768743428`](https://lora.algokit.io/testnet/
 |---|---|
 | **Judge this submission** (15 min) | [Executive Summary](00_EXECUTIVE_SUMMARY.md) → [For Judges](JUDGES.md) → [Evidence Log](PROOF.md) → [Judge Evaluation](11_Hackathon/Judge_Evaluation.md) |
 | **Review the engineering** (60 min) | [System Architecture](03_Architecture/System_Architecture.md) → [HLD](03_Architecture/HLD.md) → [LLD](03_Architecture/LLD.md) → [ADRs](03_Architecture/ADRs/README.md) → [Threat Model](06_Security/Threat_Model.md) |
-| **Integrate against the API** | [API Documentation](05_API/API_Documentation.md) → [OpenAPI Spec](05_API/OpenAPI.yaml) → [Error Catalogue](05_API/API_Error_Catalog.md) |
+| **Integrate against the API** | [API Documentation](05_API/API_Documentation.md) → [OpenAPI Spec](05_API/OpenAPI.yaml) → [Error Catalogue](05_API/API_Error_Catalog.md) → [Bazaar Discovery](05_API/Bazaar_Discovery.md) |
 | **Run or deploy it** | [Environment Setup](08_Deployment/Environment_Setup.md) → [Go-Live Runbook](08_Deployment/GO_LIVE_RUNBOOK.md) → [Incident Response](10_Operations/Incident_Response.md) |
-| **See what is proven** | [Evidence Log](PROOF.md) → [Test Results](07_Testing/Test_Results.md) |
+| **See what is proven** | [Evidence Log](PROOF.md) → [Agent Run Facts](AGENT_RUN_FACTS.md) → [Test Results](07_Testing/Test_Results.md) |
 | **See what is still weak** | [Engineering Gap Report](ENGINEERING_GAP_REPORT.md) → [Requirements Gap Analysis](02_Requirements/Requirements_Gap_Analysis.md) |
 | **Run the demo** | [Demo Script](11_Hackathon/Demo_Script.md) → [Demo Runbook](11_Hackathon/Demo_Runbook.md) |
 
@@ -30,6 +30,7 @@ endpoints. Live on TestNet as App [`768743428`](https://lora.algokit.io/testnet/
 | [Executive Summary](00_EXECUTIVE_SUMMARY.md) | The project in two minutes: problem, solution, evidence, maturity, roadmap |
 | [For Judges](JUDGES.md) | The pitch, the evidence table, and a 2-minute demo script |
 | [Evidence Log](PROOF.md) | Every claim with a transaction ID and a command to reproduce it |
+| [Agent Run Facts](AGENT_RUN_FACTS.md) | The canonical machine-to-machine run: the three accounts, every transaction ID, and what may and may not be claimed |
 | [Engineering Gap Report](ENGINEERING_GAP_REPORT.md) | 34 findings — 22 closed, 12 open — with evidence, severities and fixes |
 | [Winning Roadmap](WINNING_ROADMAP.md) | Four-phase remediation plan; Phase 1 complete |
 | [Compliance](COMPLIANCE.md) | Rule-by-rule mapping to the Global x402 Challenge requirements |
@@ -123,6 +124,7 @@ ID prefixes: `FR` functional · `NFR` non-functional · `SEC` security · `PERF`
 | [API Documentation](05_API/API_Documentation.md) | All eight routes plus the 13-method on-chain ABI |
 | [OpenAPI Specification](05_API/OpenAPI.yaml) | OpenAPI 3.1, authored from the implementation |
 | [API Error Catalogue](05_API/API_Error_Catalog.md) | Every error the API can produce, with cause and retryability |
+| [Bazaar Discovery](05_API/Bazaar_Discovery.md) | How the service declares itself to the x402 Bazaar catalogue, and what still has to happen before it is listed |
 
 ## 06 — Security
 
