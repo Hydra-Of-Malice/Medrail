@@ -1,5 +1,5 @@
-export const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:4021";
-export const NETWORK = (process.env.NEXT_PUBLIC_NETWORK ?? "testnet") as "testnet" | "mainnet";
+export const API_BASE = process.env.NEXT_PUBLIC_API_BASE;
+export const NETWORK = process.env.NEXT_PUBLIC_NETWORK;
 
 export const ALGOD_URL =
   NETWORK === "mainnet" ? "https://mainnet-api.algonode.cloud" : "https://testnet-api.algonode.cloud";
