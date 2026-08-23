@@ -3,6 +3,7 @@ import AgentFlowPanel from "@/components/AgentFlowPanel";
 import LiveDemoPanel from "@/components/LiveDemoPanel";
 import PricingTable from "@/components/PricingTable";
 import ConsentChecker from "@/components/ConsentChecker";
+import UserPanel from "@/components/UserPanel";
 
 export default function Home() {
   return (
@@ -49,7 +50,7 @@ export default function Home() {
         </h2>
         <p className="mb-4 max-w-3xl text-sm text-neutral-400">
           The panel below is not the product; the intended caller has no browser. It is a window onto the run
-          above — a throwaway keypair in this tab stands in for the agent&rsquo;s wallet so you can watch one
+          above — connect a real TestNet wallet to stand in for the agent&rsquo;s wallet so you can watch one
           x402 call happen for real: the 402 quote, the signed USDC payment, settlement on Algorand, then the
           response. Every button here is something the agent does on its own.
         </p>
@@ -78,6 +79,18 @@ export default function Home() {
             authorisation decision.
           </p>
         </div>
+      </section>
+
+      <section className="mb-14">
+        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-neutral-500">
+          Patient dashboard — who&rsquo;s accessing your data
+        </h2>
+        <p className="mb-4 max-w-3xl text-sm text-neutral-400">
+          The patient&rsquo;s own view of the same consent contract: their profile, every requester who
+          has asked for a record, whether that requester is flagged, and a one-click approve, deny, or
+          revoke for each.
+        </p>
+        <UserPanel />
       </section>
 
       <section className="mb-14">

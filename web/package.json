@@ -9,6 +9,9 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@txnlab/use-wallet-lute": "^5.0.0",
+    "@txnlab/use-wallet-pera": "^5.0.0",
+    "@txnlab/use-wallet-react": "^5.0.0",
     "@x402/avm": "^2.21.0",
     "@x402/core": "^2.21.0",
     "@x402/fetch": "^2.21.0",

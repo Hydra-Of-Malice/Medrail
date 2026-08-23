@@ -1,6 +1,5 @@
 import algosdk from "algosdk";
 import { ALGOD_URL, API_BASE } from "./config";
-import type { DemoWallet } from "./demoWallet";
 
 const algod = new algosdk.Algodv2("", ALGOD_URL, "");
 
@@ -40,25 +39,25 @@ async function getAppId(): Promise<number> {
   return info.consentAppId as number;
 }
 
-/** Patient signs directly with their own key — the backend never sees or proxies this. */
+/** Patient signs directly with their own wallet — the backend never sees or proxies this key. */
 export async function grantAccessOnChain(
-  wallet: DemoWallet,
+  patientAddress: string,
+  signer: algosdk.TransactionSigner,
   requester: string,
   scope: string,
   durationSeconds = 0,
 ): Promise<string> {
-  const account = algosdk.mnemonicToSecretKey(wallet.mnemonic);
   const appId = await getAppId();
   const suggestedParams = await algod.getTransactionParams().do();
-  const boxName = await grantBoxName(wallet.address, requester, scope);
+  const boxName = await grantBoxName(patientAddress, requester, scope);
 
   const atc = new algosdk.AtomicTransactionComposer();
   atc.addMethodCall({
     appID: appId,
     method: GRANT_ACCESS_METHOD,
     methodArgs: [requester, scope, durationSeconds],
-    sender: account.addr,
-    signer: algosdk.makeBasicAccountTransactionSigner(account),
+    sender: patientAddress,
+    signer,
     suggestedParams,
     boxes: [{ appIndex: 0, name: boxName }],
   });
@@ -67,19 +66,23 @@ export async function grantAccessOnChain(
   return result.txIDs[0];
 }
 
-export async function revokeAccessOnChain(wallet: DemoWallet, requester: string, scope: string): Promise<string> {
-  const account = algosdk.mnemonicToSecretKey(wallet.mnemonic);
+export async function revokeAccessOnChain(
+  patientAddress: string,
+  signer: algosdk.TransactionSigner,
+  requester: string,
+  scope: string,
+): Promise<string> {
   const appId = await getAppId();
   const suggestedParams = await algod.getTransactionParams().do();
-  const boxName = await grantBoxName(wallet.address, requester, scope);
+  const boxName = await grantBoxName(patientAddress, requester, scope);
 
   const atc = new algosdk.AtomicTransactionComposer();
   atc.addMethodCall({
     appID: appId,
     method: REVOKE_ACCESS_METHOD,
     methodArgs: [requester, scope],
-    sender: account.addr,
-    signer: algosdk.makeBasicAccountTransactionSigner(account),
+    sender: patientAddress,
+    signer,
     suggestedParams,
     boxes: [{ appIndex: 0, name: boxName }],
   });

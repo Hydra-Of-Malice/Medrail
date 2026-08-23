@@ -11,3 +11,5 @@ export const EXPLORER_ADDRESS_URL = (address: string) =>
   `https://lora.algokit.io/${NETWORK}/account/${address}`;
 
 export const FUND_URL = "https://lora.algokit.io/testnet/fund";
+
+export const USDC_FAUCET_URL = "https://faucet.circle.com";

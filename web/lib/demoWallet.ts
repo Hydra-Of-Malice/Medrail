@@ -7,9 +7,9 @@ export interface DemoWallet {
   mnemonic: string;
 }
 
-/** A TestNet-only throwaway keypair generated in the browser so a judge can try the
- * live payment flow without installing a wallet extension first. Never used for
- * MainNet — production usage goes through a real wallet (see lib/walletConnect.ts). */
+/** A TestNet-only throwaway keypair generated in the browser — an alternative sign-in
+ * for anyone trying the demo without a Pera or Lute wallet installed. Never used for
+ * MainNet; production usage goes through a real wallet (see lib/walletConnect.ts). */
 export function getOrCreateDemoWallet(): DemoWallet {
   if (typeof window === "undefined") {
     throw new Error("getOrCreateDemoWallet must run in the browser");
@@ -30,23 +30,10 @@ export function clearDemoWallet(): void {
   window.sessionStorage.removeItem(STORAGE_KEY);
 }
 
-/** Matches @x402/avm's ClientAvmSigner interface — see docs/ARCHITECTURE.md. */
-export interface ClientAvmSigner {
-  address: string;
-  signTransactions(txns: Uint8Array[], indexesToSign?: number[]): Promise<(Uint8Array | null)[]>;
-}
-
-export function demoSignerFromWallet(wallet: DemoWallet): ClientAvmSigner {
+/** Same algosdk.TransactionSigner shape a real wallet's useWallet().transactionSigner
+ * exposes, so callers (lib/consent.ts, the ClientAvmSigner adapter) don't need to know
+ * whether they're signing with a demo keypair or a connected wallet. */
+export function demoTransactionSigner(wallet: DemoWallet): algosdk.TransactionSigner {
   const account = algosdk.mnemonicToSecretKey(wallet.mnemonic);
-  return {
-    address: wallet.address,
-    async signTransactions(txns, indexesToSign) {
-      const toSign = new Set(indexesToSign ?? txns.map((_, i) => i));
-      return txns.map((bytes, i) => {
-        if (!toSign.has(i)) return null;
-        const txn = algosdk.decodeUnsignedTransaction(bytes);
-        return txn.signTxn(account.sk);
-      });
-    },
-  };
+  return async (txnGroup, indexesToSign) => indexesToSign.map((i) => txnGroup[i].signTxn(account.sk));
 }

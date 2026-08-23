@@ -1,10 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import DemoWalletCard from "./DemoWalletCard";
+import ConnectWalletCard from "./ConnectWalletCard";
+import { useActiveWallet } from "@/lib/activeWallet";
 import { API_BASE, EXPLORER_TX_URL } from "@/lib/config";
 import { callPaidEndpoint, type PaidCallResult } from "@/lib/x402Client";
-import { demoSignerFromWallet, type DemoWallet } from "@/lib/demoWallet";
 
 type EndpointKey = "triage" | "interaction" | "records";
 
@@ -15,7 +15,7 @@ const ENDPOINTS: Record<EndpointKey, { path: string; price: string; label: strin
 };
 
 export default function LiveDemoPanel() {
-  const [wallet, setWallet] = useState<DemoWallet | null>(null);
+  const { avmSigner: signer, address } = useActiveWallet();
   const [endpoint, setEndpoint] = useState<EndpointKey>("triage");
   const [symptoms, setSymptoms] = useState("Sudden chest pain and shortness of breath");
   const [medications, setMedications] = useState("warfarin, aspirin");
@@ -25,17 +25,16 @@ export default function LiveDemoPanel() {
   const [error, setError] = useState<string | null>(null);
 
   async function run() {
-    if (!wallet) return;
+    if (!signer) return;
     setLoading(true);
     setError(null);
     setResult(null);
     try {
-      const signer = demoSignerFromWallet(wallet);
       const def = ENDPOINTS[endpoint];
       let body: unknown;
       if (endpoint === "triage") body = { symptoms };
       else if (endpoint === "interaction") body = { medications: medications.split(",").map((m) => m.trim()) };
-      else body = { patientId: patientId || wallet.address, requesterAddress: wallet.address };
+      else body = { patientId: patientId || address, requesterAddress: address };
 
       const res = await callPaidEndpoint(signer, `${API_BASE}${def.path}`, {
         method: "POST",
@@ -55,7 +54,7 @@ export default function LiveDemoPanel() {
   return (
     <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
       <div className="space-y-4">
-        <DemoWalletCard onWallet={setWallet} />
+        <ConnectWalletCard />
 
         <div className="rounded-lg border border-neutral-800 bg-neutral-950 p-5">
           <h3 className="font-mono text-xs uppercase tracking-wide text-amber-500">
@@ -107,13 +106,13 @@ export default function LiveDemoPanel() {
         {endpoint === "records" && (
           <label className="block">
             <span className="text-sm text-neutral-400">
-              Patient address (defaults to your demo wallet — grant yourself consent first via the Consent panel to
-              see this succeed)
+              Patient address (defaults to your connected wallet — grant yourself consent first via the Consent
+              panel to see this succeed)
             </span>
             <input
               value={patientId}
               onChange={(e) => setPatientId(e.target.value)}
-              placeholder={wallet?.address ?? "…"}
+              placeholder={address ?? "…"}
               className="mt-1 w-full rounded-md border border-neutral-800 bg-neutral-900 p-2 text-sm text-neutral-100"
             />
           </label>
@@ -121,7 +120,7 @@ export default function LiveDemoPanel() {
 
         <button
           onClick={run}
-          disabled={!wallet || loading}
+          disabled={!signer || loading}
           className="mt-4 rounded-md bg-amber-600 px-4 py-2 text-sm font-semibold text-neutral-950 transition hover:bg-amber-500 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {loading ? "Signing & settling…" : `Run this call as the agent — ${ENDPOINTS[endpoint].price}`}
@@ -133,7 +132,7 @@ export default function LiveDemoPanel() {
             {error.toLowerCase().includes("insufficient") && (
               <>
                 {" "}
-                — fund your demo wallet on the{" "}
+                — fund your wallet on the{" "}
                 <a href="https://lora.algokit.io/testnet/fund" target="_blank" rel="noopener noreferrer" className="underline">
                   TestNet dispenser
                 </a>
@@ -166,11 +165,11 @@ export default function LiveDemoPanel() {
             </div>
             {result.status === 402 && (
               <p className="text-xs text-amber-400">
-                A real payment was constructed and signed by your demo wallet, but settlement was rejected —
+                A real payment was constructed and signed by your wallet, but settlement was rejected —
                 almost always because the wallet has no TestNet USDC yet. Fund it above, then try again.
               </p>
             )}
-            <pre className="max-h-80 overflow-auto rounded-md bg-neutral-900 p-3 text-xs text-neutral-300">
+            <pre className="max-h-80 overflow-y-auto overflow-x-hidden whitespace-pre-wrap break-words rounded-md bg-neutral-900 p-3 text-xs text-neutral-300">
               {JSON.stringify(result.body, null, 2)}
             </pre>
           </div>
