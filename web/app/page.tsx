@@ -3,7 +3,7 @@ import AgentFlowPanel from "@/components/AgentFlowPanel";
 import LiveDemoPanel from "@/components/LiveDemoPanel";
 import PricingTable from "@/components/PricingTable";
 import ConsentChecker from "@/components/ConsentChecker";
-import UserPanel from "@/components/UserPanel";
+import DashboardView from "@/components/DashboardView";
 
 export default function Home() {
   return (
@@ -83,14 +83,9 @@ export default function Home() {
 
       <section className="mb-14">
         <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-neutral-500">
-          Patient dashboard — who&rsquo;s accessing your data
+          Dashboard — who&rsquo;s accessing your data
         </h2>
-        <p className="mb-4 max-w-3xl text-sm text-neutral-400">
-          The patient&rsquo;s own view of the same consent contract: their profile, every requester who
-          has asked for a record, whether that requester is flagged, and a one-click approve, deny, or
-          revoke for each.
-        </p>
-        <UserPanel />
+        <DashboardView />
       </section>
 
       <section className="mb-14">

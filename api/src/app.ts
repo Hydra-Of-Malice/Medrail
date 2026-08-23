@@ -14,6 +14,7 @@ import { triageRoute } from "./routes/triage.js";
 import { interactionRoute } from "./routes/interaction.js";
 import { consentRoute } from "./routes/consent.js";
 import { recordsRoute } from "./routes/records.js";
+import { summarizeRoute } from "./routes/summarize.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -44,6 +45,10 @@ app.use(
 app.use("/v1/consent/status", rateLimit({ limit: 60, windowMs: 60_000, scope: "consent-status" }));
 app.use("/v1/consent/arc56", rateLimit({ limit: 30, windowMs: 60_000, scope: "arc56" }));
 app.use("/v1/records/summary", rateLimit({ limit: 30, windowMs: 60_000, scope: "records" }));
+// Calls out to Gemini on our own API key, so it's throttled tighter than the
+// other free routes — a caller here is spending MedRail's third-party quota,
+// not just this server's CPU.
+app.use("/v1/summarize", rateLimit({ limit: 15, windowMs: 60_000, scope: "summarize" }));
 
 // Every x402-priced route in one place, so pricing is easy for a judge (or a
 // caller writing an integration) to audit at a glance.
@@ -224,6 +229,7 @@ app.route("/", triageRoute);
 app.route("/", interactionRoute);
 app.route("/", consentRoute);
 app.route("/", recordsRoute);
+app.route("/", summarizeRoute);
 
 app.onError((err, c) => {
   // Log the detail server-side; return a generic body. Echoing err.message to an
@@ -274,6 +280,7 @@ app.get("/", (c) =>
       { method: "POST", path: "/v1/triage", price: "$0.02", gate: "x402" },
       { method: "POST", path: "/v1/interaction-check", price: "$0.02", gate: "x402" },
       { method: "POST", path: "/v1/records/summary", price: "$0.05", gate: "x402 + on-chain consent" },
+      { method: "POST", path: "/v1/summarize", price: "free", gate: "rate-limited" },
       { method: "GET", path: "/v1/consent/status", price: "free", gate: "none" },
       { method: "GET", path: "/v1/consent/app-info", price: "free", gate: "none" },
       { method: "GET", path: "/v1/consent/arc56", price: "free", gate: "none" },

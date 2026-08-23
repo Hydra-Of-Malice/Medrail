@@ -22,6 +22,15 @@ const REVOKE_ACCESS_METHOD = new algosdk.ABIMethod({
   returns: { type: "void" },
 });
 
+const REQUEST_ACCESS_METHOD = new algosdk.ABIMethod({
+  name: "request_access",
+  args: [
+    { type: "address", name: "patient" },
+    { type: "string", name: "scope" },
+  ],
+  returns: { type: "void" },
+});
+
 function grantBoxName(patient: string, requester: string, scope: string): Promise<Uint8Array> {
   const prefix = new TextEncoder().encode("g");
   const inner = new Uint8Array([
@@ -60,6 +69,32 @@ export async function grantAccessOnChain(
     signer,
     suggestedParams,
     boxes: [{ appIndex: 0, name: boxName }],
+  });
+
+  const result = await atc.execute(algod, 4);
+  return result.txIDs[0];
+}
+
+/** Requester signals interest — no box is created (see contract.py::request_access), so
+ * this is a notification event only, not a queryable state. It costs no MBR and does not
+ * itself grant anything; the patient still has to call grant_access to authorise it. */
+export async function requestAccessOnChain(
+  requesterAddress: string,
+  signer: algosdk.TransactionSigner,
+  patient: string,
+  scope: string,
+): Promise<string> {
+  const appId = await getAppId();
+  const suggestedParams = await algod.getTransactionParams().do();
+
+  const atc = new algosdk.AtomicTransactionComposer();
+  atc.addMethodCall({
+    appID: appId,
+    method: REQUEST_ACCESS_METHOD,
+    methodArgs: [patient, scope],
+    sender: requesterAddress,
+    signer,
+    suggestedParams,
   });
 
   const result = await atc.execute(algod, 4);

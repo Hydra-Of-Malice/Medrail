@@ -31,3 +31,17 @@ export async function getConsentStatus(patient: string, requester: string, scope
   if (!res.ok) throw new Error(body.error ?? `status check failed: ${res.status}`);
   return body;
 }
+
+/** record is whatever the caller already holds — a paid /v1/records/summary response,
+ * or a doctor panel's illustrative demo record. Gemini itself is only ever called
+ * server-side (api/src/services/gemini.ts); this just relays to that endpoint. */
+export async function summarizeRecord(record: Record<string, unknown>, history?: string): Promise<string> {
+  const res = await fetch(`${API_BASE}/v1/summarize`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ record, history }),
+  });
+  const body = await res.json();
+  if (!res.ok) throw new Error(body.error ?? `summarize failed: ${res.status}`);
+  return body.summary as string;
+}

@@ -57,6 +57,9 @@ export const config = {
   consentAppId: Number(process.env.CONSENT_APP_ID || readDeployedAppId(network) || 0),
   // Operator (admin) account that calls log_access after a verified payment.
   operatorMnemonic: process.env.OPERATOR_MNEMONIC ?? "",
+  // Server-side only — never exposed to the frontend. Used solely by
+  // routes/summarize.ts to call Gemini on the caller's behalf.
+  geminiApiKey: process.env.GEMINI_API_KEY ?? "",
 } as const;
 
 /**
@@ -80,6 +83,13 @@ export function assertPayToConfigured(): void {
       `PAY_TO_ADDRESS is not a valid Algorand address: ${config.payToAddress.slice(0, 12)}...`,
     );
   }
+}
+
+export function requireGeminiApiKey(): string {
+  if (!config.geminiApiKey) {
+    throw new Error("GEMINI_API_KEY is not set — see api/.env.example.");
+  }
+  return config.geminiApiKey;
 }
 
 export function requireConsentAppId(): number {
