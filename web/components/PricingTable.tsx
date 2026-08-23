@@ -7,25 +7,25 @@ const ROWS = [
 
 export default function PricingTable() {
   return (
-    <div className="overflow-x-auto rounded-lg border border-neutral-800">
+    <div className="overflow-x-auto rounded-[6px] border border-line">
       <table className="w-full text-left text-sm">
-        <thead className="bg-neutral-900 text-xs uppercase tracking-wide text-neutral-500">
+        <thead className="bg-surface-2 font-mono text-xs uppercase tracking-wide text-text-faint">
           <tr>
-            <th className="px-4 py-2">Endpoint</th>
-            <th className="px-4 py-2">Price</th>
-            <th className="px-4 py-2">Gate</th>
-            <th className="px-4 py-2">Notes</th>
+            <th className="px-4 py-2 font-medium">Endpoint</th>
+            <th className="px-4 py-2 font-medium">Price</th>
+            <th className="px-4 py-2 font-medium">Gate</th>
+            <th className="px-4 py-2 font-medium">Notes</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-neutral-800">
+        <tbody className="divide-y divide-line">
           {ROWS.map((r) => (
-            <tr key={r.path} className="bg-neutral-950">
-              <td className="px-4 py-2 font-mono text-neutral-200">
-                <span className="text-neutral-500">{r.method}</span> {r.path}
+            <tr key={r.path} className="bg-surface">
+              <td className="px-4 py-2 font-mono text-text">
+                <span className="text-text-faint">{r.method}</span> {r.path}
               </td>
-              <td className="px-4 py-2 font-mono text-amber-400">{r.price}</td>
-              <td className="px-4 py-2 text-neutral-400">{r.gate}</td>
-              <td className="px-4 py-2 text-neutral-400">{r.note}</td>
+              <td className="px-4 py-2 font-mono tabular-nums text-value">{r.price}</td>
+              <td className="px-4 py-2 text-text-muted">{r.gate}</td>
+              <td className="px-4 py-2 text-text-muted">{r.note}</td>
             </tr>
           ))}
         </tbody>

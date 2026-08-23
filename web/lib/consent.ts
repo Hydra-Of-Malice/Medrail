@@ -3,7 +3,7 @@ import { ALGOD_URL, API_BASE } from "./config";
 
 const algod = new algosdk.Algodv2("", ALGOD_URL, "");
 
-const GRANT_ACCESS_METHOD = new algosdk.ABIMethod({
+export const GRANT_ACCESS_METHOD = new algosdk.ABIMethod({
   name: "grant_access",
   args: [
     { type: "address", name: "requester" },
@@ -13,7 +13,7 @@ const GRANT_ACCESS_METHOD = new algosdk.ABIMethod({
   returns: { type: "void" },
 });
 
-const REVOKE_ACCESS_METHOD = new algosdk.ABIMethod({
+export const REVOKE_ACCESS_METHOD = new algosdk.ABIMethod({
   name: "revoke_access",
   args: [
     { type: "address", name: "requester" },
@@ -22,13 +22,27 @@ const REVOKE_ACCESS_METHOD = new algosdk.ABIMethod({
   returns: { type: "void" },
 });
 
-const REQUEST_ACCESS_METHOD = new algosdk.ABIMethod({
+export const REQUEST_ACCESS_METHOD = new algosdk.ABIMethod({
   name: "request_access",
   args: [
     { type: "address", name: "patient" },
     { type: "string", name: "scope" },
   ],
   returns: { type: "void" },
+});
+
+/** Admin-only on the contract (see contract.py::log_access) — the frontend never calls this
+ * itself, but decodes it from indexer history to build a real, global audit trail. */
+export const LOG_ACCESS_METHOD = new algosdk.ABIMethod({
+  name: "log_access",
+  args: [
+    { type: "address", name: "patient" },
+    { type: "address", name: "requester" },
+    { type: "string", name: "scope" },
+    { type: "string", name: "endpoint" },
+    { type: "string", name: "action" },
+  ],
+  returns: { type: "uint64" },
 });
 
 function grantBoxName(patient: string, requester: string, scope: string): Promise<Uint8Array> {
@@ -41,7 +55,7 @@ function grantBoxName(patient: string, requester: string, scope: string): Promis
   return crypto.subtle.digest("SHA-256", inner).then((digest) => new Uint8Array([...prefix, ...new Uint8Array(digest)]));
 }
 
-async function getAppId(): Promise<number> {
+export async function getAppId(): Promise<number> {
   const res = await fetch(`${API_BASE}/v1/consent/app-info`, { cache: "no-store" });
   const info = await res.json();
   if (!info.consentAppId) throw new Error("Consent contract is not deployed yet.");

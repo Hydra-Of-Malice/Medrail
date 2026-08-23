@@ -1,4 +1,5 @@
 import { Fragment } from "react";
+import Card from "./ui/Card";
 
 const EXPLORER = (txId: string) => `https://lora.algokit.io/testnet/transaction/${txId}`;
 
@@ -94,31 +95,29 @@ const TOTALS = [
 
 export default function AgentFlowPanel() {
   return (
-    <div className="rounded-lg border border-neutral-800 bg-neutral-950 p-5 sm:p-6">
+    <Card className="sm:p-6">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <h3 className="font-mono text-xs uppercase tracking-wide text-amber-500">
-          One agent run, no human in the loop
-        </h3>
-        <span className="rounded-full border border-neutral-800 px-2 py-0.5 font-mono text-[11px] text-neutral-500">
+        <h3 className="font-display text-lg font-medium text-text">One agent run, no human in the loop</h3>
+        <span className="rounded-full border border-line px-2 py-0.5 font-mono text-[11px] text-text-faint">
           already executed on TestNet
         </span>
       </div>
-      <p className="mt-2 max-w-3xl text-sm text-neutral-400">
+      <p className="mt-2 max-w-3xl text-sm leading-relaxed text-text-muted">
         A clinical triage agent is handed one case. It holds no MedRail account, no API key, and no prior
         relationship with the service. Here is what it did, in order — every payment below is a real Algorand
         transaction you can open right now.
       </p>
 
-      <div className="mt-4 rounded-md border border-neutral-800 bg-neutral-900/40 p-3">
+      <div className="mt-4 rounded-[6px] border border-line bg-surface-2 p-3">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <span className="font-mono text-[11px] uppercase tracking-wide text-neutral-500">
+          <span className="font-mono text-[11px] uppercase tracking-wide text-text-faint">
             Three distinct parties
           </span>
           <a
             href={EXPLORER(TX.grant)}
             target="_blank"
             rel="noopener noreferrer"
-            className="font-mono text-[11px] text-amber-400 underline underline-offset-2 hover:text-amber-300"
+            className="font-mono text-[11px] text-trust underline underline-offset-2 hover:text-trust/80"
           >
             the patient&rsquo;s own grant transaction →
           </a>
@@ -126,14 +125,14 @@ export default function AgentFlowPanel() {
         <dl className="mt-2 grid gap-2 sm:grid-cols-3">
           {PARTIES.map((p) => (
             <div key={p.role} className="min-w-0">
-              <dt className="text-xs text-neutral-300">
-                {p.role} <span className="text-neutral-500">— {p.note}</span>
+              <dt className="text-xs text-text-muted">
+                {p.role} <span className="text-text-faint">— {p.note}</span>
               </dt>
-              <dd className="mt-0.5 break-all font-mono text-[11px] text-neutral-500">{shortAddr(p.addr)}</dd>
+              <dd className="mt-0.5 break-all font-mono text-[11px] text-text-faint">{shortAddr(p.addr)}</dd>
             </div>
           ))}
         </dl>
-        <p className="mt-2 text-xs text-neutral-500">
+        <p className="mt-2 text-xs leading-relaxed text-text-faint">
           Three separate keypairs: the service can sign for none of the others, so the indexer shows
           sender &ne; receiver on all three payments, and the grant is signed by an account that is neither
           the payer nor the payee. Both wallets were funded from ours, though — TestNet ALGO and USDC have
@@ -144,33 +143,27 @@ export default function AgentFlowPanel() {
       <ol className="mt-6">
         {STEPS.map((step, i) => (
           <Fragment key={step.n}>
-            {i > 0 && <div aria-hidden className="ml-5 h-4 w-px bg-neutral-800 sm:ml-6" />}
+            {i > 0 && <div aria-hidden className="ml-5 h-4 w-px bg-line sm:ml-6" />}
             <li
-              className={`rounded-md border p-3 sm:p-4 ${
-                step.highlight
-                  ? "border-amber-600/40 bg-amber-950/20"
-                  : "border-neutral-800 bg-neutral-900/50"
+              className={`rounded-[6px] border p-3 sm:p-4 ${
+                step.highlight ? "border-trust-dim bg-trust-soft" : "border-line bg-surface-2"
               }`}
             >
               <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
-                <span className="font-mono text-[11px] tracking-wide text-neutral-600">{step.n}</span>
+                <span className="font-mono text-[11px] tracking-wide text-text-faint">{step.n}</span>
                 <span
-                  className={`rounded px-1.5 py-0.5 font-mono text-[11px] uppercase tracking-wide ${
-                    step.free ? "bg-emerald-950 text-emerald-300" : "bg-amber-950/60 text-amber-300"
+                  className={`rounded-[4px] px-1.5 py-0.5 font-mono text-[11px] uppercase tracking-wide ${
+                    step.free ? "bg-success/15 text-success" : "bg-value/15 text-value"
                   }`}
                 >
                   {step.cost}
                 </span>
-                <span className="min-w-0 break-words font-mono text-xs text-neutral-200 sm:text-sm">
-                  {step.call}
-                </span>
+                <span className="min-w-0 break-words font-mono text-xs text-text sm:text-sm">{step.call}</span>
               </div>
 
-              <p className="mt-2 text-sm text-neutral-400">{step.detail}</p>
+              <p className="mt-2 text-sm leading-relaxed text-text-muted">{step.detail}</p>
 
-              {step.punchline && (
-                <p className="mt-2 text-sm font-medium text-amber-300">{step.punchline}</p>
-              )}
+              {step.punchline && <p className="mt-2 text-sm font-medium text-trust">{step.punchline}</p>}
 
               {step.links && (
                 <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1.5">
@@ -180,7 +173,7 @@ export default function AgentFlowPanel() {
                       href={EXPLORER(link.txId)}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="min-w-0 break-all font-mono text-xs text-amber-400 underline underline-offset-2 hover:text-amber-300"
+                      className="min-w-0 break-all font-mono text-xs text-value underline underline-offset-2 hover:text-value/80"
                     >
                       {link.label} · {shortTx(link.txId)} →
                     </a>
@@ -194,26 +187,26 @@ export default function AgentFlowPanel() {
 
       <div className="mt-6 grid gap-3 sm:grid-cols-3">
         {TOTALS.map((t) => (
-          <div key={t.label} className="rounded-md border border-neutral-800 bg-neutral-900/50 p-3">
-            <div className="font-mono text-xl text-neutral-100">{t.value}</div>
-            <div className="mt-0.5 text-xs text-neutral-500">{t.label}</div>
+          <div key={t.label} className="rounded-[6px] border border-line bg-surface-2 p-3">
+            <div className="font-display text-xl tabular-nums text-text">{t.value}</div>
+            <div className="mt-0.5 text-xs text-text-faint">{t.label}</div>
           </div>
         ))}
       </div>
 
-      <div className="mt-6 border-t border-neutral-900 pt-5">
-        <h4 className="font-mono text-xs uppercase tracking-wide text-neutral-500">Reproduce it</h4>
-        <pre className="mt-2 overflow-x-auto rounded-md bg-neutral-900 p-3 font-mono text-xs text-neutral-300">
+      <div className="mt-6 border-t border-line pt-5">
+        <h4 className="font-mono text-xs uppercase tracking-wide text-text-faint">Reproduce it</h4>
+        <pre className="mt-2 overflow-x-auto rounded-[6px] bg-surface-2 p-3 font-mono text-xs text-text-muted">
           npx tsx scripts/agent-demo.ts
         </pre>
-        <p className="mt-2 text-xs text-neutral-500">
-          Run from <code className="text-neutral-400">api/</code> against a funded TestNet wallet. Triage and
+        <p className="mt-2 text-xs leading-relaxed text-text-faint">
+          Run from <code className="text-text-muted">api/</code> against a funded TestNet wallet. Triage and
           interaction checking are deterministic rule engines, not ML models; the record behind{" "}
-          <code className="text-neutral-400">/v1/records/summary</code> is synthetic. The transactions above
+          <code className="text-text-muted">/v1/records/summary</code> is synthetic. The transactions above
           are real settlements, from a run against a local API — the chain does not care where the server
           was, but the honest caveat belongs here.
         </p>
       </div>
-    </div>
+    </Card>
   );
 }

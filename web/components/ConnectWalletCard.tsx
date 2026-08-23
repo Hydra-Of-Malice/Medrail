@@ -93,9 +93,9 @@ export default function ConnectWalletCard() {
 
   if (!address) {
     return (
-      <div className="rounded-lg border border-neutral-800 bg-neutral-950 p-5">
-        <h3 className="font-mono text-xs uppercase tracking-wide text-amber-500">Connect a wallet</h3>
-        <p className="mt-2 text-sm text-neutral-400">
+      <div className="rounded-[6px] border border-line bg-surface p-5">
+        <h3 className="font-mono text-xs uppercase tracking-wide text-trust">Connect a wallet</h3>
+        <p className="mt-2 text-sm text-text-muted">
           Stand in for the agent with a real TestNet wallet, or use a throwaway demo account if you
           don&rsquo;t have one installed. MedRail never sees your keys either way.
         </p>
@@ -105,26 +105,26 @@ export default function ConnectWalletCard() {
               key={wallet.id}
               onClick={() => connectWallet(wallet.id)}
               disabled={connectingId !== null}
-              className="flex w-full items-center gap-3 rounded-md border border-neutral-800 bg-neutral-900 px-3 py-2 text-left text-sm text-neutral-200 transition hover:border-amber-600/60 disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex w-full items-center gap-3 rounded-[6px] border border-line bg-surface-2 px-3 py-2 text-left text-sm text-text transition hover:border-trust-dim disabled:cursor-not-allowed disabled:opacity-50"
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={wallet.metadata.icon} alt="" className="h-5 w-5 rounded" />
+              <img src={wallet.metadata.icon} alt="" className="h-5 w-5 rounded-[4px]" />
               <span>{connectingId === wallet.id ? "Connecting…" : wallet.metadata.name}</span>
             </button>
           ))}
           <button
             onClick={useDemoAccount}
             disabled={connectingId !== null}
-            className="flex w-full items-center gap-3 rounded-md border border-dashed border-neutral-700 bg-neutral-900/60 px-3 py-2 text-left text-sm text-neutral-300 transition hover:border-amber-600/60 disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex w-full items-center gap-3 rounded-[6px] border border-dashed border-line-strong bg-surface-2/60 px-3 py-2 text-left text-sm text-text-muted transition hover:border-trust-dim disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-neutral-800 text-xs">
+            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-[4px] bg-surface text-xs">
               🎭
             </span>
             <span>Use a demo account</span>
           </button>
         </div>
-        {error && <p className="mt-3 text-sm text-red-300">{error}</p>}
-        <p className="mt-3 text-xs text-neutral-600">
+        {error && <p className="mt-3 text-sm text-danger">{error}</p>}
+        <p className="mt-3 text-xs text-text-faint">
           TestNet only. Any funds involved have zero real-world value. A demo account is a throwaway
           keypair generated in your browser and held only in this tab&rsquo;s session storage.
         </p>
@@ -133,16 +133,16 @@ export default function ConnectWalletCard() {
   }
 
   return (
-    <div className="rounded-lg border border-neutral-800 bg-neutral-950 p-5">
+    <div className="rounded-[6px] border border-trust-dim bg-surface p-5">
       <div className="flex items-center justify-between gap-2">
-        <h3 className="truncate font-mono text-xs uppercase tracking-wide text-amber-500">
+        <h3 className="truncate font-mono text-xs uppercase tracking-wide text-trust">
           {walletName ?? "Connected wallet"}
         </h3>
         <div className="flex shrink-0 items-center gap-3">
-          <button onClick={checkBalance} className="text-xs text-neutral-500 hover:text-neutral-300" disabled={checking}>
+          <button onClick={checkBalance} className="text-xs text-text-faint hover:text-text-muted" disabled={checking}>
             {checking ? "checking…" : "refresh balance"}
           </button>
-          <button onClick={disconnect} className="text-xs text-neutral-500 hover:text-red-300">
+          <button onClick={disconnect} className="text-xs text-text-faint hover:text-danger">
             disconnect
           </button>
         </div>
@@ -151,17 +151,18 @@ export default function ConnectWalletCard() {
         href={EXPLORER_ADDRESS_URL(address)}
         target="_blank"
         rel="noopener noreferrer"
-        className="mt-2 block truncate font-mono text-sm text-neutral-300 hover:text-amber-400"
+        className="mt-2 block truncate font-mono text-sm text-text-muted hover:text-trust"
         title={address}
       >
         {shortAddr(address)}
       </a>
-      <p className="mt-2 text-sm text-neutral-400">
-        Balance: {algo !== null ? <span className="font-mono text-neutral-200">{algo} ALGO</span> : "unknown"}
+      <p className="mt-2 text-sm text-text-muted">
+        Balance:{" "}
+        {algo !== null ? <span className="font-mono tabular-nums text-text">{algo} ALGO</span> : "unknown"}
         {balanceMicroAlgo === 0 && (
           <>
             {" — "}
-            <a href={FUND_URL} target="_blank" rel="noopener noreferrer" className="text-amber-400 underline underline-offset-2">
+            <a href={FUND_URL} target="_blank" rel="noopener noreferrer" className="text-value underline underline-offset-2">
               fund it free on the TestNet dispenser
             </a>{" "}
             to run a real payment below.
@@ -169,15 +170,15 @@ export default function ConnectWalletCard() {
         )}
       </p>
 
-      <div className="mt-2 rounded-md border border-neutral-800 bg-neutral-900/50 p-3">
-        <p className="text-sm text-neutral-400">
+      <div className="mt-2 rounded-[6px] border border-line bg-surface-2 p-3">
+        <p className="text-sm text-text-muted">
           USDC:{" "}
           {usdc === null ? (
             "checking…"
           ) : usdc.optedIn ? (
-            <span className="font-mono text-neutral-200">{usdcAmount} USDC</span>
+            <span className="font-mono tabular-nums text-text">{usdcAmount} USDC</span>
           ) : (
-            <span className="text-amber-400">not opted in — a faucet send will fail until you do</span>
+            <span className="text-value">not opted in — a faucet send will fail until you do</span>
           )}
         </p>
         {usdc?.optedIn === false && (
@@ -185,29 +186,29 @@ export default function ConnectWalletCard() {
             <button
               onClick={handleOptIn}
               disabled={optingIn || !transactionSigner}
-              className="mt-2 rounded-md bg-amber-600 px-3 py-1.5 text-xs font-semibold text-neutral-950 transition hover:bg-amber-500 disabled:cursor-not-allowed disabled:opacity-50"
+              className="mt-2 rounded-[6px] bg-value px-3 py-1.5 text-xs font-semibold text-ink transition hover:bg-value/90 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {optingIn ? "Opting in…" : "Opt in to TestNet USDC"}
             </button>
-            <p className="mt-2 text-xs text-neutral-500">
+            <p className="mt-2 text-xs text-text-faint">
               A one-time, zero-value transaction — Algorand accounts must opt in to an asset before
               they can receive it, so a faucet send here will silently fail until you do this.
             </p>
           </>
         )}
         {usdc?.optedIn && usdc.balanceMicroUsdc === 0 && (
-          <p className="mt-2 text-xs text-neutral-500">
+          <p className="mt-2 text-xs text-text-faint">
             Opted in but empty —{" "}
-            <a href={USDC_FAUCET_URL} target="_blank" rel="noopener noreferrer" className="text-amber-400 underline underline-offset-2">
+            <a href={USDC_FAUCET_URL} target="_blank" rel="noopener noreferrer" className="text-value underline underline-offset-2">
               get free TestNet USDC from Circle&rsquo;s faucet
             </a>{" "}
             (select Algorand Testnet), then refresh balance above.
           </p>
         )}
-        {optInError && <p className="mt-2 text-xs text-red-300">{optInError}</p>}
+        {optInError && <p className="mt-2 text-xs text-danger">{optInError}</p>}
       </div>
 
-      <p className="mt-3 text-xs text-neutral-600">
+      <p className="mt-3 text-xs text-text-faint">
         {mode === "demo"
           ? "TestNet-only throwaway keypair, held in this tab's session storage — has zero real-world value."
           : "TestNet only — has zero real-world value. Every transaction below is signed in your wallet, not by MedRail."}

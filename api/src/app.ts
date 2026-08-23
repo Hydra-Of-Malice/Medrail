@@ -15,6 +15,9 @@ import { interactionRoute } from "./routes/interaction.js";
 import { consentRoute } from "./routes/consent.js";
 import { recordsRoute } from "./routes/records.js";
 import { summarizeRoute } from "./routes/summarize.js";
+import { activityRoute } from "./routes/activity.js";
+import { recordActivity } from "./services/activityLog.js";
+import { payerFromRequest } from "./x402Payer.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -49,6 +52,32 @@ app.use("/v1/records/summary", rateLimit({ limit: 30, windowMs: 60_000, scope: "
 // other free routes — a caller here is spending MedRail's third-party quota,
 // not just this server's CPU.
 app.use("/v1/summarize", rateLimit({ limit: 15, windowMs: 60_000, scope: "summarize" }));
+app.use("/v1/activity", rateLimit({ limit: 30, windowMs: 60_000, scope: "activity" }));
+
+// Records one line per call to a priced route, after the payment middleware and
+// the route handler have both run — c.res.status reflects the real outcome
+// (200 settled, 402 unsettled, 403 consent-denied). Registered before the
+// payment middleware below so this `next()` wraps it. Session-forward only: no
+// backfill, no fabricated history — see services/activityLog.ts.
+const PRICED_ROUTES: Record<string, string> = {
+  "POST /v1/triage": "$0.02",
+  "POST /v1/interaction-check": "$0.02",
+  "POST /v1/records/summary": "$0.05",
+};
+app.use("*", async (c, next) => {
+  await next();
+  const pathname = new URL(c.req.url).pathname;
+  const price = PRICED_ROUTES[`${c.req.method} ${pathname}`];
+  if (price) {
+    recordActivity({
+      requester: payerFromRequest(c),
+      endpoint: pathname,
+      method: c.req.method,
+      price,
+      status: c.res.status,
+    });
+  }
+});
 
 // Every x402-priced route in one place, so pricing is easy for a judge (or a
 // caller writing an integration) to audit at a glance.
@@ -230,6 +259,7 @@ app.route("/", interactionRoute);
 app.route("/", consentRoute);
 app.route("/", recordsRoute);
 app.route("/", summarizeRoute);
+app.route("/", activityRoute);
 
 app.onError((err, c) => {
   // Log the detail server-side; return a generic body. Echoing err.message to an
@@ -281,6 +311,7 @@ app.get("/", (c) =>
       { method: "POST", path: "/v1/interaction-check", price: "$0.02", gate: "x402" },
       { method: "POST", path: "/v1/records/summary", price: "$0.05", gate: "x402 + on-chain consent" },
       { method: "POST", path: "/v1/summarize", price: "free", gate: "rate-limited" },
+      { method: "GET", path: "/v1/activity", price: "free", gate: "rate-limited" },
       { method: "GET", path: "/v1/consent/status", price: "free", gate: "none" },
       { method: "GET", path: "/v1/consent/app-info", price: "free", gate: "none" },
       { method: "GET", path: "/v1/consent/arc56", price: "free", gate: "none" },

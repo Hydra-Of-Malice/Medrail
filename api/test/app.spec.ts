@@ -23,6 +23,7 @@ describe("service index (G-34)", () => {
       "POST /v1/interaction-check",
       "POST /v1/records/summary",
       "POST /v1/summarize",
+      "GET /v1/activity",
       "GET /v1/consent/status",
       "GET /v1/consent/app-info",
       "GET /v1/consent/arc56",

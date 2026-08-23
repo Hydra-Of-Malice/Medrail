@@ -1,26 +1,72 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --color-ink: #0a0f0d;
+  --color-surface: #101613;
+  --color-surface-2: #17201c;
+  --color-line: #223028;
+  --color-line-strong: #33473c;
+
+  --color-text: #e9f1ec;
+  --color-text-muted: #8aa69a;
+  --color-text-faint: #56685f;
+
+  --color-trust: #35c2a0;
+  --color-trust-dim: #1d6e5c;
+  --color-trust-soft: #14231e;
+
+  --color-value: #d9a441;
+  --color-value-dim: #7a5a22;
+  --color-value-soft: #241d10;
+
+  --color-success: #4ade80;
+  --color-danger: #e5484d;
+  --color-danger-soft: #2a1315;
+  --color-inactive: #5b6b63;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+  --color-ink: var(--color-ink);
+  --color-surface: var(--color-surface);
+  --color-surface-2: var(--color-surface-2);
+  --color-line: var(--color-line);
+  --color-line-strong: var(--color-line-strong);
+  --color-text: var(--color-text);
+  --color-text-muted: var(--color-text-muted);
+  --color-text-faint: var(--color-text-faint);
+  --color-trust: var(--color-trust);
+  --color-trust-dim: var(--color-trust-dim);
+  --color-trust-soft: var(--color-trust-soft);
+  --color-value: var(--color-value);
+  --color-value-dim: var(--color-value-dim);
+  --color-value-soft: var(--color-value-soft);
+  --color-success: var(--color-success);
+  --color-danger: var(--color-danger);
+  --color-danger-soft: var(--color-danger-soft);
+  --color-inactive: var(--color-inactive);
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --font-display: var(--font-fraunces);
+  --font-sans: var(--font-plex-sans);
+  --font-mono: var(--font-plex-mono);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--color-ink);
+  color: var(--color-text);
+}
+
+h1,
+h2,
+h3 {
+  text-wrap: balance;
+}
+
+::selection {
+  background: var(--color-trust-dim);
+  color: var(--color-text);
+}
+
+/* Digits that line up in a column — prices, balances, tx counts — should not jitter. */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
 }

@@ -15,8 +15,8 @@ export default function NetworkBadge() {
 
   if (error) {
     return (
-      <span className="inline-flex items-center gap-1.5 rounded-full border border-red-800/40 bg-red-950/40 px-3 py-1 text-xs font-mono text-red-300">
-        <span className="h-1.5 w-1.5 rounded-full bg-red-400" />
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-danger/30 bg-danger-soft px-3 py-1 font-mono text-xs text-danger">
+        <span className="h-1.5 w-1.5 rounded-full bg-danger" />
         API unreachable — start the backend (see README)
       </span>
     );
@@ -24,15 +24,15 @@ export default function NetworkBadge() {
 
   if (!health) {
     return (
-      <span className="inline-flex items-center gap-1.5 rounded-full border border-neutral-700 bg-neutral-900 px-3 py-1 text-xs font-mono text-neutral-400">
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1 font-mono text-xs text-text-muted">
         checking status…
       </span>
     );
   }
 
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-800/40 bg-emerald-950/40 px-3 py-1 text-xs font-mono text-emerald-300">
-      <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-trust-dim bg-trust-soft px-3 py-1 font-mono text-xs text-trust">
+      <span className="h-1.5 w-1.5 rounded-full bg-trust" />
       live on {health.network} {health.consentAppId ? `· app ${health.consentAppId}` : "· contract not yet deployed"}
     </span>
   );
