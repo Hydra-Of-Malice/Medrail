@@ -69,7 +69,7 @@ The rationale is recorded in three independent places, in the plan, in the sourc
 
 - **Determinism.** Same input, same output, always. NFR-009 **VALIDATED**, AI-001 **VALIDATED**.
 - **Auditability.** The entire decision procedure is 40 lines. `matchedFlags` (`triageScorer.ts:70`) returns exactly which rules fired, so every score is self-explaining. There is no "why did the model say that."
-- **Testability.** 13 of the repo's 32 tests are pure-function tests over these two files, running in milliseconds with no network and no fixtures. Compare this with the flagship gated endpoint, `api/src/routes/records.ts`, which has **zero** tests.
+- **Testability.** 13 of the repo's 121 tests are pure-function tests over these two files, running in milliseconds with no network and no fixtures. Compare this with the flagship gated endpoint, `api/src/routes/records.ts`, which has **zero** tests.
 - **Zero inference cost and zero latency.** No model to host, no tokens to buy, nothing to rate-limit — which matters when the price is $0.02.
 - **Zero model risk.** No hallucination, no drift, no version pinning, no deprecation, no vendor outage. MedRail already has one third-party availability coupling (the facilitator, finding R-1); it does not have a second.
 - **No prompt-injection surface.** Free-text symptom input never reaches an interpreter. This matters more than usual here because `api/src/routes/records.ts` writes to a public ledger; an injectable path plus an on-chain writer is a materially worse combination.

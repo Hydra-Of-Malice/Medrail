@@ -156,7 +156,7 @@ There is no Part B manual procedure for a paid records call either — the gap i
 | **Affected requirements** | **FR-010**, **FR-011**, **FR-012** (all UNVALIDATED), **SEC-006**, **SEC-007**, **SEC-008**, **NFR-011**, **REL-004**, **DATA-004**, **AI-007** |
 | **Effort** | **M** — 3–4 h |
 
-**Description.** No test exists for `api/src/routes/records.ts` or `api/src/services/algorand.ts`. All 18 API tests cover the two pure rule engines and the 402 response shape.
+**Description.** *(Closed 2026-08-22 — `api/test/records.spec.ts` and `api/test/algorandService.spec.ts` now exist; `src/services` is at 93.18% branch coverage. Original finding retained below.)* No test exists for `api/src/routes/records.ts` or `api/src/services/algorand.ts`. All 18 API tests cover the two pure rule engines and the 402 response shape.
 
 **Current state.** The 32 passing tests distribute as: 14 contract tests (AVM simulator), 7 triage-scorer tests, 6 interaction-checker tests, 5 x402-flow tests. `api/test/` contains exactly three spec files, none of which imports `records.js` or `algorand.js`. `web/` has **no test runner installed at all** — no Vitest, Jest, Playwright or Cypress config exists.
 
@@ -171,7 +171,7 @@ There is no Part B manual procedure for a paid records call either — the gap i
 
 ---
 
-### G-06 — CI has never run
+### G-06 — CI has never run *(closed 2026-08-21; original finding retained)*
 
 | | |
 |---|---|

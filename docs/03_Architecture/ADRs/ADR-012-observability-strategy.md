@@ -80,7 +80,7 @@ A scheduled job — a GitHub Actions cron querying the indexer is sufficient and
 
 **6. Close the CI observability gaps that cost nothing. (SEC-014, OPS-006)**
 
-Fix CI-1 first (`branches: [main]` while the branch is `master`, so the pipeline has never run on a push). Then add `npm audit --audit-level=high`, `pip-audit`, and Dependabot. Add `vitest run --coverage` for visibility — reporting only, no gate; a threshold on a suite that does not cover `routes/records.ts` or `services/algorand.ts` would encourage the wrong tests.
+CI-1 is fixed (`branches: [main, master]` plus `workflow_dispatch`), and `npm audit --audit-level=high` and `npm run coverage` now run. Still to add: `pip-audit`, and Dependabot. Add `vitest run --coverage` for visibility — reporting only, no gate; a threshold on a suite that does not cover `routes/records.ts` or `services/algorand.ts` would encourage the wrong tests.
 
 **Explicitly NOT recommended at this scope:** OpenTelemetry tracing (OPS-004), a Prometheus/Grafana deployment, a log-aggregation vendor, per-caller usage analytics, or a status page. Each is defensible for a service with users; none is defensible for a service whose whole payment history is a handful of self-funded TestNet settlements — no external party has paid for it — and which has no on-call rotation. OPS-004 should stay **NOT IMPLEMENTED** and be recorded as a deliberate scope decision rather than an oversight.
 

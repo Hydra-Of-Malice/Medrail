@@ -317,10 +317,20 @@ No `.env` file is tracked by git — verified.
 ## Testing
 
 ```bash
-cd contracts && pytest tests/ -v          # 14 passed
-cd api && npx tsc --noEmit && npx vitest run   # 18 passed
-cd web && npx tsc --noEmit && npm run build
+cd contracts && pytest tests/ -q                      # 28 passed  (AVM simulator, no network)
+cd api      && npm run typecheck && npx vitest run    # 93 passed  (9 spec files)
+cd api      && npm run coverage                       # 83.05% statements, 65.85% branches
+cd web      && npx tsc --noEmit -p tsconfig.json && npm run build
 ```
+
+**121 automated tests.** `npm run typecheck` is `tsc -p tsconfig.all.json`, which covers `scripts`
+and `test` as well as `src` — the build config compiles only `src`, because that is all that ships,
+and a malformed proof script once survived a green `tsc --noEmit` and failed at run time.
+
+The two modules that can lose money or mis-authorise a caller — `routes/records.ts` and
+`services/algorand.ts` — are the best covered: `src/services` sits at 98.37% of statements and
+93.18% of branches. There is still **no coverage threshold**, so nothing fails a build when it
+drops, and the frontend has no automated tests at all.
 
 Strategy, full case catalogue, and the honest coverage gaps:
 [`docs/07_Testing/`](docs/07_Testing/).

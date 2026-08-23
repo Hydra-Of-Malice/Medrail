@@ -2,26 +2,42 @@
 
 **Purpose:** document the pipeline that exists, prove why it has never run, and supply a replacement that can be committed as-is.
 
-**Status of this document:** authored 2026-08-21 against commit `32ffd73`. §1–§4 describe `.github/workflows/ci.yml` exactly as committed. §5 onward is **RECOMMENDED** and is not in the repo. Repository state at time of writing: **1 branch (`master`), 2 commits, 0 tags, 0 pull requests, 0 releases** — verified with `git branch -a`, `git tag -l`, `git rev-list --count HEAD`.
+**Status of this document:** authored 2026-08-21 against commit `32ffd73`, revised 2026-08-22. §1–§4 describe `.github/workflows/ci.yml` as committed. §5 onward is **RECOMMENDED** and is not in the repo. The repository is on branch `main` with a linear history and no pull requests — verified with `git branch -a`, `git tag -l`, `git rev-list --count HEAD`.
 
 ---
 
-## 0. The headline finding
+## 0. The headline finding — CLOSED
 
-> **CI-1 (HIGH) — `.github/workflows/ci.yml` triggers on `push: branches: [main]`, but the repository's only branch is `master`. No push to this repository has ever triggered CI, and none ever will until the branch is renamed or the trigger is changed.**
+> **CI-1 (HIGH) — the workflow triggered on `push: branches: [main]` while the repository's only
+> branch was `master`, so no push had ever run CI and none ever would.** A pipeline whose every job
+> passes locally and never fires is not a pipeline; it is a file.
 
-The pipeline is not broken. Every job it defines **passes locally** (verified 2026-08-21: API typecheck 0 errors, API build PASS, 18 API tests passed in 4.08 s, 14 contract tests passed in 0.41 s, web typecheck 0 errors, web build PASS in 6.3 s). The problem is that the pipeline never fires. `pull_request` is also configured and would fire — but the repo has **no pull requests**. Two commits went straight onto `master`.
+**Closed 2026-08-21.** The trigger now lists both branches and adds `workflow_dispatch`, so a run can
+also be started by hand:
 
-This is a genuine "the badge is not green because it was never asked to be" finding. It is worth stating plainly rather than letting a reviewer discover it, because the code itself is in good shape.
-
+```yaml
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
 ```
-.github/workflows/ci.yml:3-6      on:
-                                    push:
-                                      branches: [main]     ← never matches
-                                    pull_request           ← never fires; 0 PRs exist
-$ git branch -a
-* master                                                   ← the only branch
-```
+
+The jobs were never the problem, and still pass — re-verified locally 2026-08-22: API typecheck
+0 errors, API build PASS, **93 API tests** in 2.35 s, **28 contract tests** in 0.15 s, web typecheck
+0 errors, web build PASS.
+
+What the pipeline gained since: `npm run typecheck` in place of `npx tsc --noEmit`, so `scripts/`
+and `test/` are compiled and not just `src/`; `npm run coverage` in place of a bare `vitest run`;
+and a rebuilt artifact-freshness gate that compares a fresh compile against
+`contracts/artifacts/current/` rather than against the pinned deployed artifacts, which are
+*expected* to differ while the C-1/C-2 redeploy is deferred. See
+[`../../contracts/artifacts/README.md`](../../contracts/artifacts/README.md).
+
+**Still absent**, and CI-3 stays open for it: no deployment stage, no coverage *threshold* (the
+figure is printed, nothing fails on a drop), no artifact publishing, and no image build — both
+container images were built and booted by hand on 2026-08-22, but nothing in the pipeline stops
+them regressing.
 
 ---
 
@@ -57,7 +73,7 @@ graph LR
 | python | `actions/setup-python@v5`, `python-version: "3.12"` | Matches `contracts/pyproject.toml:4` `requires-python = ">=3.12"`. **No `cache:` key** — CI-4 |
 | install | `pip install -r requirements-dev.txt` in `contracts/` | Pulls `requirements.txt` transitively (line 1 of the dev file): `algorand-python==3.5.1`, `algokit-utils==4.2.3`, `py-algorand-sdk==2.11.1`, `python-dotenv`, plus `puyapy==5.9.0`, `algorand-python-testing==1.1.0`, `pytest` |
 | compile | `python -m puyapy smart_contracts/consent/contract.py --out-dir artifacts` | **Writes to the wrong directory — defect G-28.** See below |
-| test | `pytest tests/ -v` | **14 tests**, AVM simulator (`algorand-python-testing` 1.1.0), no network, no funds. Reviewer-measured 0.41 s |
+| test | `pytest tests/ -v` | **28 tests**, AVM simulator (`algorand-python-testing` 1.1.0), no network, no funds. Measured 0.15 s |
 
 **Assessment:** hermetic, fast, needs no secrets — and its compile step is doing nothing useful.
 
@@ -129,7 +145,7 @@ Both are in the replacement pipeline at §5.
 
 | ID | Sev | Defect | Evidence | Fix |
 |---|---|---|---|---|
-| **CI-1** | **HIGH** | Triggers on `push: branches: [main]`; the only branch is `master`. CI has never run on a push, and there are no PRs to trigger the `pull_request` path either. | `ci.yml:3-6`; `git branch -a` → `* master` | Change the trigger, or rename the branch. §5 does both defensively. |
+| **CI-1** | ~~HIGH~~ **CLOSED** | Triggered on `push: branches: [main]` while the only branch was `master`, so no push ever ran CI. **Fixed 2026-08-21:** `branches: [main, master]` plus `workflow_dispatch`, and the repository is now on `main`. | `ci.yml:3-9` | Done. §5 remains the fuller pipeline. |
 | **CI-2** | MEDIUM | The `api` job depends on a live third-party HTTP call (`facilitator.goplausible.xyz`) made at app-module import. A facilitator outage produces a red build with a misleading message. | `ci.yml:46`; `api/src/x402.ts:6-14`; `api/test/x402-flow.spec.ts` | Split hermetic unit tests from live-facilitator integration tests; run the live suite separately and allow it to fail without blocking. §5, §6. |
 | **CI-3** | MEDIUM | **Partly addressed.** `npm audit --audit-level=high` runs, `npm run coverage` runs, and the artifact-freshness gate compares a fresh compile against `contracts/artifacts/current/`. **Still absent:** a deployment stage, a coverage *threshold* (the figure is printed, nothing fails on a drop), artifact publishing, and any image build — `api/Dockerfile` and `web/Dockerfile` were built and booted by hand on 2026-08-22, but CI never exercises them, so nothing stops them regressing. `api/fly.toml` remains unexercised. | `ci.yml`; `contracts/artifacts/README.md` | §5 jobs `security`, `images`, `deploy-staging`, `deploy-mainnet`. |
 | **CI-4** | LOW | No dependency caching — `setup-node`'s `cache:` and `setup-python`'s `cache:` are both unused. | `ci.yml:32-34, 56-58, 14-16` | §5 sets both. |

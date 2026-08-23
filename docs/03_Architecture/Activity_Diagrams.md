@@ -249,7 +249,7 @@ flowchart TD
         A2["setup-python 3.12 — no cache: CI-4"]
         A3["pip install -r requirements-dev.txt<br/>puyapy==5.9.0, algorand-python-testing==1.1.0"]
         A4["python -m puyapy smart_contracts/consent/contract.py"]
-        A5["pytest tests/ -v — 14 tests, passes locally in 0.41 s"]
+        A5["pytest tests/ -q — 28 tests, passes locally in 0.15 s"]
         A1-->A2-->A3-->A4-->A5
     end
 
@@ -259,7 +259,7 @@ flowchart TD
         B3["npm ci — lockfile respected HERE but not in the Dockerfile: D-4"]
         B4["npx tsc --noEmit — strict, passes locally"]
         B5["npm run build"]
-        B6["npx vitest run — 18 tests, 4.08 s locally"]
+        B6["npx vitest run — 93 tests, 2.35 s locally"]
         B7{"x402-flow.spec.ts reaches facilitator.goplausible.xyz"}
         B8["A THIRD-PARTY OUTAGE = RED BUILD with a misleading failure<br/>CI-2 · tests are not hermetic"]
         B1-->B2-->B3-->B4-->B5-->B6-->B7-->B8
