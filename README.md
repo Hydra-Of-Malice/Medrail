@@ -598,6 +598,16 @@ docs/        Product, requirements, architecture, data, API, security,
              testing, deployment, intelligence layer, operations, hackathon
 ```
 
+## Team
+
+**Team Litchi**
+
+| Name | GitHub |
+|---|---|
+| Aditya Arnav | [Hydra-Of-Malice](https://github.com/Hydra-Of-Malice) |
+| Rudra Pratap | [rpratap2111](https://github.com/rpratap2111) |
+| Yuvraj Singh | [Yuvraj-025](https://github.com/Yuvraj-025) |
+
 ## License
 
 MIT — see [`LICENSE`](LICENSE).
