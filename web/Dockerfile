@@ -11,6 +11,15 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm ci
 COPY . .
+
+# NEXT_PUBLIC_* vars must be declared as build ARGs to reach `npm run build` —
+# a platform env var set only at container runtime is too late; Next.js
+# inlines these into the JS bundle during the build, not on container start.
+ARG NEXT_PUBLIC_API_BASE
+ARG NEXT_PUBLIC_NETWORK
+ENV NEXT_PUBLIC_API_BASE=$NEXT_PUBLIC_API_BASE
+ENV NEXT_PUBLIC_NETWORK=$NEXT_PUBLIC_NETWORK
+
 RUN npm run build
 
 FROM node:20-slim
