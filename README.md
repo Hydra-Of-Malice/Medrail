@@ -1,613 +1,211 @@
-# MedRail
+<div align="center">
 
-**Clinical services an AI agent can discover, use, and pay for — without an account, an API key, or
-permission from anyone except the patient.**
+# 🩺 MedRail
 
-Built for the [Algorand Foundation Global x402 Challenge](https://algorand.co/global-x402-challenge).
-Live on Algorand TestNet — App ID [`768743428`](https://lora.algokit.io/testnet/application/768743428).
+### Pay-per-call clinical services, gated by patient consent.
 
----
+**No accounts or API keys · Patients grant and revoke access on-chain · Every record access is logged on the ledger**
 
-## The agent problem this solves
+[![Live demo](https://img.shields.io/badge/live-open%20demo-2f6fde?style=for-the-badge)](https://medrail-1.onrender.com)
+![Network](https://img.shields.io/badge/network-Algorand%20TestNet-555?style=for-the-badge)
+![Wallet](https://img.shields.io/badge/wallet-Pera%20%C2%B7%20Lute%20%C2%B7%20demo-9a6700?style=for-the-badge)
+![API keys](https://img.shields.io/badge/API%20keys-none-1a7f37?style=for-the-badge)
 
-An AI agent triaging a patient case needs three things: **symptom triage**, a **drug-interaction
-check**, and the **patient's record**.
+<img src="docs/screenshot-main.png" width="720" alt="MedRail dashboard: API health, settled payment count, USDC volume, active consent grants, and charts of payments and consent events">
 
-Today that means three vendor signups, three API keys, three billing relationships — and even then
-the agent cannot legally touch the record, because nobody can prove the patient allowed it.
+</div>
 
-MedRail sells all three **per call, over x402**, settled in USDC on Algorand. The record endpoint
-adds the part no API key can give you: it is gated by a consent grant **the patient signed with
-their own key on-chain**, and every access writes an immutable entry to that patient's audit trail.
+MedRail sells three clinical services to software agents, one call at a time: a symptom red-flag check, a drug-interaction check, and a patient record summary. Callers pay a few cents in USDC over the x402 protocol, so there is no signup, contract, or API key. The record summary works only if the patient has granted that caller access on the Algorand blockchain, and each access is written to the patient's on-chain audit trail. It was built for the [Algorand Foundation Global x402 Challenge](https://algorand.co/global-x402-challenge) and runs on Algorand TestNet with demo data only.
 
-So a single paid call is three things at once: **a settled stablecoin payment**, **an on-chain
-authorisation check**, and **an audit-log append**. That composition is the project.
+## 💡 Why you'll like it
 
-### Watch an agent actually do it
-
-```bash
-cd api && npx tsx scripts/agent-demo.ts
-```
-
-An autonomous agent with no prior knowledge of MedRail reads `GET /`, learns the catalogue and
-prices, decides which services the case needs, checks the **free** consent oracle before spending on
-the gated endpoint, and pays for what it uses:
-
-```
-  Agent wallet : UYBTLPHS…5GO4YQ
-  Patient      : 56LFG5EE…LO66YM   (a different party — granted this agent access on-chain)
-
-[1] DISCOVER — reading the service index at GET /
-      MedRail: 8 endpoints advertised · x402 v2 · scheme "exact"
-      consent contract: App 768743428 on testnet
-
-[2] POST /v1/triage             paid $0.02   band=EMERGENCY score=70
-[3] POST /v1/interaction-check  paid $0.02   MAJOR: warfarin + aspirin
-[4] GET  /v1/consent/status     cost $0.00   granted=true
-[5] POST /v1/records/summary    paid $0.05   consent verified on-chain, access audited
-
-  $0.09  total, across 3 settled Algorand transactions
-  Zero accounts created. Zero API keys issued. Zero invoices.
-```
-
-**Three separate accounts, three separate keypairs.** The patient
-([`56LFG5EE…`](https://lora.algokit.io/testnet/account/56LFG5EEHIJ4ZVMPHUMJH6BST2O3D4DMG3AWRZ2SN7Y3LLUDVUDILO66YM))
-granted *that specific agent* access in a transaction
-[they signed themselves](https://lora.algokit.io/testnet/transaction/IG4XEBTMRCKI724ZVHSYUN4ECTYBXAGZM5N35NP4Y3ZVWECG7WUQ),
-with the backend nowhere in that path. The agent
-([`UYBTLPHS…`](https://lora.algokit.io/testnet/account/UYBTLPHS6APCXVBDPASQMUIQCEORDIR6EMTVMNSDPSVRSR5HEPKQ5GO4YQ))
-pays. MedRail receives, and can sign for neither of the others. The indexer confirms sender ≠ receiver
-on every payment:
-[$0.02 triage](https://lora.algokit.io/testnet/transaction/DOSKCNKJRXIMY2UDSDZ377LKPZQIZJW5JHCGUAGKOYV6KUCFYKIA) ·
-[$0.02 interaction](https://lora.algokit.io/testnet/transaction/PLBFDDADW576IUCH62HGGYI4AJQNO3QXSENNDIBKAORWVMP7NVHQ) ·
-[$0.05 record](https://lora.algokit.io/testnet/transaction/COMJ3TQOGTKP6LXDJS7HZY7B45QZJQWXXJ23HQ3IDDQYD7GRK36A)
-
-That last call also wrote an
-[audit entry](https://lora.algokit.io/testnet/transaction/E6ZTGEAOTLJQDYOUVBYJYL7LKTXHBGXGVTBKN3SR2NUPWJ2PIGQA)
-into the patient's on-chain trail naming the agent — so the patient can see who read their record.
-
-*Stated precisely:* both wallets were funded from our own account, because TestNet ALGO and USDC have
-no other practical source. So these are genuine account-to-account settlements between independent
-keypairs — **not** external revenue. No unrelated party has paid for this service yet.
-
-## What this is
-
-Concretely, three priced endpoints share one `payTo` address and one smart contract:
-
-| Endpoint | Price | Gate | What it does |
-|---|---|---|---|
-| `POST /v1/triage` | $0.02 | x402 payment | Rule-based clinical red-flag score over free-text symptoms |
-| `POST /v1/interaction-check` | $0.02 | x402 payment | Checks a medication list against a curated severe-interaction table |
-| `POST /v1/records/summary` | $0.05 | x402 payment **+** on-chain consent | Returns a record summary only if the patient has an active grant for this requester and scope |
-
-Plus five free routes: `GET /v1/consent/status`, `/v1/consent/app-info`, `/v1/consent/arc56`,
-`/v1/health`, and `GET /` (a machine-readable service index).
-
-No account. No API key. No prior relationship. Any off-the-shelf x402 client — `@x402/fetch`, or
-another team's agent — can call and pay for these in one round trip.
-
-## Why it matters
-
-Two problems meet here.
-
-Patients cannot grant machine-readable, independently verifiable, revocable consent over their own
-clinical data. Consent today lives inside whichever organisation holds the record; the patient
-cannot see who accessed what, and cannot revoke access without asking the holder to do it for them.
-
-Separately, autonomous agents have no good way to pay for a clinical API. Accounts, API keys, and
-monthly invoices assume a human signs up. An agent that needs one drug-interaction check does not
-want a contract.
-
-MedRail puts both on the same rail: **the payment authenticates the caller, and the ledger
-authorises them.** The patient signs grants with their own key — the backend never holds or
-proxies it — and every gated access is designed to leave a record on a public ledger that the
-patient can read and nobody, including MedRail, can quietly delete.
-
-## What is actually proven
-
-This project is unusually careful about the difference between "built" and "proven". Every claim
-below is independently checkable, and every one was re-verified against the public indexer during
-the 2026-08-21 engineering review — not taken from this repository's own word.
-
-| Claim | Evidence |
+| | |
 |---|---|
-| Contract deployed on Algorand TestNet | App [`768743428`](https://lora.algokit.io/testnet/application/768743428), created round 66088624, `deleted: false` |
-| Full consent lifecycle exercised on-chain | request → grant → `check_access=true` → revoke → `check_access=false`, every step a confirmed transaction ([`docs/PROOF.md`](docs/PROOF.md) §5) |
-| A real x402 payment settled | [`OYRQRKYA…`](https://lora.algokit.io/testnet/transaction/OYRQRKYA7WUKBVLWTOFJSJMZFBW7VCNGP5VGH5EBUJGRCVFQFJRQ) — `axfer`, asset `10458941` (TestNet USDC), **20000** base units = exactly $0.02 at 6 decimals, `fee: 0` via facilitator sponsorship, round 66091768 |
-| 402 challenge matches the live facilitator | Decoded `PAYMENT-REQUIRED` carries the real asset id, the real fee-payer address, and an SDK-computed unit conversion — nothing hardcoded ([`docs/PROOF.md`](docs/PROOF.md) §3) |
-| **The deployed program is this repo's source** | `contract.py` → (reproducible `puyapy` 5.9.0 compile) → committed TEAL → (algod assemble) → **byte-identical** to the bytecode running at App `768743428` ([`docs/PROOF.md`](docs/PROOF.md) §7) |
-| Test suites pass | **28** contract tests (AVM simulator) + **93** API tests = **121**, all green; API and web both typecheck and build |
+| 🔑 **No signup** | An agent reads the price list at `GET /`, pays per call, and gets its answer. |
+| 🪙 **Cents per call** | $0.02 for triage or an interaction check, $0.05 for a record summary. |
+| 🙋 **Patient decides** | Only the patient's own wallet can grant or revoke access. The server never holds their key. |
+| 📜 **Audit trail no one can edit** | Each record access, and each request refused for lack of consent, is appended to the patient's log on the ledger. |
+| 🛡️ **No paying to impersonate** | The wallet that pays must be the one the patient granted, or the call is refused and not charged. |
+| 🆓 **Check before you pay** | A free consent lookup tells an agent whether a paid record call would succeed. |
+| 🔍 **Everything checkable** | Payments, grants, and audit entries link to public TestNet transactions. |
 
-**The full composition, proven on-chain.** One paid call to `/v1/records/summary` produced three
-real transactions — the patient's [`grant_access`](https://lora.algokit.io/testnet/transaction/M26NPR32Z5YBLBBMZDTBQL6Y7EUSNS5YV4PXYEUBXIVJQGVJ3MAA),
-a settled [$0.05 x402 payment](https://lora.algokit.io/testnet/transaction/5DKFUULWLTNGKLYLH3TT44F22MHKOFRCEO6K4JVEPOPETFBYOESA),
-and the [immutable audit entry](https://lora.algokit.io/testnet/transaction/4YLKLQKKWXXFW3UT5APJVYKXI7T7A6OACTAWCC5YBAN3XGOGHRVQ)
-(sequence 1). `total_audit_entries` went 0 → 1 on the deployed contract. Reproducible:
-`npx tsx scripts/e2e-consent-proof.ts`. See [`docs/PROOF.md`](docs/PROOF.md) §9.
+## 🚀 Three steps
 
-Also pending, deliberately: MainNet deployment, public hosting, and the Bazaar listing. Each
-requires the team's own funded wallet and accounts. See [`docs/COMPLIANCE.md`](docs/COMPLIANCE.md)
-for the rule-by-rule status.
+<img src="docs/screenshot-services.png" width="720" alt="MedRail Services page: Clinical Triage and Medication Interaction Check at $0.02, Patient Record Summary at $0.05 with consent required, and a free Consent Status Lookup">
 
-## Architecture
+1. **Connect a wallet.** Use Pera, Lute, or a throwaway demo account from the top bar.
+2. **Grant consent.** On the Consent page, act as the patient and approve a requester or grant yourself access.
+3. **Pay for a call.** On the Developer page, run a paid call and follow its transaction on-chain.
 
-```mermaid
-flowchart TB
-    Agent["Any x402 client<br/>(agent, script, browser)"]
-    Web["MedRail Web<br/>Next.js 16 · one route"]
-    API["MedRail API<br/>Hono · TypeScript · Node 20<br/>3 priced + 5 free routes"]
-    Fac["GoPlausible facilitator<br/>verify + settle + fee sponsorship"]
-    Chain["Algorand<br/>MedRailConsent · App 768743428"]
-    Node["AlgoNode<br/>algod + indexer"]
+## 🌐 Try it or run it
 
-    Agent -->|"1 · unpaid request"| API
-    API -->|"2 · 402 + PAYMENT-REQUIRED"| Agent
-    Agent -->|"3 · signed payment"| API
-    API <-->|"4 · verify + settle"| Fac
-    Fac -->|"5 · submit"| Chain
-    API -->|"6 · check_access (simulate, free)"| Node
-    API -->|"7 · log_access (admin-signed txn)"| Node
-    Node --- Chain
-    Web -->|"paid calls"| API
-    Web ==>|"grant / revoke — patient-signed,<br/>never through the backend"| Node
+The demo is live at **https://medrail-1.onrender.com**. Nothing to install.
 
-    style Chain fill:#1e3a5f,stroke:#3b82f6,color:#fff
-    style API fill:#78350f,stroke:#f59e0b,color:#fff
-```
+1. Open the site. The hosted demo sleeps when idle, so the first load can take up to a minute.
+2. Click **Connect wallet**. Pick Pera or Lute set to TestNet, or **Use a demo account**. A demo account is a new keypair kept in your browser tab.
+3. Get free TestNet ALGO from the [Lora dispenser](https://lora.algokit.io/testnet/fund).
+4. Click **Opt in to TestNet USDC** and approve it. Algorand accounts must opt in before they can receive USDC, so a faucet send fails without this step.
+5. Get free TestNet USDC from [Circle's faucet](https://faucet.circle.com) (choose Algorand Testnet).
+6. Open **Developer**, pick a service, and click **Run this call as the agent**. With Pera or Lute, you approve each payment and consent transaction in the wallet app.
 
-Three deployment units, one contract, **no database, no cache, no queue, no message bus.** The
-ledger is the system of record — a decision with real costs, argued in
-[ADR-002](docs/03_Architecture/ADRs/ADR-002-no-database-ledger-as-system-of-record.md).
+You can browse the Dashboard, Services, Transactions, Consent, and Audit Trail pages without a wallet. To run everything on your own machine, see Development below.
 
-Full design: [`docs/03_Architecture/`](docs/03_Architecture/).
-
-## About the "AI" endpoints — read this before judging them
-
-`/v1/triage` and `/v1/interaction-check` contain **no machine-learning model of any kind.** No LLM,
-no embeddings, no vector store, no inference. They are deterministic rule engines: a weighted
-keyword matcher over 11 red-flag groups, and a lookup against 14 curated drug pairs.
-
-That was a deliberate safety decision, not a shortcut. A hackathon endpoint that reads as
-authoritative medical advice is a genuine harm vector, and an opaque model in a clinical decision
-path cannot be audited by the clinician who would have to trust it. What the project gets in
-exchange is determinism, inspectability, unit-testability, zero inference cost, and no
-prompt-injection surface.
-
-What it gives up is equally real: no generalisation, no synonym or negation handling, no clinical
-validation. All of it is enumerated in
-[`docs/09_Intelligence_Layer/Limitations.md`](docs/09_Intelligence_Layer/Limitations.md).
-Every response carries a non-diagnostic disclaimer, and that disclaimer is asserted by the test
-suite as a correctness property rather than written in prose.
-
-## USP — what makes this different
-
-Most x402 entries price an existing API per call. That is a payment rail bolted onto a product.
-MedRail's differentiator is that **the payment and the authorisation are the same act**.
-
-**1. The payment is the authentication.**
-`/v1/records/summary` recovers the address that signed the x402 payment and refuses the request
-unless it matches the requester whose consent it checks. No API key, no session, no bearer token —
-the money proves who is asking. `api/scripts/verify-g01-fix.ts` runs the impersonation attack
-against live TestNet and shows it rejected with a 403.
-
-**2. The patient is the authoriser, and the backend cannot override them.**
-`grant_access` and `revoke_access` are signed client-side by the patient's own key and submitted
-straight to Algorand. MedRail's server never holds, sees, or proxies that key — so "the patient
-controls access" is structural, not a policy promise. Revocation is one transaction and takes effect
-on the next call.
-
-**3. Every paid access writes an audit entry the operator cannot delete.**
-Not a log file MedRail could edit — an append-only per-patient sequence in Algorand box storage.
-The patient can read who accessed their record, when, and under what scope, without asking MedRail
-for it.
-
-**4. Off-the-shelf agents work with zero MedRail-specific code.**
-This drove a real architectural decision: the audit write is a *follow-up* transaction rather than a
-leg in the client's signed payment group, because requiring clients to know our App ID and method
-signatures would break every generic `@x402/fetch` caller
-([ADR-005](docs/03_Architecture/ADRs/ADR-005-audit-write-as-follow-up-transaction.md)). We gave up
-atomicity to keep the door open to any agent.
-
-**5. Self-describing for machines.**
-`GET /` returns the catalogue with prices and gates; `/v1/consent/arc56` serves the compiled ABI spec
-so an agent can build its own on-chain client without cloning this repository.
-
-### What is *not* novel, stated plainly
-
-x402 is a protocol we consume, not one we invented. Algorand box storage is standard. On-chain
-consent registries are a known pattern. The two intelligence endpoints are deterministic rule
-engines, not models — a deliberate safety choice, argued in
-[ADR-007](docs/03_Architecture/ADRs/ADR-007-deterministic-rule-engines-instead-of-an-ml-model.md).
-The novelty is the composition, not the parts.
-
-## Technology
-
-| Layer | Stack |
+| Requirement | Details |
 |---|---|
-| Contract | Algorand Python (`algopy`) 3.5.1, compiled with `puyapy` 5.9.0; ARC-4 ABI, ARC-56 spec, box storage |
-| API | Hono 4.7, TypeScript 5.7 (strict), Node 20, `@x402/{core,avm,hono}` 2.21.0, `algosdk` ^3.6.0, zod |
-| Web | Next.js 16.3.0, React 19.2.8, Tailwind CSS 4 |
-| Chain | Algorand TestNet · USDC ASA `10458941` · x402 protocol v2, scheme `exact` |
-| Facilitator | GoPlausible — `https://facilitator.goplausible.xyz` |
-| Test | `pytest` + `algorand-python-testing` (AVM simulator) · `vitest` |
+| Browser | A current desktop browser |
+| Wallet | Pera or Lute on TestNet, or the built-in demo account |
+| Funds | TestNet ALGO and TestNet USDC. Both are free and have no real value. |
+| Local run | Node.js 20 for the API and web app. Python 3.12 for the smart contract. |
+| Not supported | Algorand MainNet (no contract is deployed there). Defly wallet. Real patient data. Mobile browsers are not tested. |
 
-## Quick start
+## 🔍 What it does
 
-```bash
-# 1 — Contract: compile + test (no network, no funds)
-cd contracts
-python -m venv .venv && .venv/Scripts/activate      # or: source .venv/bin/activate
-pip install -r requirements-dev.txt
-python -m puyapy smart_contracts/consent/contract.py --out-dir artifacts
-cp smart_contracts/consent/artifacts/* artifacts/    # see note below
-pytest tests/ -v                                     # expect 14 passed
-
-# 2 — API
-cd ../api
-npm install
-cp .env.example .env                                 # fill PAY_TO_ADDRESS / OPERATOR_MNEMONIC
-npm run dev                                          # http://localhost:4021
-
-# 3 — Web
-cd ../web
-npm install && cp .env.example .env.local
-npm run dev                                          # http://localhost:3000
-```
-
-> **Note on the copy step.** `puyapy` resolves `--out-dir` relative to the *source file*, so
-> `--out-dir artifacts` writes to `contracts/smart_contracts/consent/artifacts/` — not
-> `contracts/artifacts/`, which is where `deploy_testnet.py` and the `/v1/consent/arc56` route both
-> read from. The committed artifacts were produced this way and copied across; the copy was
-> previously undocumented. Passing `--out-dir ../../artifacts` targets the right directory but
-> embeds an absolute machine-specific path in the source maps, so it is not reproducible. Tracked
-> as **G-28** in [`docs/ENGINEERING_GAP_REPORT.md`](docs/ENGINEERING_GAP_REPORT.md).
-
-Full setup including TestNet funding, the USDC opt-in step, and deployment:
-[`docs/08_Deployment/Environment_Setup.md`](docs/08_Deployment/Environment_Setup.md).
-
-### Watch an autonomous agent use the service
-
-```bash
-cd api && npx tsx src/index.ts &          # start the API
-npm run preflight                         # eight checks; exits 1 if anything blocks the run
-npx tsx scripts/agent-demo.ts             # the agent discovers, decides, and pays
-```
-
-Needs a TestNet account holding ALGO and USDC (see `docs/08_Deployment/Environment_Setup.md`).
-Other scripts prove specific properties:
-
-| Script | Proves |
+| Stage | What happens |
 |---|---|
-| `scripts/agent-demo.ts` | An agent completes a clinical task across 3 paid services for $0.09 |
-| `scripts/e2e-consent-proof.ts` | grant → consent check → payment → on-chain audit entry, in one call |
-| `scripts/verify-g01-fix.ts` | An impersonation attack against the consent gate is rejected with 403 |
-| `scripts/preflight.ts` | The service, both funding accounts, the facilitator, the Bazaar declaration, the agent's USDC and the consent grant are all in the state the demo needs |
-| `scripts/provision-agent-wallet.ts` | — creates and funds an independent payer wallet |
-| `scripts/provision-patient-wallet.ts` | — creates and funds an independent patient wallet |
-| `scripts/grant-consent.ts` | — the patient signs a grant to a named requester |
+| Discover | `GET /` returns every endpoint with its price and gate, plus the consent contract's App ID. |
+| Quote | An unpaid call to a priced endpoint returns HTTP 402 with the price in TestNet USDC. |
+| Pay | The caller's wallet signs a USDC transfer. The GoPlausible facilitator verifies it and settles it on Algorand. |
+| Check consent | For a record summary, the paying wallet must match the requester, and the contract must hold an active, unexpired grant from the patient. |
+| Answer | Triage returns a score, an urgency band, and the matched red flags. The interaction check returns flagged drug pairs. The record summary returns a fixed synthetic record. |
+| Audit | The API writes a `log_access` entry to the patient's on-chain trail, for allowed requests and for requests refused for lack of consent. A refused call is not charged. |
+| Summarize (optional) | In the Consent page's hospital panel, a record can be summarized in a few sentences by Google Gemini. This call is free and rate-limited. |
+| Review | Dashboard, Transactions, Consent, and Audit Trail pages read settled payments and contract calls from the public TestNet indexer. |
 
-The pre-flight is worth running before any demo. Each of its checks maps to a failure that is
-*silent* rather than loud: an unfunded operator degrades a successful paid call to
-`auditStatus: "pending"` with no error, and a missing consent grant turns the agent run into a
-polite decline.
+## ⚙️ How it works
 
-### See the payment flow without any setup
-
-```bash
-curl -i -X POST http://localhost:4021/v1/triage \
-  -H "Content-Type: application/json" \
-  -d '{"symptoms":"Sudden chest pain and shortness of breath"}'
+```text
+ agent / browser ──► MedRail API (Hono) ──► GoPlausible facilitator ──► Algorand TestNet
+       │                   │                  (verify + settle USDC)          ▲
+       │                   ├──► check_access (simulated, free) ───────────────┤
+       │                   └──► log_access (operator-signed audit entry) ─────┤
+       │                                                                      │
+       └── patient wallet ──► grant_access / revoke_access (signed in browser)┘
+                                        MedRailConsent contract · App 768743428
 ```
 
-Returns a real `402` whose `payment-required` header base64-decodes to the live price, asset, and
-fee-sponsorship address. Then `npx tsx scripts/e2e-proof.ts` from `api/` runs the whole
-402 → sign → settle → 200 round trip against a funded TestNet account and writes the settled
-transaction ID to disk.
-
-## Environment variables
-
-| File | Variable | Notes |
+| Component | Purpose | License |
 |---|---|---|
-| `contracts/.env` | `DEPLOYER_ADDRESS`, `DEPLOYER_MNEMONIC` | Dedicated deploy key. Gitignored. |
-| `api/.env` | `NETWORK`, `PORT`, `FACILITATOR_URL`, `PAY_TO_ADDRESS`, `CONSENT_APP_ID`, `OPERATOR_MNEMONIC`, `OPERATOR_ADDRESS` | See `api/.env.example`. `CONSENT_APP_ID` is **required in containers** — the deploy-artifact fallback is not present in the image. |
-| `web/.env.local` | `NEXT_PUBLIC_API_BASE`, `NEXT_PUBLIC_NETWORK` | Public values only. |
+| `contracts/` MedRailConsent | Consent grants, revocations, expiry, and the per-patient audit log in box storage | MIT (this repo) |
+| Algorand Python, PuyaPy, algorand-python-testing | Write, compile, and unit-test the contract | AGPL-3.0-or-later |
+| AlgoKit Utils, py-algorand-sdk | Deploy and exercise the contract | MIT |
+| python-dotenv, pytest | Config loading and tests for the contract scripts | BSD-3-Clause, MIT |
+| Hono, @hono/node-server | API server | MIT |
+| @x402/core, @x402/avm, @x402/hono, @x402/fetch, @x402/extensions | x402 payments on Algorand, and Bazaar discovery metadata | Apache-2.0 |
+| algosdk | Algorand transactions and contract calls in the API and browser | MIT |
+| zod, dotenv | Request validation and config loading | MIT, BSD-2-Clause |
+| Next.js, React, Tailwind CSS | Web app | MIT |
+| @txnlab/use-wallet (react, pera, lute) | Wallet connection | MIT |
+| TypeScript, Vitest, tsx | Types, tests, scripts | Apache-2.0, MIT, MIT |
+| Fraunces, IBM Plex Sans, IBM Plex Mono | Fonts, served via `next/font/google` | SIL Open Font License 1.1 |
+| GoPlausible facilitator, AlgoNode, Google Gemini API | External services called at run time. Nothing is bundled. | Their own terms of service |
 
-No `.env` file is tracked by git — verified.
+The triage and interaction checks are plain rules, not a machine-learning model: 11 weighted red-flag keyword groups and a table of 14 severe drug pairs. The only AI model involved is the optional Gemini summary.
 
-## Testing
+## 🛡️ Responsible use
+
+- **Not a medical device.** Triage, interaction checks, and Gemini summaries are for demonstration only. Do not use them for real care decisions. Triage and interaction responses carry a disclaimer that says so.
+- **Demo data only.** Every record summary is the same fixed synthetic record. There are no real patients in this system. Do not enter real health information: symptom text goes to the API, and summary requests send the record to Google's Gemini API.
+- **The ledger is public and permanent.** Consent grants and audit entries show wallet addresses, scopes, and endpoints to anyone, and cannot be deleted. No health data is written on-chain.
+- **TestNet only.** Payments use TestNet USDC with no real value. The demo account's key is stored in your browser tab's session storage, so never send real funds to it.
+
+## ⚠️ Known limits
+
+- Runs on Algorand TestNet only. There is no MainNet deployment and no x402 Bazaar listing yet.
+- No outside party has paid for the service. The test wallets used in the recorded agent runs were funded by the team.
+- The hosted demo sleeps when idle, so the first request can take up to a minute.
+- The triage rules match keywords. They do not understand synonyms or negation, so "no chest pain" still counts as chest pain.
+- The interaction check knows 14 drug pairs. Anything else comes back unflagged.
+- A valid paid call has once returned HTTP 402 without settling. The cause is not known, and a retry worked.
+- The Gemini summary needs a `GEMINI_API_KEY` on the server and has no automated tests.
+- The deployed contract is an older build than the source. Two fixes in the source (an event with swapped fields and an under-reported storage cost) are not deployed, to keep the existing App ID and history.
+- Audit writes are ordered by a lock inside one process, so the API must run as a single instance.
+- The operator account pays the network fee for every audit write, including denied requests that the caller is not charged for. The record endpoint is rate-limited to contain this.
+- The Agents page activity log lives in memory and resets whenever the API restarts.
+- The web app has no automated tests, and its typecheck step in CI currently fails. The API has 93 tests and the contract 28. There is no coverage threshold.
+- There are no metrics, tracing, or alerts.
+
+## 🛠️ Development
+
+Prerequisites: Git, Node.js 20, and Python 3.12 (only for the contract).
 
 ```bash
-cd contracts && pytest tests/ -q                      # 28 passed  (AVM simulator, no network)
-cd api      && npm run typecheck && npx vitest run    # 93 passed  (9 spec files)
-cd api      && npm run coverage                       # 83.05% statements, 65.85% branches
-cd web      && npx tsc --noEmit -p tsconfig.json && npm run build
+git clone https://github.com/Hydra-Of-Malice/Medrail.git
+cd Medrail
 ```
 
-**121 automated tests.** `npm run typecheck` is `tsc -p tsconfig.all.json`, which covers `scripts`
-and `test` as well as `src` — the build config compiles only `src`, because that is all that ships,
-and a malformed proof script once survived a green `tsc --noEmit` and failed at run time.
+Contract: install the toolchain and run the unit tests (AVM simulator, no network or funds needed).
 
-The two modules that can lose money or mis-authorise a caller — `routes/records.ts` and
-`services/algorand.ts` — are the best covered: `src/services` sits at 98.37% of statements and
-93.18% of branches. There is still **no coverage threshold**, so nothing fails a build when it
-drops, and the frontend has no automated tests at all.
-
-Strategy, full case catalogue, and the honest coverage gaps:
-[`docs/07_Testing/`](docs/07_Testing/).
-
-## Security
-
-The design gets several hard things right: patient keys never reach the backend; contract
-admin functions are gated on-chain and negatively tested; no PHI touches the ledger; the attack
-surface is genuinely small (no database, no templating, no shell, no model in the decision path).
-
-It also has one finding you should know about before you evaluate anything else:
-**`/v1/records/summary` does not currently bind the paying identity to the `requesterAddress` it
-checks consent against**, so the consent gate does not yet function as an access control. It is
-documented in full, with a compile-verified fix, as **G-01** in
-[`docs/ENGINEERING_GAP_REPORT.md`](docs/ENGINEERING_GAP_REPORT.md).
-
-Full treatment: [`docs/06_Security/`](docs/06_Security/) — architecture, STRIDE threat model,
-privacy analysis, and risk register.
-
-## Performance
-
-**No performance benchmark exists, and none is claimed.** The only measurements taken are two
-single observations on a developer laptop: ~505 ms for a cold `/v1/consent/status` (two sequential
-algod round-trips) and ~15 ms to serve a warm 402. A measurement plan — rather than invented
-numbers — is in
-[`docs/07_Testing/Performance_Validation.md`](docs/07_Testing/Performance_Validation.md).
-
-## Known limitations
-
-Stated plainly, because a reviewer will find them anyway:
-
-- `services/algorand.ts` still has thin direct test coverage, though the box-key derivation it owns
-  is now pinned by golden vectors asserted from both TypeScript and Python (G-05).
-- Nothing is publicly hosted; there is no MainNet deployment and no Bazaar listing.
-- No *external* party has paid for this service. Payments settle between independent accounts, but the agent's TestNet float was seeded from our own wallet.
-- The record summary is a fixed synthetic constant; there are no real patients in this system.
-- Audit sequencing is serialised in-process only, so the deployment is pinned to one machine (G-11).
-- There is no observability: no metrics, no tracing, no alerting (G-15).
-
-The complete register, with severities and fixes:
-[`docs/ENGINEERING_GAP_REPORT.md`](docs/ENGINEERING_GAP_REPORT.md).
-
-## Roadmap
-
-Phase 1 is complete: every finding a reviewer can discover unaided has been fixed and verified.
-Phases 2–4 cover resilience, production hardening, and genuine product direction —
-[`docs/WINNING_ROADMAP.md`](docs/WINNING_ROADMAP.md).
-
-## Documentation
-
-**Start here:** [Executive Summary](docs/00_EXECUTIVE_SUMMARY.md) — the whole project in two minutes.
-Full index: [`docs/README.md`](docs/README.md).
-
-Every document is linked below. Click any row to open it.
-
-<details open>
-<summary><b>Overview</b></summary>
-
-| Document | What it covers |
-|---|---|
-| [Executive Summary](docs/00_EXECUTIVE_SUMMARY.md) | The project in two minutes: problem, solution, evidence, maturity, roadmap |
-| [For Judges](docs/JUDGES.md) | The pitch, the evidence table, and a 2-minute demo script |
-| [Evidence Log](docs/PROOF.md) | Every claim with a transaction ID and a command to reproduce it |
-| [Agent Run Facts](docs/AGENT_RUN_FACTS.md) | The canonical machine-to-machine run: the three accounts, every transaction ID, and what may and may not be claimed |
-| [Engineering Gap Report](docs/ENGINEERING_GAP_REPORT.md) | 37 findings — 25 closed, 12 open — with evidence, severities and fixes |
-| [Winning Roadmap](docs/WINNING_ROADMAP.md) | Four-phase remediation plan; Phase 1 complete |
-| [Compliance](docs/COMPLIANCE.md) | Rule-by-rule mapping to the Global x402 Challenge requirements |
-| [Go-Live Checklist](docs/GO_LIVE_CHECKLIST.md) | Competition entry checklist |
-| [Implementation Plan](docs/IMPLEMENTATION_PLAN.md) | The plan the build followed, with its verified-fact table |
-| [Architecture (narrative)](docs/ARCHITECTURE.md) · [API Reference](docs/API.md) · [Security Notes](docs/SECURITY.md) · [Deployment Runbook](docs/DEPLOYMENT.md) | Original build-time documents, kept for continuity |
-
-</details>
-
-<details>
-<summary><b>01 — Product</b> · problem, vision, personas, journeys, use cases, novelty</summary>
-
-| Document | What it covers |
-|---|---|
-| [Problem Statement](docs/01_Product/Problem_Statement.md) | The consent gap and the agent-payment gap; why existing approaches fall short |
-| [Project Vision](docs/01_Product/Project_Vision.md) | Vision, objectives, success criteria, maturity ladder |
-| [User Personas](docs/01_Product/User_Personas.md) | The five parties the system actually serves |
-| [User Journey](docs/01_Product/User_Journey.md) | End-to-end journeys for the paying agent and the consenting patient |
-| [Use Cases](docs/01_Product/Use_Cases.md) | Formal use cases mapped to requirement IDs, including the abuse case |
-| [Scope](docs/01_Product/Scope.md) | In scope, out of scope, assumptions, constraints, dependencies |
-| [Competitive Analysis](docs/01_Product/Competitive_Analysis.md) | Against SMART-on-FHIR, FHIR Consent, and commercial clinical APIs |
-| [USP & Novelty](docs/01_Product/USP_Novelty.md) | What is genuinely novel — and what is not |
-
-</details>
-
-<details>
-<summary><b>02 — Requirements</b> · SRS, traceability, gap analysis</summary>
-
-| Document | What it covers |
-|---|---|
-| [Software Requirements Specification](docs/02_Requirements/SRS.md) | Full SRS, 17 sections, every requirement with acceptance criteria and evidence |
-| [Requirements Traceability Matrix](docs/02_Requirements/Requirements_Traceability_Matrix.md) | Requirement → design → code → test → evidence, forward and reverse |
-| [Requirements Gap Analysis](docs/02_Requirements/Requirements_Gap_Analysis.md) | Prioritised gaps by severity with recommended fixes |
-| [Requirements Registry](docs/02_Requirements/Requirements_Registry.md) | The frozen canonical ID registry every other document cites |
-
-</details>
-
-<details>
-<summary><b>03 — Architecture</b> · HLD, LLD, diagrams, 12 decision records</summary>
-
-| Document | What it covers |
-|---|---|
-| [System Architecture](docs/03_Architecture/System_Architecture.md) | Architectural style, context and container diagrams, why there is no database |
-| [High-Level Design](docs/03_Architecture/HLD.md) | Components, boundaries, protocols, synchronous flows |
-| [Low-Level Design](docs/03_Architecture/LLD.md) | Module-level design: the contract, chain integration, x402 wiring, the routes |
-| [Component Diagram](docs/03_Architecture/Component_Diagram.md) | Component graphs plus dependency and failure-impact tables |
-| [Sequence Diagrams](docs/03_Architecture/Sequence_Diagrams.md) | Nine flows including the rejected attack path and both failure paths |
-| [Activity Diagrams](docs/03_Architecture/Activity_Diagrams.md) | Request lifecycle, consent state machine, CI pipeline |
-| [Data Flow Diagrams](docs/03_Architecture/Data_Flow_Diagrams.md) | DFD levels 0–2 with trust boundaries and data classification |
-| [**ADR Index**](docs/03_Architecture/ADRs/README.md) | All twelve decision records, indexed |
-
-**Decision records** — each separates *recorded* from *reconstructed* rationale, and states what the decision cost.
-
-| ADR | Decision |
-|---|---|
-| [ADR-001](docs/03_Architecture/ADRs/ADR-001-backend-framework.md) | Backend framework — Hono + TypeScript on Node 20 |
-| [ADR-002](docs/03_Architecture/ADRs/ADR-002-no-database-ledger-as-system-of-record.md) | No database — the ledger is the system of record |
-| [ADR-003](docs/03_Architecture/ADRs/ADR-003-box-storage-over-local-state.md) | Box storage over local state |
-| [ADR-004](docs/03_Architecture/ADRs/ADR-004-x402-v2-exact-scheme-with-external-facilitator.md) | x402 v2 `exact` scheme with an external facilitator |
-| [ADR-005](docs/03_Architecture/ADRs/ADR-005-audit-write-as-follow-up-transaction.md) | Audit write as a follow-up transaction, not an atomic group |
-| [ADR-006](docs/03_Architecture/ADRs/ADR-006-admin-only-audit-log.md) | Admin-only audit log |
-| [ADR-007](docs/03_Architecture/ADRs/ADR-007-deterministic-rule-engines-instead-of-an-ml-model.md) | Deterministic rule engines instead of an ML model |
-| [ADR-008](docs/03_Architecture/ADRs/ADR-008-open-plus-gated-endpoint-split.md) | The open plus consent-gated endpoint split |
-| [ADR-009](docs/03_Architecture/ADRs/ADR-009-in-process-per-patient-lock-for-audit-sequencing.md) | In-process per-patient lock for audit sequencing |
-| [ADR-010](docs/03_Architecture/ADRs/ADR-010-client-side-key-custody-and-the-demo-wallet.md) | Client-side key custody and the demo wallet |
-| [ADR-011](docs/03_Architecture/ADRs/ADR-011-deployment-target-docker-and-fly-io.md) | Deployment target — Docker and Fly.io |
-| [ADR-012](docs/03_Architecture/ADRs/ADR-012-observability-strategy.md) | Observability strategy (proposed) |
-
-</details>
-
-<details>
-<summary><b>04 — Data</b> · box-storage model, ER diagram, dictionary, indexing</summary>
-
-| Document | What it covers |
-|---|---|
-| [Database Design](docs/04_Data/Database_Design.md) | Algorand box storage as the system of record; MBR economics |
-| [ER Diagram](docs/04_Data/ER_Diagram.md) | Entity model and physical box-key byte layout |
-| [Data Dictionary](docs/04_Data/Data_Dictionary.md) | Every field, on-chain and over HTTP |
-| [Data Flow](docs/04_Data/Data_Flow.md) | Lineage, retention, visibility, and what is publicly readable |
-| [Indexing & Query Strategy](docs/04_Data/Indexing_And_Query_Strategy.md) | Query patterns the design serves — and the ones it cannot |
-
-</details>
-
-<details>
-<summary><b>05 — API</b> · endpoint reference, OpenAPI 3.1, error catalogue</summary>
-
-| Document | What it covers |
-|---|---|
-| [API Documentation](docs/05_API/API_Documentation.md) | All eight routes plus the 13-method on-chain ABI |
-| [OpenAPI Specification](docs/05_API/OpenAPI.yaml) | OpenAPI 3.1, authored from the implementation |
-| [API Error Catalogue](docs/05_API/API_Error_Catalog.md) | Every error the API can produce, with cause and retryability |
-| [Bazaar Discovery](docs/05_API/Bazaar_Discovery.md) | How the service declares itself to the x402 Bazaar catalogue, and what still has to happen before it is listed |
-
-</details>
-
-<details>
-<summary><b>06 — Security</b> · architecture, STRIDE threat model, privacy, risk register</summary>
-
-| Document | What it covers |
-|---|---|
-| [Security Architecture](docs/06_Security/Security_Architecture.md) | Controls by domain, each with an honest status |
-| [Threat Model](docs/06_Security/Threat_Model.md) | STRIDE register across 35 threats |
-| [Privacy](docs/06_Security/Privacy.md) | What reaches the permanent public ledger, and the tensions that creates |
-| [Risk Register](docs/06_Security/Risk_Register.md) | Technical, security, operational and demo risks |
-
-</details>
-
-<details>
-<summary><b>07 — Testing</b> · strategy, plan, cases, results, performance</summary>
-
-| Document | What it covers |
-|---|---|
-| [Test Strategy](docs/07_Testing/Test_Strategy.md) | The testing philosophy and the pyramid as it actually is |
-| [Test Plan](docs/07_Testing/Test_Plan.md) | Per-level plan, CI execution, environment matrix |
-| [Test Cases](docs/07_Testing/Test_Cases.md) | The full case catalogue, existing and missing |
-| [Test Results](docs/07_Testing/Test_Results.md) | Real results only, plus an explicit evidence-gaps section |
-| [Performance Validation](docs/07_Testing/Performance_Validation.md) | A measurement plan — no invented benchmarks |
-
-</details>
-
-<details>
-<summary><b>08 — Deployment</b> · go-live runbook, Docker, CI/CD, rollback</summary>
-
-| Document | What it covers |
-|---|---|
-| [**Go-Live Runbook**](docs/08_Deployment/GO_LIVE_RUNBOOK.md) | **Exact commands to deploy publicly** — Fly.io, Vercel, secrets, verification, MainNet |
-| [Deployment Architecture](docs/08_Deployment/Deployment_Architecture.md) | Actual vs intended topology; environment-variable reference |
-| [Environment Setup](docs/08_Deployment/Environment_Setup.md) | Local setup with real troubleshooting |
-| [Docker](docs/08_Deployment/Docker.md) | Both Dockerfiles analysed line by line |
-| [CI/CD](docs/08_Deployment/CI_CD.md) | The pipeline, its history, and the recommended production version |
-| [Rollback Strategy](docs/08_Deployment/Rollback_Strategy.md) | Including why a deployed contract cannot be rolled back |
-
-</details>
-
-<details>
-<summary><b>09 — Intelligence Layer</b> · the rule engines, honestly documented</summary>
-
-Deliberately **not** named `09_AI_ML`, because there is no AI or ML in this system —
-[see why](docs/09_Intelligence_Layer/README.md).
-
-| Document | What it covers |
-|---|---|
-| [Overview](docs/09_Intelligence_Layer/README.md) | What this layer is, and the naming decision |
-| [Intelligence Architecture](docs/09_Intelligence_Layer/Intelligence_Architecture.md) | Where it sits; rule engine vs model, compared fairly |
-| [Algorithm Inventory](docs/09_Intelligence_Layer/Algorithm_Inventory.md) | Both engines in full, plus an explicit "models used: none" |
-| [Processing Pipeline](docs/09_Intelligence_Layer/Processing_Pipeline.md) | Input to output, with worked arithmetic |
-| [Evaluation](docs/09_Intelligence_Layer/Evaluation.md) | What is verified, what is not, and what real evaluation would require |
-| [Prompt Architecture](docs/09_Intelligence_Layer/Prompt_Architecture.md) | There are no prompts — and why that is a security property |
-| [Limitations](docs/09_Intelligence_Layer/Limitations.md) | Enumerated failure modes and appropriate-use boundaries |
-
-</details>
-
-<details>
-<summary><b>10 — Operations</b> · monitoring, logging, incidents, disaster recovery</summary>
-
-| Document | What it covers |
-|---|---|
-| [Monitoring](docs/10_Operations/Monitoring.md) | What an operator can see today, and the blind spots |
-| [Logging](docs/10_Operations/Logging.md) | Current state plus a design with an explicit never-log list |
-| [Incident Response](docs/10_Operations/Incident_Response.md) | Runbooks for the failure modes that actually exist |
-| [Disaster Recovery](docs/10_Operations/Disaster_Recovery.md) | Key custody is the real risk; RPO/RTO are not established |
-
-</details>
-
-<details>
-<summary><b>11 — Hackathon</b> · judge evaluation, strategy, demo, pitch</summary>
-
-| Document | What it covers |
-|---|---|
-| [Judge Evaluation](docs/11_Hackathon/Judge_Evaluation.md) | Adversarial scoring; why this could win and why it could lose |
-| [Winning Strategy](docs/11_Hackathon/Winning_Strategy.md) | Ranked actions by judge-perception impact |
-| [Demo Script](docs/11_Hackathon/Demo_Script.md) | 2-minute and 5-minute runs of show |
-| [**Demo Video Script**](docs/11_Hackathon/Demo_Video_Script.md) | **Shot-by-shot script for the 3-minute submission video** |
-| [Demo Runbook](docs/11_Hackathon/Demo_Runbook.md) | Pre-flight checklist and failure fallbacks |
-| [Pitch Architecture](docs/11_Hackathon/Pitch_Architecture.md) | How to present the design, plus a hard-question Q&A bank |
-
-</details>
-
-<details>
-<summary><b>Future work</b></summary>
-
-| Document | What it covers |
-|---|---|
-| [Sentinel Exchange Proposal](docs/future/SENTINEL_EXCHANGE_PROPOSAL.md) | **Unbuilt proposal** for a different product. Nothing in it exists in this repository. Retained for design continuity only. |
-
-</details>
-
-## Entry classification
-
-**Composite** — three priced endpoints, one `payTo` address.
-Not Orchestrator: MedRail does not pay other x402 endpoints, and does not claim to.
-[`docs/COMPLIANCE.md`](docs/COMPLIANCE.md) has the rule-by-rule mapping.
-
-## Repository layout
-
-```
-contracts/   Algorand Python contract (algopy/puya), 28 unit tests, deploy + proof scripts
-api/         Hono/TypeScript x402 resource server, 93 tests
-web/         Next.js demo — live payment flow and on-chain consent UI
-docs/        Product, requirements, architecture, data, API, security,
-             testing, deployment, intelligence layer, operations, hackathon
+```bash
+cd contracts
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+pip install -r requirements-dev.txt
+pytest tests/ -v
 ```
 
-## Team
+API: runs on http://localhost:4021.
 
-**Team Litchi**
+```bash
+cd api
+npm install
+cp .env.example .env             # set PAY_TO_ADDRESS; OPERATOR_MNEMONIC for audit writes; GEMINI_API_KEY is optional
+npm run dev
+```
 
-| Name | GitHub |
+The API refuses to start without a valid `PAY_TO_ADDRESS`. `CONSENT_APP_ID` defaults to the deployed TestNet contract, read from `contracts/artifacts/deploy_testnet.json`.
+
+Web app: runs on http://localhost:3000. There is no `.env.example` for it, so create `web/.env.local` yourself.
+
+```bash
+cd web
+npm install
+printf "NEXT_PUBLIC_API_BASE=http://localhost:4021\nNEXT_PUBLIC_NETWORK=testnet\n" > .env.local
+npm run dev
+```
+
+| Command (in `api/`) | What it does |
 |---|---|
-| Aditya Arnav | [Hydra-Of-Malice](https://github.com/Hydra-Of-Malice) |
-| Rudra Pratap | [rpratap2111](https://github.com/rpratap2111) |
-| Yuvraj Singh | [Yuvraj-025](https://github.com/Yuvraj-025) |
+| `npm run dev` | Start the API with reload |
+| `npm test` | Run the Vitest suite |
+| `npm run typecheck` | Type-check source, scripts, and tests |
+| `npm run coverage` | Tests with a coverage report |
+| `npm run preflight` | Check that wallets, facilitator, and consent grant are ready for the agent demo |
+| `npx tsx scripts/agent-demo.ts` | An agent discovers the services, checks consent, and pays for three calls (needs funded TestNet wallets) |
 
-## License
+| Folder / file | Contents |
+|---|---|
+| `api/src/` | API server: routes, x402 setup, rule engines, Algorand and Gemini clients |
+| `api/scripts/` | Agent demo, end-to-end proofs, wallet provisioning, preflight |
+| `api/test/` | API tests |
+| `contracts/smart_contracts/` | The MedRailConsent contract in Algorand Python |
+| `contracts/artifacts/` | Compiled contract: the deployed build at the top level, the current source build in `current/` |
+| `contracts/scripts/`, `contracts/tests/` | Deploy and exercise scripts, contract tests |
+| `web/app/`, `web/components/`, `web/lib/` | Next.js pages, UI components, wallet, x402, and indexer clients |
+| `docs/` | Full project documentation, indexed in [docs/README.md](docs/README.md) |
 
-MIT — see [`LICENSE`](LICENSE).
+Build for production:
+
+```bash
+cd api && npm run build && npm start
+```
+
+```bash
+cd web && npm run build && npm start
+```
+
+Docker: build the API image from the repo root and the web image from `web/`. The web build needs `NEXT_PUBLIC_API_BASE` and `NEXT_PUBLIC_NETWORK` as build args, because Next.js bakes them into the bundle.
+
+```bash
+docker build -f api/Dockerfile -t medrail-api .
+docker build -f web/Dockerfile -t medrail-web --build-arg NEXT_PUBLIC_API_BASE=http://localhost:4021 --build-arg NEXT_PUBLIC_NETWORK=testnet ./web
+```
+
+A Fly.io config for the API is in `api/fly.toml`. The hosted demo runs on Render.
+
+More detail, including the recorded agent run, what has been proven on-chain, environment variables, and contract build notes, is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Transaction-level evidence is in [docs/PROOF.md](docs/PROOF.md), and open issues are in [docs/ENGINEERING_GAP_REPORT.md](docs/ENGINEERING_GAP_REPORT.md).
+
+## 📄 License
+
+[MIT](LICENSE). See [third-party notices](THIRD_PARTY_NOTICES.md).
+
+Built by Team Litchi: Aditya Arnav ([Hydra-Of-Malice](https://github.com/Hydra-Of-Malice)), Rudra Pratap ([rpratap2111](https://github.com/rpratap2111)), and Yuvraj Singh ([Yuvraj-025](https://github.com/Yuvraj-025)).
