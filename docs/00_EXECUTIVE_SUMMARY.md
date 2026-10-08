@@ -247,6 +247,8 @@ Full detail: [`WINNING_ROADMAP.md`](WINNING_ROADMAP.md).
 |---|---|
 | To watch an agent discover, use and pay for the service | `api/scripts/agent-demo.ts` — one command, ~220 lines |
 | The pitch and a 2-minute demo | [`JUDGES.md`](JUDGES.md) |
+| The pitch deck (6 slides) | [`11_Hackathon/MedRail_Pitch_Deck.pptx`](11_Hackathon/MedRail_Pitch_Deck.pptx) |
+| The 30-second and 3-minute pitch, with judge Q&A | [`11_Hackathon/Judge_Pitch_And_QA.md`](11_Hackathon/Judge_Pitch_And_QA.md) |
 | The demo, beat by beat, with expected output | [`11_Hackathon/Demo_Script.md`](11_Hackathon/Demo_Script.md) |
 | The 3-minute submission video shot list | [`11_Hackathon/Demo_Video_Script.md`](11_Hackathon/Demo_Video_Script.md) |
 | Every claim with a transaction ID and a reproduction command | [`PROOF.md`](PROOF.md) |
